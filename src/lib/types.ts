@@ -50,10 +50,22 @@ export interface PageExtraction {
   stickerUrl: string;
 }
 
+export interface Panel {
+  panelNumber: number;
+  description: string;
+  dialogue: string;
+  action: string;
+  characters: string[];
+  setting: string;
+}
+
 export interface StoryPage {
   pageNumber: number;
   text: string;
   imageUrl: string;
+  // Present only for comic-mode stories. Drives the multi-panel image
+  // prompt and is kept on the row so the editor can show panel metadata.
+  panels?: Panel[];
   // Background-only version of the page after entities have been extracted
   // out (inpainted to remove them). Used as the canvas backdrop in the
   // editor so the original character isn't double-visible behind a layer.
@@ -84,12 +96,16 @@ export interface Story {
   pages: StoryPage[];
   cover_image: string | null;
   entities: Entity[] | null;
+  mode?: StoryMode;
   created_at: string;
 }
+
+export type StoryMode = "storybook" | "comic";
 
 export interface GenerateRequest {
   prompt: string;
   pageCount: number;
+  mode?: StoryMode;
 }
 
 export interface GenerateResponse {

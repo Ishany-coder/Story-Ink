@@ -19,6 +19,12 @@ create table if not exists public.stories (
 alter table public.stories
   add column if not exists entities jsonb;
 
+-- Comic mode: distinguishes single-illustration storybooks from multi-panel
+-- comic pages. Drives which generation pipeline runs for a given row.
+alter table public.stories
+  add column if not exists mode text not null default 'storybook'
+  check (mode in ('storybook', 'comic'));
+
 create index if not exists stories_created_at_idx
   on public.stories (created_at desc);
 

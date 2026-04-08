@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { Entity, EditKind, StoryPage } from "./types";
+import type { Entity, EditKind, Panel, StoryPage } from "./types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -62,6 +62,157 @@ User's idea: ${prompt}`
 
   const text = result.response.text();
   return JSON.parse(text) as StoryTextResult;
+}
+
+// ---------------------------------------------------------------------------
+// Comic mode: structured panel script + multi-panel page image generation.
+// Mirrors comicink's pipeline (panels JSON → one rendered page image with
+// multiple panels and speech bubbles), but reuses Story-Ink's existing
+// entity/sticker reference machinery for character consistency.
+// ---------------------------------------------------------------------------
+
+export interface ComicScriptResult {
+  title: string;
+  pages: { pageNumber: number; panels: Panel[] }[];
+}
+
+export async function generateComicScript(
+  prompt: string,
+  pageCount: number
+): Promise<ComicScriptResult> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const result = await model.generateContent(
+    `You are a professional comic book writer. Create a detailed page-by-page script for a comic book with exactly ${pageCount} pages.
+
+You MUST follow the user's idea exactly. Each page contains 3-6 panels that move the story forward with clear, sequential beats. Dialogue should be short and natural — only what fits in a speech bubble. If a panel has no dialogue, return an empty string.
+
+Return a JSON object with this exact structure:
+{
+  "title": "Comic Title",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "panels": [
+        {
+          "panelNumber": 1,
+          "description": "Vivid visual description of what we see in this panel — composition, framing, mood.",
+          "dialogue": "Character: short line. Or empty string if silent.",
+          "action": "What is happening in the scene.",
+          "characters": ["Names of characters appearing in this panel"],
+          "setting": "Where this panel takes place"
+        }
+      ]
+    }
+  ]
+}
+
+Keep characters and settings consistent across panels and pages. Use the same character names everywhere.
+
+User's idea: ${prompt}`
+  );
+
+  return JSON.parse(result.response.text()) as ComicScriptResult;
+}
+
+function panelsToPrompt(panels: Panel[]): string {
+  return panels
+    .map((p) => {
+      const lines = [
+        `PANEL ${p.panelNumber}:`,
+        `  Setting: ${p.setting}`,
+        `  Characters: ${p.characters.join(", ") || "(none)"}`,
+        `  Action: ${p.action}`,
+        `  Description: ${p.description}`,
+      ];
+      if (p.dialogue && p.dialogue.trim().length > 0) {
+        lines.push(`  Dialogue (in speech bubble): ${p.dialogue}`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+export async function generateComicPageImage(
+  page: { pageNumber: number; panels: Panel[] },
+  storyTitle: string,
+  entities: Entity[] = [],
+  references: EntityReference[] = []
+): Promise<string> {
+  try {
+    const model = genAI.getGenerativeModel({
+      // Higher-fidelity model for multi-panel comic pages. Slower than the
+      // 3.1-flash-image used for storybook mode but worth it here because
+      // the model has to render multiple coherent panels in one image.
+      model: "gemini-3-pro-image-preview",
+    });
+
+    const cappedRefs = references.slice(0, 10);
+
+    const intro = [
+      `Create a full comic book page for "${storyTitle}" — page ${page.pageNumber}.`,
+      `Render a SINGLE image containing multiple comic panels arranged in a dynamic page layout (like a real printed comic book page). Use clear black panel borders with consistent gutters between panels. Sequential storytelling: panels read left-to-right, top-to-bottom.`,
+      `Speech bubbles must contain ONLY the dialogue text given for each panel — no character name prefixes, no narration captions, no panel numbers, no labels. If a panel has no dialogue, draw no speech bubble. Letters inside speech bubbles must be clean and legible.`,
+      `Panels to render (in order):`,
+      panelsToPrompt(page.panels),
+      cappedRefs.length > 0
+        ? `ABSOLUTE HIGHEST PRIORITY — CHARACTER VISUAL CONSISTENCY: Each named character MUST look EXACTLY like its reference image below — same face, same hair, same outfit, same colors, same proportions. This is non-negotiable across every panel and every page.`
+        : entities.length > 0
+        ? `Maintain visual consistency with these characters, environments, and objects across all pages:\n${entitiesContextBlock(
+            entities
+          )}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const parts: Array<
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } }
+    > = [{ text: intro }];
+
+    for (const ref of cappedRefs) {
+      parts.push({
+        text: `Reference for ${ref.name} (${ref.type}): ${ref.description}`,
+      });
+      parts.push({
+        inlineData: { mimeType: ref.mime, data: ref.base64 },
+      });
+    }
+
+    parts.push({
+      text: `Style: modern comic book illustration, bold ink linework, vibrant flat colors with cel shading, dramatic lighting, expressive character poses. Keep the same art style on every page of this comic. The output must be a complete multi-panel comic page — not a single illustration.`,
+    });
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts }],
+      generationConfig: {
+        // @ts-expect-error - field not declared in legacy SDK types
+        responseModalities: ["IMAGE", "TEXT"],
+      },
+    });
+
+    const respParts = result.response.candidates?.[0]?.content?.parts;
+    if (respParts) {
+      for (const part of respParts) {
+        if (part.inlineData?.data) {
+          return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+        }
+      }
+    }
+
+    console.error(
+      "[gemini] comic page response had no inlineData. parts:",
+      JSON.stringify(respParts, null, 2)
+    );
+    return generatePlaceholder(`page ${page.pageNumber}`);
+  } catch (err) {
+    console.error("[gemini] comic page generation failed:", err);
+    return generatePlaceholder(`page ${page.pageNumber}`);
+  }
 }
 
 export interface EntityReference {
