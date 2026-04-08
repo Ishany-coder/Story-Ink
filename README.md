@@ -1,37 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Story-Ink
+
+An AI-powered children's storybook generator. Enter a prompt, pick a page count, and Gemini writes the story and illustrates every page. Stories are persisted to Supabase and readable in a slide-by-slide viewer.
+
+Built on Next.js 16 (App Router), React 19, Tailwind 4, Supabase, and `@google/generative-ai`.
 
 ## Getting Started
 
-First, run the development server:
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Environment variables
+
+Create a `.env.local` in the project root:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+GEMINI_API_KEY=your-gemini-api-key
+```
+
+### 3. Set up the database
+
+StoryInk stores generated stories in a `public.stories` table. Before the app can save anything, you need to create it.
+
+Open the [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql) for your project, paste the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it. This creates the table, an index on `created_at`, and permissive RLS policies so the anon key can read and insert.
+
+> **Troubleshooting — `PGRST205: Could not find the table 'public.stories' in the schema cache`**
+> This error means the schema script hasn't been applied yet (or PostgREST's cache is stale). Run `supabase/schema.sql` as described above. If the error persists right after creating the table, click **"Reload schema cache"** in the Supabase dashboard or wait ~30 seconds for PostgREST to refresh.
+
+### 4. Run the dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project layout
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# Story-Ink
+- `src/app/page.tsx` — home page with the prompt form
+- `src/app/api/generate/route.ts` — generation endpoint (Gemini + Supabase insert)
+- `src/app/read/` — story list and `[id]` reader
+- `src/components/SlideReader.tsx` — keyboard-navigable slide viewer
+- `src/lib/gemini.ts` — Gemini text + image generation
+- `src/lib/supabase.ts` — Supabase client
+- `supabase/schema.sql` — database schema
