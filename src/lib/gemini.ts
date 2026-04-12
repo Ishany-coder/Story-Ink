@@ -355,24 +355,33 @@ function pagesToScript(pages: { pageNumber: number; text: string }[]): string {
   return pages.map((p) => `Page ${p.pageNumber}: ${p.text}`).join("\n");
 }
 
+export interface ExtractEntitiesResult {
+  entities: Entity[];
+  /** Maps pageNumber → array of entity IDs that appear on that page. */
+  pageEntityMap: Record<number, string[]>;
+}
+
 export async function extractEntities(
   title: string,
   pages: { pageNumber: number; text: string }[]
-): Promise<Entity[]> {
+): Promise<ExtractEntitiesResult> {
   const result = await jsonModel().generateContent(
     `You analyze a children's storybook and extract every distinct character, environment (location/setting), and notable object that appears.
 
 For each entity, write a vivid 1-2 sentence description that captures both how it LOOKS (physical appearance, colors, shapes) and how it BEHAVES or what role it plays. The description must be detailed enough that an illustrator could draw it consistently across many pages.
 
+You must also determine which pages each entity appears on. Read each page carefully and list the entity only on pages where it is actually mentioned or clearly present in the scene.
+
 Return JSON with this exact shape:
 {
   "entities": [
-    { "name": "Luna", "type": "character", "description": "A small purple cat with bright green eyes and a tiny silver bell on her collar; curious and brave." },
-    { "name": "The Mossy Forest", "type": "environment", "description": "A dense forest with towering ancient oaks, glowing mushrooms, and shafts of golden light filtering through emerald leaves." }
+    { "name": "Luna", "type": "character", "description": "A small purple cat with bright green eyes and a tiny silver bell on her collar; curious and brave.", "pages": [1, 2, 3] },
+    { "name": "The Mossy Forest", "type": "environment", "description": "A dense forest with towering ancient oaks, glowing mushrooms, and shafts of golden light filtering through emerald leaves.", "pages": [1, 2] }
   ]
 }
 
 "type" must be exactly one of: "character", "environment", "object".
+"pages" must be an array of page numbers (integers) where the entity appears.
 
 Only include entities that meaningfully appear in the story. Don't include generic background elements.
 
@@ -383,10 +392,10 @@ ${pagesToScript(pages)}`
   );
 
   const parsed = JSON.parse(result.response.text()) as {
-    entities: { name: string; type: string; description: string }[];
+    entities: { name: string; type: string; description: string; pages?: number[] }[];
   };
 
-  return parsed.entities
+  const entities = parsed.entities
     .filter((e) =>
       ["character", "environment", "object"].includes(e.type)
     )
@@ -396,6 +405,22 @@ ${pagesToScript(pages)}`
       type: e.type as Entity["type"],
       description: e.description,
     }));
+
+  // Build the reverse map: pageNumber → entity IDs on that page.
+  const pageEntityMap: Record<number, string[]> = {};
+  for (const page of pages) {
+    pageEntityMap[page.pageNumber] = [];
+  }
+  for (const raw of parsed.entities) {
+    if (!["character", "environment", "object"].includes(raw.type)) continue;
+    const id = slugify(raw.name);
+    for (const pn of raw.pages ?? []) {
+      if (!pageEntityMap[pn]) pageEntityMap[pn] = [];
+      pageEntityMap[pn].push(id);
+    }
+  }
+
+  return { entities, pageEntityMap };
 }
 
 export async function classifyEdit(
@@ -503,35 +528,59 @@ export async function generateEntitySticker(entity: Entity): Promise<string> {
 // background — the client chroma-keys it to transparent.
 export async function extractEntityFromImage(
   pageImage: { mime: string; base64: string },
-  entity: Entity
+  entity: Entity,
+  referenceSticker?: { mime: string; base64: string } | null
 ): Promise<StickerBytes> {
   const model = genAI.getGenerativeModel({
     model: "gemini-3.1-flash-image-preview",
   });
 
+  const hasRef = !!referenceSticker;
+
+  const promptParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+
+  // Text prompt first
+  promptParts.push({
+    text: [
+      `You are a precise image-editing tool.`,
+      ``,
+      `I will give you ${hasRef ? "two images" : "one image"}:`,
+      `1. IMAGE A: A children's storybook illustration (the scene).`,
+      ...(hasRef ? [`2. IMAGE B: A reference showing what "${entity.name}" looks like — use this to identify the correct subject in the scene.`] : []),
+      ``,
+      `YOUR TASK: Find "${entity.name}" in IMAGE A and extract ONLY that subject onto a pure white background.`,
+      ``,
+      `SUBJECT TO EXTRACT:`,
+      `- Name: "${entity.name}"`,
+      `- Type: ${entity.type}`,
+      `- Description: ${entity.description}`,
+      ``,
+      `RULES:`,
+      `1. Locate "${entity.name}" in IMAGE A${hasRef ? " (it looks like IMAGE B)" : ""}. Cut it out precisely along its edges.`,
+      `2. Output a NEW image containing ONLY "${entity.name}" on a SOLID WHITE (#FFFFFF) background.`,
+      `3. The output must contain NOTHING from the scene — no background, no ground, no sky, no other characters, no other objects. ONLY "${entity.name}".`,
+      `4. Preserve the EXACT appearance from IMAGE A: same pose, colors, art style, proportions. Do NOT redraw or reimagine.`,
+      `5. If there are multiple instances of "${entity.name}", extract all of them together.`,
+    ].join("\n"),
+  });
+
+  // IMAGE A: the scene
+  promptParts.push({
+    inlineData: { mimeType: pageImage.mime, data: pageImage.base64 },
+  });
+
+  // IMAGE B: reference sticker (if available)
+  if (referenceSticker) {
+    promptParts.push({
+      text: `Above is IMAGE A (the scene). Below is IMAGE B (reference showing what "${entity.name}" looks like):`,
+    });
+    promptParts.push({
+      inlineData: { mimeType: referenceSticker.mime, data: referenceSticker.base64 },
+    });
+  }
+
   const result = await model.generateContent({
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: [
-              `Look at this children's storybook illustration and isolate just one subject from it.`,
-              `Subject to extract: "${entity.name}" (${entity.type}).`,
-              `Reference description: ${entity.description}`,
-              `OUTPUT: a new image showing ONLY "${entity.name}", in the EXACT same pose, colors, and appearance as in the source image. Do NOT redraw or reinterpret — preserve every visible detail.`,
-              `Background: SOLID PURE WHITE (#FFFFFF). No scenery, no other characters, no props, no text, no border.`,
-            ].join("\n\n"),
-          },
-          {
-            inlineData: {
-              mimeType: pageImage.mime,
-              data: pageImage.base64,
-            },
-          },
-        ],
-      },
-    ],
+    contents: [{ role: "user", parts: promptParts }],
     generationConfig: {
       // @ts-expect-error - field not declared in legacy SDK types
       responseModalities: ["IMAGE", "TEXT"],
@@ -556,36 +605,57 @@ export async function extractEntityFromImage(
 // where it was, so the rest of the scene looks intact.
 export async function removeEntityFromImage(
   pageImage: { mime: string; base64: string },
-  entity: Entity
+  entity: Entity,
+  referenceSticker?: { mime: string; base64: string } | null
 ): Promise<StickerBytes> {
   const model = genAI.getGenerativeModel({
     model: "gemini-3.1-flash-image-preview",
   });
 
+  const hasRef = !!referenceSticker;
+
+  const promptParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+
+  promptParts.push({
+    text: [
+      `You are a precise image-editing tool.`,
+      ``,
+      `I will give you ${hasRef ? "two images" : "one image"}:`,
+      `1. IMAGE A: A children's storybook illustration (the scene).`,
+      ...(hasRef ? [`2. IMAGE B: A reference showing what "${entity.name}" looks like — use this to identify the correct subject to remove.`] : []),
+      ``,
+      `YOUR TASK: Find "${entity.name}" in IMAGE A and remove it, inpainting the gap naturally.`,
+      ``,
+      `SUBJECT TO REMOVE:`,
+      `- Name: "${entity.name}"`,
+      `- Type: ${entity.type}`,
+      `- Description: ${entity.description}`,
+      ``,
+      `RULES:`,
+      `1. Locate "${entity.name}" in IMAGE A${hasRef ? " (it looks like IMAGE B)" : ""}. Erase every pixel that belongs to it.`,
+      `2. Fill the removed area using surrounding background, scenery, and colors so it looks natural — as if "${entity.name}" was never there.`,
+      `3. Keep EVERYTHING else IDENTICAL: all other characters, objects, environment, lighting, color palette, art style. Do NOT redraw or modify anything else.`,
+      `4. If there are multiple instances of "${entity.name}", remove all of them.`,
+      `5. Output the same scene, same composition, same dimensions — just without "${entity.name}".`,
+      `6. No text in the output image.`,
+    ].join("\n"),
+  });
+
+  promptParts.push({
+    inlineData: { mimeType: pageImage.mime, data: pageImage.base64 },
+  });
+
+  if (referenceSticker) {
+    promptParts.push({
+      text: `Above is IMAGE A (the scene). Below is IMAGE B (reference showing what "${entity.name}" looks like — remove this from the scene):`,
+    });
+    promptParts.push({
+      inlineData: { mimeType: referenceSticker.mime, data: referenceSticker.base64 },
+    });
+  }
+
   const result = await model.generateContent({
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: [
-              `Look at this children's storybook illustration and remove one subject from it.`,
-              `Subject to remove: "${entity.name}" (${entity.type}).`,
-              `Reference description: ${entity.description}`,
-              `OUTPUT: the same scene with "${entity.name}" completely gone. Paint over the area where they were, using the surrounding background, scenery, and other elements so it looks natural and complete — like they were never there.`,
-              `Keep EVERYTHING else identical: other characters, environment, lighting, color palette, and watercolor style. Do not redraw or reinterpret unrelated parts of the image.`,
-              `No text in the output image.`,
-            ].join("\n\n"),
-          },
-          {
-            inlineData: {
-              mimeType: pageImage.mime,
-              data: pageImage.base64,
-            },
-          },
-        ],
-      },
-    ],
+    contents: [{ role: "user", parts: promptParts }],
     generationConfig: {
       // @ts-expect-error - field not declared in legacy SDK types
       responseModalities: ["IMAGE", "TEXT"],

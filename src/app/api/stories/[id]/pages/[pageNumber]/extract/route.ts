@@ -90,10 +90,21 @@ export async function POST(
   }
 
   let pageBytes;
+  let refSticker: { mime: string; base64: string } | null = null;
   try {
-    pageBytes = await fetchStickerBytes(sourceUrl);
+    const fetches: Promise<{ mime: string; base64: string }>[] = [
+      fetchStickerBytes(sourceUrl),
+    ];
+    // If the entity has a cached sticker, fetch it as a reference image
+    // so the model knows exactly which subject to extract/remove.
+    if (entity.stickerUrl) {
+      fetches.push(fetchStickerBytes(entity.stickerUrl));
+    }
+    const results = await Promise.all(fetches);
+    pageBytes = results[0];
+    refSticker = results[1] ?? null;
   } catch (err) {
-    console.error("[extract] failed to fetch page image:", err);
+    console.error("[extract] failed to fetch images:", err);
     return NextResponse.json(
       { error: "Couldn't load page image" },
       { status: 500 }
@@ -104,8 +115,8 @@ export async function POST(
   let inpaintedBytes;
   try {
     [stickerBytes, inpaintedBytes] = await Promise.all([
-      extractEntityFromImage(pageBytes, entity),
-      removeEntityFromImage(pageBytes, entity),
+      extractEntityFromImage(pageBytes, entity, refSticker),
+      removeEntityFromImage(pageBytes, entity, refSticker),
     ]);
   } catch (err) {
     console.error("[extract] gemini failed:", err);

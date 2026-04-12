@@ -89,12 +89,12 @@ export async function POST(
       // regenerate stickers that haven't changed. The edited entity gets
       // the freshly extracted description (since its behavior changed) but
       // KEEPS its sticker — personality doesn't affect appearance.
-      const freshlyExtracted = await extractEntities(
+      const extraction = await extractEntities(
         rewritten.title,
         rewritten.pages
       );
       const oldById = new Map(entities.map((e) => [e.id, e]));
-      nextEntities = freshlyExtracted.map((e) => {
+      nextEntities = extraction.entities.map((e) => {
         const old = oldById.get(e.id);
         if (!old) return e;
         if (e.id === target.id) {
@@ -118,6 +118,7 @@ export async function POST(
         text: p.text,
         imageUrl: "",
         overlays: overlaysByPage.get(p.pageNumber) ?? [],
+        entityIds: extraction.pageEntityMap[p.pageNumber] ?? [],
       }));
     }
 

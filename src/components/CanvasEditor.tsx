@@ -79,18 +79,34 @@ function makeShape(shape: ShapeKind): ShapeLayer {
   };
 }
 
-function makeImage(src: string, source: ImageLayer["source"]): ImageLayer {
+function makeImage(
+  src: string,
+  source: ImageLayer["source"],
+  width = 300,
+  height = 300
+): ImageLayer {
   return {
     id: uid(),
     type: "image",
     src,
     source,
-    x: 250,
-    y: 250,
-    width: 300,
-    height: 300,
+    x: CANVAS_SIZE / 2 - width / 2,
+    y: CANVAS_SIZE / 2 - height / 2,
+    width,
+    height,
     rotation: 0,
   };
+}
+
+/** Load an image and return its natural dimensions. */
+function measureImage(src: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
 const FONT_FAMILIES = [
@@ -425,9 +441,16 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
             : p
         ),
       }));
-      // The new layer is added with the transparent data URL so it renders
-      // correctly even before the user saves.
-      addLayer(makeImage(transparentSrc, "sticker"));
+      // Measure the sticker so the layer matches its natural aspect ratio
+      // instead of being a fixed 300×300 square. Scale it to fit within
+      // half the canvas while preserving proportions.
+      const { w, h } = await measureImage(transparentSrc);
+      const maxDim = CANVAS_SIZE * 0.5;
+      const scale = Math.min(maxDim / w, maxDim / h, 1);
+      const layerW = Math.round(w * scale);
+      const layerH = Math.round(h * scale);
+
+      addLayer(makeImage(transparentSrc, "sticker", layerW, layerH));
     } catch (err) {
       setSaveError(
         err instanceof Error ? err.message : "Couldn't extract entity"
@@ -439,15 +462,26 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
 
   // ---- Render -------------------------------------------------------------
 
+  // Only show entities that appear on the current page. Falls back to
+  // showing all entities for stories generated before entityIds existed.
   const groupedEntities = useMemo(() => {
     const out: Record<string, Entity[]> = {
       character: [],
       environment: [],
       object: [],
     };
-    for (const e of story.entities ?? []) out[e.type].push(e);
+    const allEntities = story.entities ?? [];
+    const pageEntityIds = currentPage?.entityIds;
+
+    // If entityIds is populated, filter; otherwise show all (legacy stories).
+    const visible =
+      pageEntityIds && pageEntityIds.length > 0
+        ? allEntities.filter((e) => pageEntityIds.includes(e.id))
+        : allEntities;
+
+    for (const e of visible) out[e.type].push(e);
     return out;
-  }, [story.entities]);
+  }, [story.entities, currentPage]);
 
   const isDirty = !!dirty[currentPage?.pageNumber ?? -1];
 

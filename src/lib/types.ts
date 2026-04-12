@@ -74,6 +74,9 @@ export interface StoryPage {
   // sticker pulled from this page so subsequent clicks are instant.
   extractions?: Record<string, PageExtraction>;
   overlays?: Layer[];
+  // IDs of entities that appear on this page. Populated during generation
+  // so the canvas editor only shows relevant entities per page.
+  entityIds?: string[];
 }
 
 export type EntityType = "character" | "environment" | "object";

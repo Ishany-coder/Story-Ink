@@ -59,15 +59,19 @@ export async function POST(request: NextRequest) {
       }));
     }
 
-    // 2. Extract entities (text descriptions only). For comic mode this
-    // runs against the synthesized panel-action text — good enough to
-    // surface the recurring characters and locations.
+    // 2. Extract entities (text descriptions only) and which pages they
+    // appear on. For comic mode this runs against the synthesized
+    // panel-action text — good enough to surface the recurring characters
+    // and locations.
     let entities: Entity[] = [];
+    let pageEntityMap: Record<number, string[]> = {};
     try {
-      entities = await extractEntities(
+      const extraction = await extractEntities(
         title,
         scriptPages.map((p) => ({ pageNumber: p.pageNumber, text: p.text }))
       );
+      entities = extraction.entities;
+      pageEntityMap = extraction.pageEntityMap;
     } catch (err) {
       console.error("[generate] entity extraction failed:", err);
     }
@@ -109,6 +113,7 @@ export async function POST(request: NextRequest) {
           : "",
       panels: page.panels,
       overlays: [],
+      entityIds: pageEntityMap[page.pageNumber] ?? [],
     }));
 
     const coverImage = pages[0]?.imageUrl || null;

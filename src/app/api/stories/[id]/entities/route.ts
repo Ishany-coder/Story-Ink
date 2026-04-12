@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { extractEntities } from "@/lib/gemini";
-import type { Entity } from "@/lib/types";
+import type { Entity, StoryPage } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -34,24 +34,31 @@ export async function POST(
 
   let entities: Entity[] = [];
   try {
-    entities = await extractEntities(story.title, story.pages);
+    const extraction = await extractEntities(story.title, story.pages);
+    entities = extraction.entities;
+
+    // Backfill entityIds onto pages for legacy stories.
+    const pages = (story.pages as StoryPage[]).map((p) => ({
+      ...p,
+      entityIds: extraction.pageEntityMap[p.pageNumber] ?? [],
+    }));
+
+    const { error: updateErr } = await supabase
+      .from("stories")
+      .update({ entities, pages })
+      .eq("id", id);
+
+    if (updateErr) {
+      console.error("[entities] persist failed:", updateErr);
+      return NextResponse.json(
+        { error: "Failed to save entities" },
+        { status: 500 }
+      );
+    }
   } catch (err) {
     console.error("[entities] extraction failed:", err);
     return NextResponse.json(
       { error: "Failed to extract entities" },
-      { status: 500 }
-    );
-  }
-
-  const { error: updateErr } = await supabase
-    .from("stories")
-    .update({ entities })
-    .eq("id", id);
-
-  if (updateErr) {
-    console.error("[entities] persist failed:", updateErr);
-    return NextResponse.json(
-      { error: "Failed to save entities" },
       { status: 500 }
     );
   }
