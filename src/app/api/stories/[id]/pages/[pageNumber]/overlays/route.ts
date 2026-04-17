@@ -6,6 +6,7 @@ export const maxDuration = 30;
 
 interface SaveBody {
   overlays: Layer[];
+  layoutId?: string;
 }
 
 export async function PUT(
@@ -42,7 +43,13 @@ export async function PUT(
   }
 
   const nextPages: StoryPage[] = story.pages.map((p) =>
-    p.pageNumber === pageNum ? { ...p, overlays: body.overlays } : p
+    p.pageNumber === pageNum
+      ? {
+          ...p,
+          overlays: body.overlays,
+          ...(body.layoutId ? { layoutId: body.layoutId } : {}),
+        }
+      : p
   );
 
   const { error: updateErr } = await supabase

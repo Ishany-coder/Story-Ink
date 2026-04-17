@@ -1,30 +1,38 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CANVAS_SIZE,
-  type Entity,
   type ImageLayer,
   type Layer,
   type ShapeKind,
   type ShapeLayer,
   type Story,
-  type StoryPage,
   type TextLayer,
 } from "@/lib/types";
+import {
+  DEFAULT_LAYOUT_ID,
+  LAYOUTS,
+  getLayout,
+  morphLayersToLayout,
+  resolveDisplayLayers,
+} from "@/lib/layouts";
+import { useAutoFitFontSize } from "./useAutoFitFontSize";
 
 interface CanvasEditorProps {
   story: Story;
 }
 
-type SidebarTab = "text" | "shapes" | "upload" | "entities";
+type SidebarTab = "layouts" | "text" | "shapes" | "upload";
+
+type ResizeAxis = "x" | "y" | "both";
 
 type Drag =
   | { kind: "move"; layerId: string; startX: number; startY: number; origX: number; origY: number }
   | {
       kind: "resize";
+      axis: ResizeAxis;
       layerId: string;
       startX: number;
       startY: number;
@@ -51,15 +59,16 @@ function makeText(): TextLayer {
     id: uid(),
     type: "text",
     text: "Double-click to edit",
-    x: 200,
-    y: 350,
-    width: 400,
+    x: 240,
+    y: 360,
+    width: 320,
     height: 80,
     rotation: 0,
-    fontSize: 48,
+    fontSize: 24,
     color: "#1f1147",
     fontFamily: "var(--font-display), serif",
     fontWeight: "bold",
+    source: "user",
   };
 }
 
@@ -76,37 +85,22 @@ function makeShape(shape: ShapeKind): ShapeLayer {
     fill: shape === "line" ? "transparent" : "#fde68a",
     stroke: "#7c3aed",
     strokeWidth: shape === "line" ? 6 : 4,
+    source: "user",
   };
 }
 
-function makeImage(
-  src: string,
-  source: ImageLayer["source"],
-  width = 300,
-  height = 300
-): ImageLayer {
+function makeUploadImage(src: string, width = 300, height = 300): ImageLayer {
   return {
     id: uid(),
     type: "image",
     src,
-    source,
     x: CANVAS_SIZE / 2 - width / 2,
     y: CANVAS_SIZE / 2 - height / 2,
     width,
     height,
     rotation: 0,
+    source: "user",
   };
-}
-
-/** Load an image and return its natural dimensions. */
-function measureImage(src: string): Promise<{ w: number; h: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new window.Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = reject;
-    img.src = src;
-  });
 }
 
 const FONT_FAMILIES = [
@@ -132,35 +126,72 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
   const [story, setStory] = useState<Story>(initialStory);
   const [pageIdx, setPageIdx] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tab, setTab] = useState<SidebarTab>("text");
+  const [tab, setTab] = useState<SidebarTab>("layouts");
   const [drag, setDrag] = useState<Drag | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [dirty, setDirty] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [stickerLoading, setStickerLoading] = useState<string | null>(null);
+  const [regenPending, setRegenPending] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const currentPage = story.pages[pageIdx];
   const layers: Layer[] = currentPage?.overlays ?? [];
   const selectedLayer = layers.find((l) => l.id === selectedId) ?? null;
+  const currentLayoutId = currentPage?.layoutId ?? DEFAULT_LAYOUT_ID;
+
+  // Materialize layout-synthesized layers into real overlays on first view of
+  // a page that doesn't have them yet (legacy stories, or pages that somehow
+  // never got initial overlays). This makes the layers movable and persistable.
+  useEffect(() => {
+    if (!currentPage) return;
+    const existing = currentPage.overlays ?? [];
+    const hasLayoutImage = existing.some(
+      (l) => l.source === "layout" && l.type === "image"
+    );
+    const hasLayoutText = existing.some(
+      (l) => l.source === "layout" && l.type === "text"
+    );
+    if (hasLayoutImage && hasLayoutText) return;
+
+    const resolved = resolveDisplayLayers(currentPage);
+    setStory((prev) => ({
+      ...prev,
+      pages: prev.pages.map((p) =>
+        p.pageNumber === currentPage.pageNumber
+          ? {
+              ...p,
+              overlays: resolved,
+              layoutId: p.layoutId ?? DEFAULT_LAYOUT_ID,
+            }
+          : p
+      ),
+    }));
+    setDirty((d) => ({ ...d, [currentPage.pageNumber]: true }));
+  }, [currentPage]);
 
   // ---- Layer mutations -----------------------------------------------------
 
-  const updatePageLayers = useCallback(
-    (pageNumber: number, mutate: (layers: Layer[]) => Layer[]) => {
+  const updatePage = useCallback(
+    (
+      pageNumber: number,
+      mutate: (page: NonNullable<typeof currentPage>) => NonNullable<typeof currentPage>
+    ) => {
       setStory((prev) => ({
         ...prev,
-        pages: prev.pages.map((p) =>
-          p.pageNumber === pageNumber
-            ? { ...p, overlays: mutate(p.overlays ?? []) }
-            : p
-        ),
+        pages: prev.pages.map((p) => (p.pageNumber === pageNumber ? mutate(p) : p)),
       }));
       setDirty((d) => ({ ...d, [pageNumber]: true }));
     },
     []
+  );
+
+  const updatePageLayers = useCallback(
+    (pageNumber: number, mutate: (layers: Layer[]) => Layer[]) => {
+      updatePage(pageNumber, (p) => ({ ...p, overlays: mutate(p.overlays ?? []) }));
+    },
+    [updatePage]
   );
 
   const addLayer = useCallback(
@@ -193,6 +224,19 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
     [currentPage, selectedId, updatePageLayers]
   );
 
+  const applyLayout = useCallback(
+    (layoutId: string) => {
+      if (!currentPage) return;
+      const layout = getLayout(layoutId);
+      updatePage(currentPage.pageNumber, (p) => ({
+        ...p,
+        layoutId,
+        overlays: morphLayersToLayout(p.overlays ?? [], layout),
+      }));
+    },
+    [currentPage, updatePage]
+  );
+
   // Delete key removes selected (when not editing text inline).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -217,7 +261,6 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
 
   // ---- Drag / resize / rotate ---------------------------------------------
 
-  // Convert a client (pixel) delta to canvas-logical delta.
   function clientToCanvasScale(): number {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || rect.width === 0) return 1;
@@ -238,10 +281,11 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
     (e.target as Element).setPointerCapture?.(e.pointerId);
   }
 
-  function startResize(e: React.PointerEvent, layer: Layer) {
+  function startResize(e: React.PointerEvent, layer: Layer, axis: ResizeAxis) {
     e.stopPropagation();
     setDrag({
       kind: "resize",
+      axis,
       layerId: layer.id,
       startX: e.clientX,
       startY: e.clientY,
@@ -286,8 +330,8 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
         });
       } else if (drag.kind === "resize") {
         const scale = clientToCanvasScale();
-        const dx = (e.clientX - drag.startX) * scale;
-        const dy = (e.clientY - drag.startY) * scale;
+        const dx = drag.axis === "y" ? 0 : (e.clientX - drag.startX) * scale;
+        const dy = drag.axis === "x" ? 0 : (e.clientY - drag.startY) * scale;
         updateLayer(drag.layerId, {
           width: Math.max(20, drag.origW + dx),
           height: Math.max(20, drag.origH + dy),
@@ -324,7 +368,10 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ overlays: currentPage.overlays ?? [] }),
+          body: JSON.stringify({
+            overlays: currentPage.overlays ?? [],
+            layoutId: currentPage.layoutId ?? DEFAULT_LAYOUT_ID,
+          }),
         }
       );
       if (!res.ok) {
@@ -353,137 +400,56 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
         throw new Error(body.error || "Upload failed");
       }
       const { url } = (await res.json()) as { url: string };
-      addLayer(makeImage(url, "upload"));
+      addLayer(makeUploadImage(url));
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Upload failed");
     }
   }
 
-  // Loads an image URL into a canvas, makes near-white pixels transparent,
-  // and returns a data URL of the result. Used so the white background that
-  // Gemini puts on extracted stickers doesn't show as a white box on the
-  // page. Threshold is generous (any RGB > 240 → alpha 0).
-  async function whiteToTransparent(url: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const img = new window.Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        try {
-          const canvas = document.createElement("canvas");
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return reject(new Error("no 2d context"));
-          ctx.drawImage(img, 0, 0);
-          const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const px = data.data;
-          for (let i = 0; i < px.length; i += 4) {
-            if (px[i] > 240 && px[i + 1] > 240 && px[i + 2] > 240) {
-              px[i + 3] = 0;
-            }
-          }
-          ctx.putImageData(data, 0, 0);
-          resolve(canvas.toDataURL("image/png"));
-        } catch (err) {
-          reject(err);
-        }
-      };
-      img.onerror = () => reject(new Error("image load failed"));
-      img.src = url;
-    });
-  }
-
-  async function addEntitySticker(entity: Entity) {
-    if (stickerLoading || !currentPage) return;
-    setStickerLoading(entity.id);
+  async function regenerateLayoutText() {
+    if (!currentPage || regenPending) return;
+    setRegenPending(true);
     setSaveError(null);
     try {
-      // Pull this entity OUT of the current page image. Server runs Gemini
-      // image-to-image twice (extract + inpaint) and returns a sticker URL
-      // and a "clean" version of the page with the entity removed.
       const res = await fetch(
-        `/api/stories/${story.id}/pages/${currentPage.pageNumber}/extract`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entityId: entity.id }),
-        }
+        `/api/stories/${story.id}/pages/${currentPage.pageNumber}/regenerate-text`,
+        { method: "POST" }
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Extraction failed");
+        throw new Error(body.error || "Regeneration failed");
       }
-      const { stickerUrl, cleanImageUrl } = (await res.json()) as {
-        stickerUrl: string;
-        cleanImageUrl: string;
-        cached: boolean;
-      };
+      const { text } = (await res.json()) as { text: string };
 
-      // Chroma-key the white sticker background to transparent on the
-      // client. The result is a data URL — we keep it short-lived in the
-      // layer's src; if the user saves the page, this gets persisted as-is.
-      const transparentSrc = await whiteToTransparent(stickerUrl);
-
-      // Update the current page in local state: swap the background to the
-      // inpainted version, cache the extraction, and add the sticker layer.
-      setStory((prev) => ({
-        ...prev,
-        pages: prev.pages.map((p) =>
-          p.pageNumber === currentPage.pageNumber
-            ? {
-                ...p,
-                cleanImageUrl,
-                extractions: {
-                  ...(p.extractions ?? {}),
-                  [entity.id]: { stickerUrl },
-                },
-              }
-            : p
+      // Update page.text AND the layout-tagged text layer so both the reader
+      // and the canvas stay in sync. Other text layers are untouched.
+      updatePage(currentPage.pageNumber, (p) => ({
+        ...p,
+        text,
+        overlays: (p.overlays ?? []).map((l) =>
+          l.source === "layout" && l.type === "text"
+            ? ({ ...l, text } as Layer)
+            : l
         ),
       }));
-      // Measure the sticker so the layer matches its natural aspect ratio
-      // instead of being a fixed 300×300 square. Scale it to fit within
-      // half the canvas while preserving proportions.
-      const { w, h } = await measureImage(transparentSrc);
-      const maxDim = CANVAS_SIZE * 0.5;
-      const scale = Math.min(maxDim / w, maxDim / h, 1);
-      const layerW = Math.round(w * scale);
-      const layerH = Math.round(h * scale);
-
-      addLayer(makeImage(transparentSrc, "sticker", layerW, layerH));
     } catch (err) {
       setSaveError(
-        err instanceof Error ? err.message : "Couldn't extract entity"
+        err instanceof Error ? err.message : "Couldn't regenerate text"
       );
     } finally {
-      setStickerLoading(null);
+      setRegenPending(false);
     }
   }
 
   // ---- Render -------------------------------------------------------------
 
-  // Only show entities that appear on the current page. Falls back to
-  // showing all entities for stories generated before entityIds existed.
-  const groupedEntities = useMemo(() => {
-    const out: Record<string, Entity[]> = {
-      character: [],
-      environment: [],
-      object: [],
-    };
-    const allEntities = story.entities ?? [];
-    const pageEntityIds = currentPage?.entityIds;
-
-    // If entityIds is populated, filter; otherwise show all (legacy stories).
-    const visible =
-      pageEntityIds && pageEntityIds.length > 0
-        ? allEntities.filter((e) => pageEntityIds.includes(e.id))
-        : allEntities;
-
-    for (const e of visible) out[e.type].push(e);
-    return out;
-  }, [story.entities, currentPage]);
-
   const isDirty = !!dirty[currentPage?.pageNumber ?? -1];
+
+  const selectedIsLayoutText = useMemo(
+    () =>
+      selectedLayer?.source === "layout" && selectedLayer?.type === "text",
+    [selectedLayer]
+  );
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6">
@@ -542,11 +508,11 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[200px_1fr_260px]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr_260px]">
         {/* Left: tools sidebar */}
         <aside className="rounded-3xl border-2 border-purple-200 bg-white p-4 shadow-sm">
           <div className="mb-4 grid grid-cols-2 gap-1">
-            {(["text", "shapes", "upload", "entities"] as SidebarTab[]).map(
+            {(["layouts", "text", "shapes", "upload"] as SidebarTab[]).map(
               (t) => (
                 <button
                   key={t}
@@ -563,6 +529,30 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
               )
             )}
           </div>
+
+          {tab === "layouts" && (
+            <div className="space-y-2">
+              {LAYOUTS.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => applyLayout(l.id)}
+                  className={`w-full overflow-hidden rounded-2xl border-2 text-left transition-all ${
+                    currentLayoutId === l.id
+                      ? "border-purple-400 bg-purple-50 shadow-md"
+                      : "border-purple-100 bg-white hover:border-purple-300 hover:bg-purple-50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 px-2 py-2">
+                    <LayoutThumbnail layoutId={l.id} />
+                    <span className="text-[11px] font-black uppercase text-purple-500">
+                      {l.name}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
 
           {tab === "text" && (
             <button
@@ -616,67 +606,20 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
               />
             </label>
           )}
-
-          {tab === "entities" && (
-            <div className="space-y-3">
-              {(["character", "environment", "object"] as const).map((type) => {
-                const list = groupedEntities[type];
-                if (!list || list.length === 0) return null;
-                return (
-                  <div key={type}>
-                    <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
-                      {type}s
-                    </p>
-                    <div className="space-y-1">
-                      {list.map((e) => (
-                        <button
-                          key={e.id}
-                          type="button"
-                          onClick={() => addEntitySticker(e)}
-                          disabled={stickerLoading === e.id}
-                          className="w-full truncate rounded-xl border-2 border-purple-100 bg-white px-2 py-2 text-left text-xs font-bold text-purple-500 hover:border-purple-300 hover:bg-purple-50 disabled:cursor-wait disabled:opacity-60"
-                        >
-                          {stickerLoading === e.id ? "Generating..." : e.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-              {(story.entities?.length ?? 0) === 0 && (
-                <p className="text-xs font-medium text-purple-300">
-                  No entities yet. Open the AI edit page first to extract them.
-                </p>
-              )}
-            </div>
-          )}
         </aside>
 
         {/* Center: canvas */}
         <div className="flex items-center justify-center">
           <div
             ref={canvasRef}
-            className="relative aspect-square w-full max-w-[720px] overflow-hidden rounded-3xl border-4 border-purple-200 bg-white shadow-xl"
+            className="relative aspect-square w-full max-w-[720px] overflow-hidden rounded-3xl border-4 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50 shadow-xl"
             onPointerDown={() => {
               setSelectedId(null);
               setEditingTextId(null);
             }}
           >
-            {/* Background image. Prefer the inpainted (clean) version if
-                we've extracted any entities from this page — otherwise the
-                original page image. */}
-            {(currentPage?.cleanImageUrl || currentPage?.imageUrl) && (
-              <Image
-                src={currentPage.cleanImageUrl || currentPage.imageUrl}
-                alt={`Page ${currentPage.pageNumber}`}
-                fill
-                className="select-none object-cover"
-                draggable={false}
-                unoptimized
-              />
-            )}
-
-            {/* Layers */}
+            {/* Layers — image layers are part of this list now, no separate
+                background image. */}
             {layers.map((layer) => (
               <LayerView
                 key={layer.id}
@@ -684,7 +627,7 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
                 selected={selectedId === layer.id}
                 editingText={editingTextId === layer.id}
                 onPointerDown={(e) => startMove(e, layer)}
-                onStartResize={(e) => startResize(e, layer)}
+                onStartResize={(e, axis) => startResize(e, layer, axis)}
                 onStartRotate={(e) => startRotate(e, layer)}
                 onChangeText={(text) => updateLayer(layer.id, { text })}
                 onDoubleClickText={() => setEditingTextId(layer.id)}
@@ -699,6 +642,9 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
           {selectedLayer ? (
             <PropertiesPanel
               layer={selectedLayer}
+              showRegenerate={selectedIsLayoutText}
+              regenPending={regenPending}
+              onRegenerate={regenerateLayoutText}
               onChange={(patch) => updateLayer(selectedLayer.id, patch)}
               onDelete={() => deleteLayer(selectedLayer.id)}
             />
@@ -714,6 +660,37 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
 }
 
 // ---------------------------------------------------------------------------
+// LayoutThumbnail — tiny visual preview of a layout's image + text regions
+// ---------------------------------------------------------------------------
+
+function LayoutThumbnail({ layoutId }: { layoutId: string }) {
+  const layout = getLayout(layoutId);
+  const toPct = (v: number) => `${(v / CANVAS_SIZE) * 100}%`;
+  return (
+    <div className="relative h-10 w-10 flex-none overflow-hidden rounded border border-purple-200 bg-purple-50">
+      <div
+        className="absolute rounded-sm bg-purple-300"
+        style={{
+          left: toPct(layout.imageRegion.x),
+          top: toPct(layout.imageRegion.y),
+          width: toPct(layout.imageRegion.width),
+          height: toPct(layout.imageRegion.height),
+        }}
+      />
+      <div
+        className="absolute rounded-sm bg-pink-400"
+        style={{
+          left: toPct(layout.textRegion.x),
+          top: toPct(layout.textRegion.y),
+          width: toPct(layout.textRegion.width),
+          height: toPct(layout.textRegion.height),
+        }}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // LayerView — renders one layer with selection box, resize/rotate handles
 // ---------------------------------------------------------------------------
 
@@ -722,7 +699,7 @@ interface LayerViewProps {
   selected: boolean;
   editingText: boolean;
   onPointerDown: (e: React.PointerEvent) => void;
-  onStartResize: (e: React.PointerEvent) => void;
+  onStartResize: (e: React.PointerEvent, axis: ResizeAxis) => void;
   onStartRotate: (e: React.PointerEvent) => void;
   onChangeText: (t: string) => void;
   onDoubleClickText: () => void;
@@ -740,7 +717,6 @@ function LayerView({
   onDoubleClickText,
   onBlurText,
 }: LayerViewProps) {
-  // Position uses percentages of CANVAS_SIZE so the canvas can scale.
   const style: React.CSSProperties = {
     position: "absolute",
     left: `${(layer.x / CANVAS_SIZE) * 100}%`,
@@ -769,12 +745,21 @@ function LayerView({
       {selected && (
         <>
           <div className="pointer-events-none absolute inset-0 border-2 border-dashed border-purple-500" />
-          {/* Resize handle (bottom-right) */}
+          {/* Right-edge handle — width only */}
           <div
-            onPointerDown={onStartResize}
+            onPointerDown={(e) => onStartResize(e, "x")}
+            className="absolute -right-1.5 top-1/2 h-8 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-purple-500 bg-white"
+          />
+          {/* Bottom-edge handle — height only */}
+          <div
+            onPointerDown={(e) => onStartResize(e, "y")}
+            className="absolute -bottom-1.5 left-1/2 h-3 w-8 -translate-x-1/2 cursor-ns-resize rounded-full border-2 border-purple-500 bg-white"
+          />
+          {/* Corner handle — both axes */}
+          <div
+            onPointerDown={(e) => onStartResize(e, "both")}
             className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-purple-500 bg-white"
           />
-          {/* Rotate handle (top-center) */}
           <div
             onPointerDown={onStartRotate}
             className="absolute -top-8 left-1/2 h-4 w-4 -translate-x-1/2 cursor-grab rounded-full border-2 border-purple-500 bg-white"
@@ -798,45 +783,72 @@ function TextLayerContent({
   onDoubleClick: () => void;
   onBlur: () => void;
 }) {
-  // Scale font size relative to the canvas, since width/height are percentages.
-  const inner: React.CSSProperties = {
-    width: "100%",
-    height: "100%",
-    color: layer.color,
+  // Share the autofit size between view mode (the rendered text) and edit
+  // mode (the textarea) so double-clicking to edit doesn't cause the font
+  // to jump. Binary-searches the largest px size whose rendered text fits
+  // inside the container on every resize.
+  const { containerRef, fontSizePx } = useAutoFitFontSize({
+    text: layer.text,
+    logicalWidth: layer.width,
+    logicalMaxFontSize: layer.fontSize,
     fontFamily: layer.fontFamily,
     fontWeight: layer.fontWeight,
-    fontSize: `${(layer.fontSize / CANVAS_SIZE) * 100}cqw`,
-    lineHeight: 1.1,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    textAlign: "center",
-    containerType: "inline-size",
-    overflow: "hidden",
-    wordBreak: "break-word",
-  };
+  });
 
-  if (editing) {
-    return (
-      <textarea
-        autoFocus
-        value={layer.text}
-        onChange={(e) => onChangeText(e.target.value)}
-        onBlur={onBlur}
-        onPointerDown={(e) => e.stopPropagation()}
-        style={{
-          ...inner,
-          background: "rgba(255,255,255,0.6)",
-          border: "none",
-          outline: "2px solid #7c3aed",
-          resize: "none",
-        }}
-      />
-    );
-  }
   return (
-    <div onDoubleClick={onDoubleClick} style={inner}>
-      {layer.text}
+    <div
+      ref={containerRef}
+      onDoubleClick={onDoubleClick}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+      }}
+    >
+      {editing ? (
+        <textarea
+          autoFocus
+          value={layer.text}
+          onChange={(e) => onChangeText(e.target.value)}
+          onBlur={onBlur}
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            width: "100%",
+            height: "100%",
+            color: layer.color,
+            fontFamily: layer.fontFamily,
+            fontWeight: layer.fontWeight,
+            fontSize: `${fontSizePx}px`,
+            lineHeight: 1.15,
+            textAlign: "center",
+            wordBreak: "break-word",
+            background: "rgba(255,255,255,0.6)",
+            border: "none",
+            outline: "2px solid #7c3aed",
+            resize: "none",
+            padding: 0,
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            color: layer.color,
+            fontFamily: layer.fontFamily,
+            fontWeight: layer.fontWeight,
+            lineHeight: 1.15,
+            textAlign: "center",
+            wordBreak: "break-word",
+            whiteSpace: "pre-wrap",
+            width: "100%",
+            fontSize: `${fontSizePx}px`,
+          }}
+        >
+          {layer.text}
+        </div>
+      )}
     </div>
   );
 }
@@ -868,7 +880,6 @@ function ShapeLayerContent({ layer }: { layer: ShapeLayer }) {
       />
     );
   }
-  // line
   return (
     <div
       style={{
@@ -882,11 +893,10 @@ function ShapeLayerContent({ layer }: { layer: ShapeLayer }) {
 }
 
 function ImageLayerContent({ layer }: { layer: ImageLayer }) {
+  // Layout-managed images should fill the region (cover); user-uploaded
+  // images should letterbox (contain) to preserve their aspect.
+  const fit = layer.source === "layout" ? "cover" : "contain";
   return (
-    // Plain <img> here (not next/image) — the URL set could be external,
-    // and next/image with fill needs a positioned parent which we already
-    // have, but we want object-contain and we don't want optimization on
-    // user uploads.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={layer.src}
@@ -895,7 +905,7 @@ function ImageLayerContent({ layer }: { layer: ImageLayer }) {
       style={{
         width: "100%",
         height: "100%",
-        objectFit: "contain",
+        objectFit: fit,
         userSelect: "none",
         pointerEvents: "none",
       }}
@@ -909,10 +919,16 @@ function ImageLayerContent({ layer }: { layer: ImageLayer }) {
 
 function PropertiesPanel({
   layer,
+  showRegenerate,
+  regenPending,
+  onRegenerate,
   onChange,
   onDelete,
 }: {
   layer: Layer;
+  showRegenerate: boolean;
+  regenPending: boolean;
+  onRegenerate: () => void;
   onChange: (patch: Partial<Layer>) => void;
   onDelete: () => void;
 }) {
@@ -921,6 +937,9 @@ function PropertiesPanel({
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-black uppercase tracking-wider text-purple-400">
           {layer.type}
+          {layer.source === "layout" && (
+            <span className="ml-1 text-purple-300">· layout</span>
+          )}
         </h3>
         <button
           type="button"
@@ -962,6 +981,16 @@ function PropertiesPanel({
 
       {layer.type === "text" && (
         <>
+          {showRegenerate && (
+            <button
+              type="button"
+              onClick={onRegenerate}
+              disabled={regenPending}
+              className="w-full rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 px-3 py-2 text-xs font-black uppercase text-white shadow-md disabled:cursor-wait disabled:opacity-60"
+            >
+              {regenPending ? "Thinking..." : "Regenerate with AI"}
+            </button>
+          )}
           <Field label="Text">
             <textarea
               value={layer.text}
@@ -970,7 +999,7 @@ function PropertiesPanel({
                   text: e.target.value,
                 })
               }
-              rows={2}
+              rows={3}
               className="w-full rounded-lg border-2 border-purple-200 bg-purple-50/40 px-2 py-1 text-xs font-medium text-purple-700"
             />
           </Field>

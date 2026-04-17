@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  generateStoryText,
-  generatePageImage,
-  extractEntities,
-  generateComicScript,
-  generateComicPageImage,
-} from "@/lib/gemini";
-import { buildEntityReferences } from "@/lib/stickers";
+import { generateStoryText, generatePageImage } from "@/lib/gemini";
+import { buildInitialOverlays, DEFAULT_LAYOUT_ID } from "@/lib/layouts";
 import { supabase } from "@/lib/supabase";
-import { Entity, GenerateRequest, StoryPage } from "@/lib/types";
+import { GenerateRequest, StoryPage } from "@/lib/types";
 
-// Reference-image generation makes this route significantly slower —
-// 1 text call + 1 extract call + N sticker calls + N page calls.
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
@@ -26,110 +18,42 @@ export async function POST(request: NextRequest) {
     }
 
     const pageCount = Math.min(Math.max(body.pageCount || 5, 3), 12);
-    const mode = body.mode === "comic" ? "comic" : "storybook";
 
-    // 1. Script generation. Comic mode produces structured panel JSON;
-    // storybook mode produces flat narrative text per page.
-    type ScriptPage = {
-      pageNumber: number;
-      text: string;
-      panels?: import("@/lib/types").Panel[];
-    };
-    let title: string;
-    let scriptPages: ScriptPage[];
+    const storyText = await generateStoryText(body.prompt, pageCount);
+    const title = storyText.title;
+    const scriptPages = storyText.pages.map((p) => ({
+      pageNumber: p.pageNumber,
+      text: p.text,
+    }));
 
-    if (mode === "comic") {
-      const script = await generateComicScript(body.prompt, pageCount);
-      title = script.title;
-      scriptPages = script.pages.map((p) => ({
-        pageNumber: p.pageNumber,
-        // Synthesize a text summary so the storybook reader (and entity
-        // extraction) still has something to chew on for comic pages.
-        text: p.panels
-          .map((panel) => panel.action || panel.description)
-          .join(" "),
-        panels: p.panels,
-      }));
-    } else {
-      const storyText = await generateStoryText(body.prompt, pageCount);
-      title = storyText.title;
-      scriptPages = storyText.pages.map((p) => ({
-        pageNumber: p.pageNumber,
-        text: p.text,
-      }));
-    }
-
-    // 2. Extract entities (text descriptions only) and which pages they
-    // appear on. For comic mode this runs against the synthesized
-    // panel-action text — good enough to surface the recurring characters
-    // and locations.
-    let entities: Entity[] = [];
-    let pageEntityMap: Record<number, string[]> = {};
-    try {
-      const extraction = await extractEntities(
-        title,
-        scriptPages.map((p) => ({ pageNumber: p.pageNumber, text: p.text }))
-      );
-      entities = extraction.entities;
-      pageEntityMap = extraction.pageEntityMap;
-    } catch (err) {
-      console.error("[generate] entity extraction failed:", err);
-    }
-
-    // Pre-compute the story id so stickers can be uploaded under
-    // stickers/{storyId}/... before the row exists in the DB.
-    const storyId = crypto.randomUUID();
-
-    // 3. Generate reference images (stickers) for every entity in parallel,
-    // upload them to Storage, and keep their bytes for the page-gen step.
-    const { refs, updatedEntities } = await buildEntityReferences(
-      storyId,
-      entities
-    );
-    entities = updatedEntities;
-
-    // 4. Generate each page image. Comic pages render multi-panel layouts
-    // via gemini-3-pro-image-preview; storybook pages stay on the existing
-    // single-illustration path.
     const imageResults = await Promise.allSettled(
-      scriptPages.map((page) =>
-        mode === "comic" && page.panels
-          ? generateComicPageImage(
-              { pageNumber: page.pageNumber, panels: page.panels },
-              title,
-              entities,
-              refs
-            )
-          : generatePageImage(page.text, title, entities, refs)
-      )
+      scriptPages.map((page) => generatePageImage(page.text, title))
     );
 
-    const pages: StoryPage[] = scriptPages.map((page, i) => ({
-      pageNumber: page.pageNumber,
-      text: page.text,
-      imageUrl:
+    const pages: StoryPage[] = scriptPages.map((page, i) => {
+      const imageUrl =
         imageResults[i].status === "fulfilled"
           ? (imageResults[i] as PromiseFulfilledResult<string>).value
-          : "",
-      panels: page.panels,
-      overlays: [],
-      entityIds: pageEntityMap[page.pageNumber] ?? [],
-    }));
+          : "";
+      return {
+        pageNumber: page.pageNumber,
+        text: page.text,
+        imageUrl,
+        layoutId: DEFAULT_LAYOUT_ID,
+        overlays: buildInitialOverlays(imageUrl, page.text),
+      };
+    });
 
     const coverImage = pages[0]?.imageUrl || null;
 
-    // 5. Insert with the precomputed id so it matches the sticker paths.
     const { data, error } = await supabase
       .from("stories")
       .insert({
-        id: storyId,
         title,
         prompt: body.prompt,
         page_count: pageCount,
         pages,
         cover_image: coverImage,
-        entities,
-        mode,
       })
       .select("id")
       .single();

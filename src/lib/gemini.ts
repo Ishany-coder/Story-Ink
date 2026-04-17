@@ -1,36 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { Entity, EditKind, Panel, StoryPage } from "./types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-interface StoryTextResult {
+export interface StoryTextResult {
   title: string;
   pages: { pageNumber: number; text: string }[];
-}
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-function entitiesContextBlock(entities: Entity[]): string {
-  if (!entities || entities.length === 0) return "";
-  const grouped: Record<string, Entity[]> = {};
-  for (const e of entities) {
-    (grouped[e.type] ||= []).push(e);
-  }
-  const lines: string[] = [];
-  for (const type of ["character", "environment", "object"] as const) {
-    const list = grouped[type];
-    if (!list) continue;
-    lines.push(`${type.toUpperCase()}S:`);
-    for (const e of list) {
-      lines.push(`- ${e.name}: ${e.description}`);
-    }
-  }
-  return lines.join("\n");
 }
 
 export async function generateStoryText(
@@ -60,224 +34,59 @@ Make the story whimsical, engaging, and rich with visual imagery. Each page shou
 User's idea: ${prompt}`
   );
 
-  const text = result.response.text();
-  return JSON.parse(text) as StoryTextResult;
+  return JSON.parse(result.response.text()) as StoryTextResult;
 }
 
-// ---------------------------------------------------------------------------
-// Comic mode: structured panel script + multi-panel page image generation.
-// Mirrors comicink's pipeline (panels JSON → one rendered page image with
-// multiple panels and speech bubbles), but reuses Story-Ink's existing
-// entity/sticker reference machinery for character consistency.
-// ---------------------------------------------------------------------------
-
-export interface ComicScriptResult {
-  title: string;
-  pages: { pageNumber: number; panels: Panel[] }[];
-}
-
-export async function generateComicScript(
-  prompt: string,
-  pageCount: number
-): Promise<ComicScriptResult> {
+export async function regeneratePageText(
+  storyTitle: string,
+  allPages: { pageNumber: number; text: string }[],
+  targetPageNumber: number
+): Promise<string> {
   const model = genAI.getGenerativeModel({
     model: "gemini-2.0-flash",
     generationConfig: { responseMimeType: "application/json" },
   });
 
+  const context = allPages
+    .map((p) =>
+      p.pageNumber === targetPageNumber
+        ? `Page ${p.pageNumber} (rewrite this one): ${p.text}`
+        : `Page ${p.pageNumber}: ${p.text}`
+    )
+    .join("\n");
+
   const result = await model.generateContent(
-    `You are a professional comic book writer. Create a detailed page-by-page script for a comic book with exactly ${pageCount} pages.
+    `You are revising one page of a children's storybook titled "${storyTitle}". Rewrite only page ${targetPageNumber} in a fresh way — a different turn of phrase, a new sensory detail — while keeping the plot beat, characters, and tone consistent with the surrounding pages. Keep it to 2-4 whimsical sentences suitable for illustration.
 
-You MUST follow the user's idea exactly. Each page contains 3-6 panels that move the story forward with clear, sequential beats. Dialogue should be short and natural — only what fits in a speech bubble. If a panel has no dialogue, return an empty string.
+Return JSON: { "text": "..." }
 
-Return a JSON object with this exact structure:
-{
-  "title": "Comic Title",
-  "pages": [
-    {
-      "pageNumber": 1,
-      "panels": [
-        {
-          "panelNumber": 1,
-          "description": "Vivid visual description of what we see in this panel — composition, framing, mood.",
-          "dialogue": "Character: short line. Or empty string if silent.",
-          "action": "What is happening in the scene.",
-          "characters": ["Names of characters appearing in this panel"],
-          "setting": "Where this panel takes place"
-        }
-      ]
-    }
-  ]
-}
-
-Keep characters and settings consistent across panels and pages. Use the same character names everywhere.
-
-User's idea: ${prompt}`
+Story so far:
+${context}`
   );
 
-  return JSON.parse(result.response.text()) as ComicScriptResult;
-}
-
-function panelsToPrompt(panels: Panel[]): string {
-  return panels
-    .map((p) => {
-      const lines = [
-        `PANEL ${p.panelNumber}:`,
-        `  Setting: ${p.setting}`,
-        `  Characters: ${p.characters.join(", ") || "(none)"}`,
-        `  Action: ${p.action}`,
-        `  Description: ${p.description}`,
-      ];
-      if (p.dialogue && p.dialogue.trim().length > 0) {
-        lines.push(`  Dialogue (in speech bubble): ${p.dialogue}`);
-      }
-      return lines.join("\n");
-    })
-    .join("\n\n");
-}
-
-export async function generateComicPageImage(
-  page: { pageNumber: number; panels: Panel[] },
-  storyTitle: string,
-  entities: Entity[] = [],
-  references: EntityReference[] = []
-): Promise<string> {
-  try {
-    const model = genAI.getGenerativeModel({
-      // Higher-fidelity model for multi-panel comic pages. Slower than the
-      // 3.1-flash-image used for storybook mode but worth it here because
-      // the model has to render multiple coherent panels in one image.
-      model: "gemini-3-pro-image-preview",
-    });
-
-    const cappedRefs = references.slice(0, 10);
-
-    const intro = [
-      `Create a full comic book page for "${storyTitle}" — page ${page.pageNumber}.`,
-      `Render a SINGLE image containing multiple comic panels arranged in a dynamic page layout (like a real printed comic book page). Use clear black panel borders with consistent gutters between panels. Sequential storytelling: panels read left-to-right, top-to-bottom.`,
-      `Speech bubbles must contain ONLY the dialogue text given for each panel — no character name prefixes, no narration captions, no panel numbers, no labels. If a panel has no dialogue, draw no speech bubble. Letters inside speech bubbles must be clean and legible.`,
-      `Panels to render (in order):`,
-      panelsToPrompt(page.panels),
-      cappedRefs.length > 0
-        ? `ABSOLUTE HIGHEST PRIORITY — CHARACTER VISUAL CONSISTENCY: Each named character MUST look EXACTLY like its reference image below — same face, same hair, same outfit, same colors, same proportions. This is non-negotiable across every panel and every page.`
-        : entities.length > 0
-        ? `Maintain visual consistency with these characters, environments, and objects across all pages:\n${entitiesContextBlock(
-            entities
-          )}`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-
-    const parts: Array<
-      | { text: string }
-      | { inlineData: { mimeType: string; data: string } }
-    > = [{ text: intro }];
-
-    for (const ref of cappedRefs) {
-      parts.push({
-        text: `Reference for ${ref.name} (${ref.type}): ${ref.description}`,
-      });
-      parts.push({
-        inlineData: { mimeType: ref.mime, data: ref.base64 },
-      });
-    }
-
-    parts.push({
-      text: `Style: modern comic book illustration, bold ink linework, vibrant flat colors with cel shading, dramatic lighting, expressive character poses. Keep the same art style on every page of this comic. The output must be a complete multi-panel comic page — not a single illustration.`,
-    });
-
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts }],
-      generationConfig: {
-        // @ts-expect-error - field not declared in legacy SDK types
-        responseModalities: ["IMAGE", "TEXT"],
-      },
-    });
-
-    const respParts = result.response.candidates?.[0]?.content?.parts;
-    if (respParts) {
-      for (const part of respParts) {
-        if (part.inlineData?.data) {
-          return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-        }
-      }
-    }
-
-    console.error(
-      "[gemini] comic page response had no inlineData. parts:",
-      JSON.stringify(respParts, null, 2)
-    );
-    return generatePlaceholder(`page ${page.pageNumber}`);
-  } catch (err) {
-    console.error("[gemini] comic page generation failed:", err);
-    return generatePlaceholder(`page ${page.pageNumber}`);
-  }
-}
-
-export interface EntityReference {
-  name: string;
-  type: Entity["type"];
-  description: string;
-  mime: string;
-  base64: string;
+  const parsed = JSON.parse(result.response.text()) as { text: string };
+  return parsed.text;
 }
 
 export async function generatePageImage(
   pageText: string,
-  storyTitle: string,
-  entities: Entity[] = [],
-  references: EntityReference[] = []
+  storyTitle: string
 ): Promise<string> {
   try {
     const model = genAI.getGenerativeModel({
       // Gemini 3.1 Flash Image — current fast image generation model.
-      // Alternatives on this API key: "gemini-2.5-flash-image",
-      // "gemini-3-pro-image-preview" (higher quality, slower).
       model: "gemini-3.1-flash-image-preview",
     });
 
-    // Build the parts array. When reference images are provided, interleave
-    // them with labels so the model knows what each one represents and uses
-    // them for visual consistency. Cap at 10 references to stay under the
-    // model's input image limit comfortably.
-    const cappedRefs = references.slice(0, 10);
-
     const intro = [
       `Create a beautiful children's storybook illustration for one page of the story titled "${storyTitle}".`,
-      `CRITICAL: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. This is an illustration only — narration is shown separately under the image.`,
+      `CRITICAL: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. This is an illustration only — narration is overlaid separately.`,
       `Scene to illustrate: ${pageText}`,
-      cappedRefs.length > 0
-        ? `Use the following reference images for visual consistency. Each character, environment, and object that appears in the scene MUST match the appearance of its reference image exactly — same colors, same shapes, same details.`
-        : entities.length > 0
-        ? `Maintain visual consistency with these characters, environments, and objects across all pages of the story:\n${entitiesContextBlock(
-            entities
-          )}`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-
-    const parts: Array<
-      | { text: string }
-      | { inlineData: { mimeType: string; data: string } }
-    > = [{ text: intro }];
-
-    for (const ref of cappedRefs) {
-      parts.push({
-        text: `Reference for ${ref.name} (${ref.type}): ${ref.description}`,
-      });
-      parts.push({
-        inlineData: { mimeType: ref.mime, data: ref.base64 },
-      });
-    }
-
-    parts.push({
-      text: `Now compose these subjects into the scene described above. Style: watercolor children's book illustration, whimsical, warm colors. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
-    });
+      `Style: watercolor children's book illustration, whimsical, warm colors. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
+    ].join("\n\n");
 
     const result = await model.generateContent({
-      contents: [{ role: "user", parts }],
+      contents: [{ role: "user", parts: [{ text: intro }] }],
       generationConfig: {
         // responseModalities isn't in @google/generative-ai@0.24.1's types,
         // but the SDK forwards unknown generationConfig fields to the API.
@@ -339,378 +148,3 @@ function hashCode(str: string): number {
   }
   return hash;
 }
-
-// ---------------------------------------------------------------------------
-// AI Studio helpers: entity extraction, edit classification, rewrites
-// ---------------------------------------------------------------------------
-
-function jsonModel() {
-  return genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
-    generationConfig: { responseMimeType: "application/json" },
-  });
-}
-
-function pagesToScript(pages: { pageNumber: number; text: string }[]): string {
-  return pages.map((p) => `Page ${p.pageNumber}: ${p.text}`).join("\n");
-}
-
-export interface ExtractEntitiesResult {
-  entities: Entity[];
-  /** Maps pageNumber → array of entity IDs that appear on that page. */
-  pageEntityMap: Record<number, string[]>;
-}
-
-export async function extractEntities(
-  title: string,
-  pages: { pageNumber: number; text: string }[]
-): Promise<ExtractEntitiesResult> {
-  const result = await jsonModel().generateContent(
-    `You analyze a children's storybook and extract every distinct character, environment (location/setting), and notable object that appears.
-
-For each entity, write a vivid 1-2 sentence description that captures both how it LOOKS (physical appearance, colors, shapes) and how it BEHAVES or what role it plays. The description must be detailed enough that an illustrator could draw it consistently across many pages.
-
-You must also determine which pages each entity appears on. Read each page carefully and list the entity only on pages where it is actually mentioned or clearly present in the scene.
-
-Return JSON with this exact shape:
-{
-  "entities": [
-    { "name": "Luna", "type": "character", "description": "A small purple cat with bright green eyes and a tiny silver bell on her collar; curious and brave.", "pages": [1, 2, 3] },
-    { "name": "The Mossy Forest", "type": "environment", "description": "A dense forest with towering ancient oaks, glowing mushrooms, and shafts of golden light filtering through emerald leaves.", "pages": [1, 2] }
-  ]
-}
-
-"type" must be exactly one of: "character", "environment", "object".
-"pages" must be an array of page numbers (integers) where the entity appears.
-
-Only include entities that meaningfully appear in the story. Don't include generic background elements.
-
-Story title: ${title}
-
-Story:
-${pagesToScript(pages)}`
-  );
-
-  const parsed = JSON.parse(result.response.text()) as {
-    entities: { name: string; type: string; description: string; pages?: number[] }[];
-  };
-
-  const entities = parsed.entities
-    .filter((e) =>
-      ["character", "environment", "object"].includes(e.type)
-    )
-    .map((e) => ({
-      id: slugify(e.name),
-      name: e.name,
-      type: e.type as Entity["type"],
-      description: e.description,
-    }));
-
-  // Build the reverse map: pageNumber → entity IDs on that page.
-  const pageEntityMap: Record<number, string[]> = {};
-  for (const page of pages) {
-    pageEntityMap[page.pageNumber] = [];
-  }
-  for (const raw of parsed.entities) {
-    if (!["character", "environment", "object"].includes(raw.type)) continue;
-    const id = slugify(raw.name);
-    for (const pn of raw.pages ?? []) {
-      if (!pageEntityMap[pn]) pageEntityMap[pn] = [];
-      pageEntityMap[pn].push(id);
-    }
-  }
-
-  return { entities, pageEntityMap };
-}
-
-export async function classifyEdit(
-  entity: Entity,
-  instruction: string
-): Promise<EditKind> {
-  const result = await jsonModel().generateContent(
-    `Classify a user's edit request to a storybook entity as either "appearance" or "personality".
-
-- "appearance": purely visual/physical changes (color, size, clothing, material, shape, texture, lighting). The story's plot and the entity's behavior do NOT change. Only images need regenerating.
-- "personality": behavior, mood, temperament, role in the story, relationships, or anything that would change how the character ACTS or how the plot unfolds. The whole story text needs rewriting.
-
-If the request mixes both, choose "personality" (the safer/larger rewrite).
-
-Return JSON: { "kind": "appearance" } or { "kind": "personality" }
-
-Entity name: ${entity.name}
-Entity type: ${entity.type}
-Current description: ${entity.description}
-
-User's edit request: ${instruction}`
-  );
-
-  const parsed = JSON.parse(result.response.text()) as { kind: string };
-  return parsed.kind === "personality" ? "personality" : "appearance";
-}
-
-export async function rewriteEntityDescription(
-  entity: Entity,
-  instruction: string
-): Promise<string> {
-  const result = await jsonModel().generateContent(
-    `Rewrite a storybook entity's description to incorporate a user's change. Keep the same length and style (1-2 vivid sentences). Preserve everything the user did NOT ask to change.
-
-Return JSON: { "description": "..." }
-
-Entity name: ${entity.name}
-Entity type: ${entity.type}
-Current description: ${entity.description}
-
-Change to apply: ${instruction}`
-  );
-
-  const parsed = JSON.parse(result.response.text()) as { description: string };
-  return parsed.description;
-}
-
-export interface StickerBytes {
-  mime: string;
-  base64: string;
-}
-
-export async function generateEntityStickerBytes(
-  entity: Entity
-): Promise<StickerBytes> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.1-flash-image-preview",
-  });
-
-  const result = await model.generateContent({
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: [
-              `Create a single isolated illustration of "${entity.name}" — a ${entity.type} from a children's storybook.`,
-              `Description: ${entity.description}`,
-              `IMPORTANT: The subject must be CENTERED on a SOLID PURE WHITE background (#FFFFFF). No scenery, no other characters, no props, no shadows extending beyond the subject, no border, no text.`,
-              `Style: watercolor children's book illustration, warm colors, clean edges. Show the full ${entity.type} from a clear angle.`,
-            ].join("\n\n"),
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      // @ts-expect-error - field not declared in legacy SDK types
-      responseModalities: ["IMAGE", "TEXT"],
-    },
-  });
-
-  const parts = result.response.candidates?.[0]?.content?.parts;
-  if (parts) {
-    for (const part of parts) {
-      if (part.inlineData?.data && part.inlineData.mimeType) {
-        return {
-          mime: part.inlineData.mimeType,
-          base64: part.inlineData.data,
-        };
-      }
-    }
-  }
-
-  throw new Error("Sticker generation returned no image");
-}
-
-// Convenience wrapper used by routes that just want a data: URL.
-export async function generateEntitySticker(entity: Entity): Promise<string> {
-  const { mime, base64 } = await generateEntityStickerBytes(entity);
-  return `data:${mime};base64,${base64}`;
-}
-
-// Image-to-image: extract one entity from a page image, preserving its
-// exact appearance (pose, colors, details). Output has a plain white
-// background — the client chroma-keys it to transparent.
-export async function extractEntityFromImage(
-  pageImage: { mime: string; base64: string },
-  entity: Entity,
-  referenceSticker?: { mime: string; base64: string } | null
-): Promise<StickerBytes> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.1-flash-image-preview",
-  });
-
-  const hasRef = !!referenceSticker;
-
-  const promptParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
-
-  // Text prompt first
-  promptParts.push({
-    text: [
-      `You are a precise image-editing tool.`,
-      ``,
-      `I will give you ${hasRef ? "two images" : "one image"}:`,
-      `1. IMAGE A: A children's storybook illustration (the scene).`,
-      ...(hasRef ? [`2. IMAGE B: A reference showing what "${entity.name}" looks like — use this to identify the correct subject in the scene.`] : []),
-      ``,
-      `YOUR TASK: Find "${entity.name}" in IMAGE A and extract ONLY that subject onto a pure white background.`,
-      ``,
-      `SUBJECT TO EXTRACT:`,
-      `- Name: "${entity.name}"`,
-      `- Type: ${entity.type}`,
-      `- Description: ${entity.description}`,
-      ``,
-      `RULES:`,
-      `1. Locate "${entity.name}" in IMAGE A${hasRef ? " (it looks like IMAGE B)" : ""}. Cut it out precisely along its edges.`,
-      `2. Output a NEW image containing ONLY "${entity.name}" on a SOLID WHITE (#FFFFFF) background.`,
-      `3. The output must contain NOTHING from the scene — no background, no ground, no sky, no other characters, no other objects. ONLY "${entity.name}".`,
-      `4. Preserve the EXACT appearance from IMAGE A: same pose, colors, art style, proportions. Do NOT redraw or reimagine.`,
-      `5. If there are multiple instances of "${entity.name}", extract all of them together.`,
-    ].join("\n"),
-  });
-
-  // IMAGE A: the scene
-  promptParts.push({
-    inlineData: { mimeType: pageImage.mime, data: pageImage.base64 },
-  });
-
-  // IMAGE B: reference sticker (if available)
-  if (referenceSticker) {
-    promptParts.push({
-      text: `Above is IMAGE A (the scene). Below is IMAGE B (reference showing what "${entity.name}" looks like):`,
-    });
-    promptParts.push({
-      inlineData: { mimeType: referenceSticker.mime, data: referenceSticker.base64 },
-    });
-  }
-
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: promptParts }],
-    generationConfig: {
-      // @ts-expect-error - field not declared in legacy SDK types
-      responseModalities: ["IMAGE", "TEXT"],
-    },
-  });
-
-  const parts = result.response.candidates?.[0]?.content?.parts;
-  if (parts) {
-    for (const part of parts) {
-      if (part.inlineData?.data && part.inlineData.mimeType) {
-        return {
-          mime: part.inlineData.mimeType,
-          base64: part.inlineData.data,
-        };
-      }
-    }
-  }
-  throw new Error("extractEntityFromImage: no image in response");
-}
-
-// Image-to-image: remove one entity from a page image and inpaint over
-// where it was, so the rest of the scene looks intact.
-export async function removeEntityFromImage(
-  pageImage: { mime: string; base64: string },
-  entity: Entity,
-  referenceSticker?: { mime: string; base64: string } | null
-): Promise<StickerBytes> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.1-flash-image-preview",
-  });
-
-  const hasRef = !!referenceSticker;
-
-  const promptParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
-
-  promptParts.push({
-    text: [
-      `You are a precise image-editing tool.`,
-      ``,
-      `I will give you ${hasRef ? "two images" : "one image"}:`,
-      `1. IMAGE A: A children's storybook illustration (the scene).`,
-      ...(hasRef ? [`2. IMAGE B: A reference showing what "${entity.name}" looks like — use this to identify the correct subject to remove.`] : []),
-      ``,
-      `YOUR TASK: Find "${entity.name}" in IMAGE A and remove it, inpainting the gap naturally.`,
-      ``,
-      `SUBJECT TO REMOVE:`,
-      `- Name: "${entity.name}"`,
-      `- Type: ${entity.type}`,
-      `- Description: ${entity.description}`,
-      ``,
-      `RULES:`,
-      `1. Locate "${entity.name}" in IMAGE A${hasRef ? " (it looks like IMAGE B)" : ""}. Erase every pixel that belongs to it.`,
-      `2. Fill the removed area using surrounding background, scenery, and colors so it looks natural — as if "${entity.name}" was never there.`,
-      `3. Keep EVERYTHING else IDENTICAL: all other characters, objects, environment, lighting, color palette, art style. Do NOT redraw or modify anything else.`,
-      `4. If there are multiple instances of "${entity.name}", remove all of them.`,
-      `5. Output the same scene, same composition, same dimensions — just without "${entity.name}".`,
-      `6. No text in the output image.`,
-    ].join("\n"),
-  });
-
-  promptParts.push({
-    inlineData: { mimeType: pageImage.mime, data: pageImage.base64 },
-  });
-
-  if (referenceSticker) {
-    promptParts.push({
-      text: `Above is IMAGE A (the scene). Below is IMAGE B (reference showing what "${entity.name}" looks like — remove this from the scene):`,
-    });
-    promptParts.push({
-      inlineData: { mimeType: referenceSticker.mime, data: referenceSticker.base64 },
-    });
-  }
-
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: promptParts }],
-    generationConfig: {
-      // @ts-expect-error - field not declared in legacy SDK types
-      responseModalities: ["IMAGE", "TEXT"],
-    },
-  });
-
-  const parts = result.response.candidates?.[0]?.content?.parts;
-  if (parts) {
-    for (const part of parts) {
-      if (part.inlineData?.data && part.inlineData.mimeType) {
-        return {
-          mime: part.inlineData.mimeType,
-          base64: part.inlineData.data,
-        };
-      }
-    }
-  }
-  throw new Error("removeEntityFromImage: no image in response");
-}
-
-export async function rewriteStory(
-  originalPrompt: string,
-  currentTitle: string,
-  currentPages: StoryPage[],
-  entity: Entity,
-  instruction: string
-): Promise<StoryTextResult> {
-  const pageCount = currentPages.length;
-  const result = await jsonModel().generateContent(
-    `You are revising an existing children's storybook. Apply the user's change to the character/entity below, propagating it through the entire story so plot and dialogue make sense with the new behavior.
-
-Keep the story's core premise and the same number of pages (${pageCount}). Keep the title unless the change makes it nonsensical. Preserve other characters and environments unchanged.
-
-Return JSON with this exact structure:
-{
-  "title": "Story Title",
-  "pages": [
-    { "pageNumber": 1, "text": "..." }
-  ]
-}
-
-Each page should be 2-4 vivid, whimsical sentences suitable for illustration.
-
-Original user prompt: ${originalPrompt}
-
-Current title: ${currentTitle}
-
-Current story:
-${pagesToScript(currentPages)}
-
-Entity being changed: ${entity.name} (${entity.type})
-Current description: ${entity.description}
-Change to apply: ${instruction}`
-  );
-
-  return JSON.parse(result.response.text()) as StoryTextResult;
-}
-

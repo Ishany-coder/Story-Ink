@@ -11,19 +11,12 @@ create table if not exists public.stories (
   page_count int not null check (page_count between 3 and 12),
   pages jsonb not null,
   cover_image text,
-  entities jsonb,
   created_at timestamptz not null default now()
 );
 
--- For databases created before the AI Studio feature, add the column.
-alter table public.stories
-  add column if not exists entities jsonb;
-
--- Comic mode: distinguishes single-illustration storybooks from multi-panel
--- comic pages. Drives which generation pipeline runs for a given row.
-alter table public.stories
-  add column if not exists mode text not null default 'storybook'
-  check (mode in ('storybook', 'comic'));
+-- Legacy columns removed when entity stickers and comic mode were dropped.
+alter table public.stories drop column if exists entities;
+alter table public.stories drop column if exists mode;
 
 create index if not exists stories_created_at_idx
   on public.stories (created_at desc);
@@ -58,11 +51,11 @@ create policy "anyone can delete stories"
 -- ---------------------------------------------------------------------------
 -- Supabase Storage: "uploads" bucket policies
 --
--- The Studio (Canvas editor) saves user-uploaded images and Gemini-generated
--- entity stickers to a Storage bucket called "uploads". Create the bucket
--- in the dashboard FIRST (Storage → New bucket → name "uploads", Public ON),
--- then run these policies. Marking a bucket public only enables READ — the
--- anon role still needs explicit policies to write/update/delete.
+-- The Studio saves user-uploaded images to a Storage bucket called "uploads".
+-- Create the bucket in the dashboard FIRST (Storage → New bucket → name
+-- "uploads", Public ON), then run these policies. Marking a bucket public
+-- only enables READ — the anon role still needs explicit policies to
+-- write/update/delete.
 -- ---------------------------------------------------------------------------
 
 drop policy if exists "anon can upload to uploads" on storage.objects;

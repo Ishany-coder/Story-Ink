@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   CANVAS_SIZE,
@@ -11,6 +10,8 @@ import {
   type Story,
   type TextLayer,
 } from "@/lib/types";
+import { resolveDisplayLayers } from "@/lib/layouts";
+import AutoFitText from "./AutoFitText";
 
 export default function SlideReader({ story }: { story: Story }) {
   const [currentPage, setCurrentPage] = useState(0);
@@ -40,6 +41,7 @@ export default function SlideReader({ story }: { story: Story }) {
   }, [goNext, goPrev]);
 
   const page = pages[currentPage];
+  const layers = useMemo(() => resolveDisplayLayers(page), [page]);
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-gradient-to-b from-purple-50 to-[#fffbf5]">
@@ -76,37 +78,13 @@ export default function SlideReader({ story }: { story: Story }) {
       <div className="flex flex-1 items-center justify-center px-4 py-6">
         <div className="relative mx-auto w-full max-w-3xl">
           <div className="overflow-hidden rounded-3xl border-4 border-purple-200 bg-white shadow-xl shadow-purple-100/50">
-            {/* Image + overlays. Square aspect matches the canvas editor's
-                logical coordinate space, so overlays line up exactly. */}
             <div className="relative aspect-square w-full bg-gradient-to-br from-purple-50 to-pink-50">
-              {(page.cleanImageUrl || page.imageUrl) ? (
-                <Image
-                  src={page.cleanImageUrl || page.imageUrl}
-                  alt={`Page ${page.pageNumber}`}
-                  fill
-                  className="object-cover"
-                  unoptimized
-                  priority
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center">
-                  <span className="text-6xl">&#127912;</span>
-                </div>
-              )}
-              {(page.overlays ?? []).map((layer) => (
+              {layers.map((layer) => (
                 <ReadOnlyLayer key={layer.id} layer={layer} />
               ))}
             </div>
-
-            {/* Text */}
-            <div className="bg-gradient-to-b from-white to-purple-50/30 px-8 py-6 sm:px-10 sm:py-8">
-              <p className="font-[family-name:var(--font-display)] text-lg leading-relaxed text-purple-800 sm:text-xl">
-                {page.text}
-              </p>
-            </div>
           </div>
 
-          {/* Navigation buttons */}
           <button
             onClick={goPrev}
             disabled={currentPage === 0}
@@ -169,8 +147,6 @@ export default function SlideReader({ story }: { story: Story }) {
   );
 }
 
-// Read-only render of a single overlay layer. Mirrors the editor's
-// percentage-based positioning so coordinates round-trip exactly.
 function ReadOnlyLayer({ layer }: { layer: Layer }) {
   const style: React.CSSProperties = {
     position: "absolute",
@@ -187,25 +163,14 @@ function ReadOnlyLayer({ layer }: { layer: Layer }) {
     const t = layer as TextLayer;
     return (
       <div style={style}>
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            color: t.color,
-            fontFamily: t.fontFamily,
-            fontWeight: t.fontWeight,
-            fontSize: `${(t.fontSize / CANVAS_SIZE) * 100}cqw`,
-            lineHeight: 1.1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-            containerType: "inline-size",
-            wordBreak: "break-word",
-          }}
-        >
-          {t.text}
-        </div>
+        <AutoFitText
+          text={t.text}
+          logicalWidth={t.width}
+          logicalMaxFontSize={t.fontSize}
+          color={t.color}
+          fontFamily={t.fontFamily}
+          fontWeight={t.fontWeight}
+        />
       </div>
     );
   }
@@ -230,8 +195,8 @@ function ReadOnlyLayer({ layer }: { layer: Layer }) {
     );
   }
 
-  // image
   const im = layer as ImageLayer;
+  const fit = im.source === "layout" ? "cover" : "contain";
   return (
     <div style={style}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -242,7 +207,7 @@ function ReadOnlyLayer({ layer }: { layer: Layer }) {
         style={{
           width: "100%",
           height: "100%",
-          objectFit: "contain",
+          objectFit: fit,
           userSelect: "none",
         }}
       />

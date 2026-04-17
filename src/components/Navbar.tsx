@@ -39,16 +39,6 @@ export default function Navbar() {
             Read
           </Link>
           <Link
-            href="/studio"
-            className={`rounded-full px-5 py-2 text-sm font-bold transition-all ${
-              pathname.startsWith("/studio")
-                ? "bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-md shadow-purple-200"
-                : "bg-purple-50 text-purple-400 hover:bg-purple-100 hover:text-purple-600"
-            }`}
-          >
-            AI Studio
-          </Link>
-          <Link
             href="/canvas"
             className={`rounded-full px-5 py-2 text-sm font-bold transition-all ${
               pathname.startsWith("/canvas")

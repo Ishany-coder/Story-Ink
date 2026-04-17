@@ -49,7 +49,7 @@ export default async function CanvasIndexPage() {
           Studio &#127912;
         </h1>
         <p className="mt-1 text-lg font-semibold text-purple-400">
-          Pick a story to design — add text, shapes, stickers, and more.
+          Pick a story to design — swap layouts, edit text, add shapes.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
