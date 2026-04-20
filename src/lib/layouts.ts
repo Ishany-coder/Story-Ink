@@ -36,8 +36,18 @@ export const LAYOUTS: Layout[] = [
 
 export const DEFAULT_LAYOUT_ID = LAYOUTS[0].id;
 
-export function getLayout(id: string | undefined): Layout {
-  return LAYOUTS.find((l) => l.id === id) ?? LAYOUTS[0];
+// Built-in IDs are stable strings ("full-bleed-caption", etc.). Custom layout
+// IDs are UUIDs from Supabase. Pass `customs` so the lookup can resolve those
+// too — without it, a page tagged with a custom layoutId falls back silently.
+export function getLayout(
+  id: string | undefined,
+  customs: readonly Layout[] = []
+): Layout {
+  return (
+    LAYOUTS.find((l) => l.id === id) ??
+    customs.find((l) => l.id === id) ??
+    LAYOUTS[0]
+  );
 }
 
 // Build the layer set that should actually be shown for a page. Pages created
@@ -133,23 +143,77 @@ export function computeInitialTextRegion(
   return { x: base.x, y, width: base.width, height };
 }
 
-// Morph existing layout-tagged layers (single image, single text) into a new
-// layout's regions. Non-layout layers pass through untouched. If either layer
-// is missing, the layout switch still succeeds for the present one.
+// Morph existing layout-tagged layers into a new layout's regions.
+// Non-layout (user) layers pass through untouched.
+//
+// Multi-slot custom layouts have primary + extra image/text regions. We map
+// existing layout-image layers onto image regions in order, same for text.
+// When the new layout has more regions than existing layers, the extras are
+// created as empty placeholders (empty src for image boxes, empty text for
+// text boxes) so the user can fill them. When the new layout has fewer
+// regions, the excess layout-layers are dropped — extras only live as long
+// as a layout that defines them.
 export function morphLayersToLayout(layers: Layer[], layout: Layout): Layer[] {
-  return layers.map((l) => {
-    if (l.source !== "layout") return l;
-    const region =
-      l.type === "image" ? layout.imageRegion : layout.textRegion;
+  const imageRegions = [
+    layout.imageRegion,
+    ...(layout.extraImageRegions ?? []),
+  ];
+  const textRegions = [layout.textRegion, ...(layout.extraTextRegions ?? [])];
+
+  const layoutImages: ImageLayer[] = [];
+  const layoutTexts: TextLayer[] = [];
+  const userLayers: Layer[] = [];
+
+  for (const l of layers) {
+    if (l.source !== "layout") {
+      userLayers.push(l);
+      continue;
+    }
+    if (l.type === "image") layoutImages.push(l);
+    else if (l.type === "text") layoutTexts.push(l);
+    else userLayers.push(l);
+  }
+
+  const nextImages: ImageLayer[] = imageRegions.map((region, i) => {
+    const existing = layoutImages[i];
+    if (existing) {
+      return {
+        ...existing,
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        rotation: 0,
+      };
+    }
+    // New slot — empty src renders as the drop-target placeholder in the
+    // Studio. Dragging a thumbnail from the Images tab fills it.
     return {
-      ...l,
-      x: region.x,
-      y: region.y,
-      width: region.width,
-      height: region.height,
-      rotation: 0,
+      ...makeLayoutImage("", region),
+      id: `layout-image-extra-${i}-${region.x}-${region.y}`,
     };
   });
+
+  const nextTexts: TextLayer[] = textRegions.map((region, i) => {
+    const existing = layoutTexts[i];
+    if (existing) {
+      return {
+        ...existing,
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        rotation: 0,
+      };
+    }
+    return {
+      ...makeLayoutText("", region),
+      id: `layout-text-extra-${i}-${region.x}-${region.y}`,
+    };
+  });
+
+  // Layout layers first (render below user layers), then user layers on top.
+  return [...nextImages, ...nextTexts, ...userLayers];
 }
 
 // Build the default overlays set for a freshly generated page: one layout

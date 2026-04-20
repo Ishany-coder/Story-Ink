@@ -18,6 +18,12 @@ create table if not exists public.stories (
 alter table public.stories drop column if exists entities;
 alter table public.stories drop column if exists mode;
 
+-- User-uploaded images attached to a story. Survives deleting the layer
+-- that first referenced them, so the Studio's Images tab / picker keeps
+-- showing them for reuse. Idempotent for existing deployments.
+alter table public.stories
+  add column if not exists library_images jsonb not null default '[]'::jsonb;
+
 create index if not exists stories_created_at_idx
   on public.stories (created_at desc);
 
@@ -76,3 +82,60 @@ create policy "anon can delete uploads"
   on storage.objects for delete
   to anon
   using (bucket_id = 'uploads');
+
+-- ---------------------------------------------------------------------------
+-- Custom layouts
+--
+-- Users can save their own image/text region presets from the Studio. A row
+-- with story_id = null is "global" (shown in every story's layout picker);
+-- a row with story_id set is scoped to that single story. Deletes cascade
+-- when the owning story is removed.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.custom_layouts (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  image_region jsonb not null,
+  text_region jsonb not null,
+  -- Additional regions for multi-slot layouts. Stored as JSON arrays of
+  -- Rect objects. Empty arrays by default so existing single-region
+  -- layouts keep working unchanged.
+  extra_image_regions jsonb not null default '[]'::jsonb,
+  extra_text_regions jsonb not null default '[]'::jsonb,
+  story_id uuid references public.stories(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+-- For existing deployments that already created the table without the two
+-- "extra" columns, add them here (idempotent).
+alter table public.custom_layouts
+  add column if not exists extra_image_regions jsonb not null default '[]'::jsonb,
+  add column if not exists extra_text_regions jsonb not null default '[]'::jsonb;
+
+create index if not exists custom_layouts_story_id_idx
+  on public.custom_layouts (story_id);
+create index if not exists custom_layouts_global_idx
+  on public.custom_layouts (created_at desc) where story_id is null;
+
+alter table public.custom_layouts enable row level security;
+
+drop policy if exists "custom layouts readable" on public.custom_layouts;
+create policy "custom layouts readable"
+  on public.custom_layouts for select
+  using (true);
+
+drop policy if exists "anyone can insert custom layouts" on public.custom_layouts;
+create policy "anyone can insert custom layouts"
+  on public.custom_layouts for insert
+  with check (true);
+
+drop policy if exists "anyone can update custom layouts" on public.custom_layouts;
+create policy "anyone can update custom layouts"
+  on public.custom_layouts for update
+  using (true)
+  with check (true);
+
+drop policy if exists "anyone can delete custom layouts" on public.custom_layouts;
+create policy "anyone can delete custom layouts"
+  on public.custom_layouts for delete
+  using (true);

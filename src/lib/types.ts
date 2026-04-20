@@ -48,6 +48,10 @@ export type ShapeLayer = LayerBase & {
 export type ImageLayer = LayerBase & {
   type: "image";
   src: string;
+  // How the image sits in its box. Defaults: layout-source -> "cover" (fill
+  // and crop), user-source -> "contain" (letterbox). Empty "add image box"
+  // slots override to "cover" so a dropped image visibly fills the frame.
+  fit?: "cover" | "contain";
 };
 
 export type Layer = TextLayer | ShapeLayer | ImageLayer;
@@ -66,8 +70,23 @@ export interface Rect {
 export interface Layout {
   id: string;
   name: string;
+  // Primary regions — always present. Built-in layouts have just these.
   imageRegion: Rect;
   textRegion: Rect;
+  // Additional regions for multi-slot custom layouts. Each extra becomes an
+  // empty layout-tagged box (image or text) on the page when the layout is
+  // applied, which the user can then fill via drag-drop or inline edit.
+  extraImageRegions?: Rect[];
+  extraTextRegions?: Rect[];
+}
+
+// User-defined layouts loaded from the custom_layouts table. scope="global"
+// means the row has story_id=null and shows for every story; scope="story"
+// is scoped to storyId and only shows in that story's picker.
+export interface CustomLayout extends Layout {
+  scope: "global" | "story";
+  storyId?: string;
+  createdAt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +109,10 @@ export interface Story {
   pages: StoryPage[];
   cover_image: string | null;
   created_at: string;
+  // User-uploaded images attached to this story. Survives deleting the
+  // layer that first referenced an image, so the Studio keeps showing it
+  // in the Images tab / picker for reuse.
+  library_images?: string[];
 }
 
 export interface GenerateRequest {

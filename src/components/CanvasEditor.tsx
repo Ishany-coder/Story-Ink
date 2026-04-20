@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CANVAS_SIZE,
+  type CustomLayout,
   type ImageLayer,
   type Layer,
+  type Layout,
+  type Rect,
   type ShapeKind,
   type ShapeLayer,
   type Story,
@@ -26,7 +29,7 @@ interface CanvasEditorProps {
   story: Story;
 }
 
-type SidebarTab = "layouts" | "text" | "shapes" | "upload";
+type SidebarTab = "layouts" | "text" | "shapes" | "images";
 
 // Compass points for resize handles. The edge the user grabs determines
 // which corner stays anchored and whether width/height grows positive or
@@ -180,6 +183,30 @@ function makeUploadImage(src: string, width = 300, height = 300): ImageLayer {
   };
 }
 
+// Empty image placeholder — user can drop an image onto it, upload one, or
+// open the picker modal to choose one from this comic. src=="" is the
+// "show the drop target" state. fit: "cover" so a dropped image fills the
+// frame instead of letterboxing (makeImageBox is a frame, not a sticker).
+function makeImageBox(): ImageLayer {
+  return {
+    id: uid(),
+    type: "image",
+    src: "",
+    x: 240,
+    y: 240,
+    width: 320,
+    height: 320,
+    rotation: 0,
+    source: "user",
+    fit: "cover",
+  };
+}
+
+// Custom MIME used by the Images tab when dragging a thumbnail. Consumers
+// check for this (in addition to text/uri-list) so random images dragged
+// from outside the app don't accidentally fill a box.
+const IMAGE_DRAG_MIME = "application/x-storyink-image";
+
 const FONT_FAMILIES = [
   { label: "Display (Fredoka)", value: "var(--font-display), serif" },
   { label: "Sans (Nunito)", value: "var(--font-sans), system-ui, sans-serif" },
@@ -212,12 +239,52 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
   const [regenPending, setRegenPending] = useState(false);
   const [shapeSearch, setShapeSearch] = useState("");
 
+  // Custom layouts (saved from this Studio). Fetched once on mount; new saves
+  // prepend to the list so they appear immediately in the Layouts tab.
+  const [customLayouts, setCustomLayouts] = useState<CustomLayout[]>([]);
+
+  // "Define your layout" mode. Non-null while the user is arranging the
+  // IMAGE and TEXT rectangles on the canvas. A layout has >=1 image region
+  // and >=1 text region; extras beyond the first become empty placeholder
+  // slots once the layout is applied. `active` tracks which rect shows the
+  // remove button.
+  const [defineMode, setDefineMode] = useState<
+    | {
+        imageRects: Rect[];
+        textRects: Rect[];
+        active: { kind: "image" | "text"; index: number } | null;
+      }
+    | null
+  >(null);
+  const [defineName, setDefineName] = useState("");
+  const [defineScope, setDefineScope] = useState<"story" | "global">("story");
+  const [saveLayoutPending, setSaveLayoutPending] = useState(false);
+  const [saveLayoutError, setSaveLayoutError] = useState<string | null>(null);
+
+  // Image picker modal — open when the user clicks "Choose image" on an
+  // empty image box. Holds the layer id the modal should write back to.
+  const [pickingLayerId, setPickingLayerId] = useState<string | null>(null);
+
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const currentPage = story.pages[pageIdx];
   const layers: Layer[] = currentPage?.overlays ?? [];
   const selectedLayer = layers.find((l) => l.id === selectedId) ?? null;
   const currentLayoutId = currentPage?.layoutId ?? DEFAULT_LAYOUT_ID;
+
+  // Fetch this story's custom layouts (globals + scoped to this story).
+  useEffect(() => {
+    const url = `/api/custom-layouts?storyId=${encodeURIComponent(story.id)}`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load failed"))))
+      .then((d: { layouts: CustomLayout[] }) =>
+        setCustomLayouts(d.layouts ?? [])
+      )
+      .catch(() => {
+        // Non-fatal: user just won't see saved layouts until a successful
+        // refetch. The built-in presets still work.
+      });
+  }, [story.id]);
 
   // Materialize layout-synthesized layers into real overlays on first view of
   // a page that doesn't have them yet (legacy stories, or pages that somehow
@@ -305,15 +372,167 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
   const applyLayout = useCallback(
     (layoutId: string) => {
       if (!currentPage) return;
-      const layout = getLayout(layoutId);
-      updatePage(currentPage.pageNumber, (p) => ({
-        ...p,
-        layoutId,
-        overlays: morphLayersToLayout(p.overlays ?? [], layout),
+      const layout = getLayout(layoutId, customLayouts);
+      // Apply to every page in the book, not just the current one — keeps
+      // the book visually consistent and matches the "all pages in this
+      // story" scope the user picked when saving per-story layouts.
+      setStory((prev) => ({
+        ...prev,
+        pages: prev.pages.map((p) => ({
+          ...p,
+          layoutId,
+          overlays: morphLayersToLayout(p.overlays ?? [], layout),
+        })),
       }));
+      setDirty((d) => {
+        const next = { ...d };
+        for (const p of story.pages) next[p.pageNumber] = true;
+        return next;
+      });
     },
-    [currentPage, updatePage]
+    [currentPage, customLayouts, story.pages]
   );
+
+  // ---- Custom layout definition -------------------------------------------
+
+  const startDefineLayout = useCallback(() => {
+    const base = getLayout(currentLayoutId, customLayouts);
+    setDefineMode({
+      imageRects: [
+        { ...base.imageRegion },
+        ...(base.extraImageRegions ?? []).map((r) => ({ ...r })),
+      ],
+      textRects: [
+        { ...base.textRegion },
+        ...(base.extraTextRegions ?? []).map((r) => ({ ...r })),
+      ],
+      active: null,
+    });
+    setDefineName("");
+    setDefineScope("story");
+    setSaveLayoutError(null);
+    setSelectedId(null);
+    setEditingTextId(null);
+  }, [currentLayoutId, customLayouts]);
+
+  const cancelDefineLayout = useCallback(() => {
+    setDefineMode(null);
+    setSaveLayoutError(null);
+  }, []);
+
+  // Place a newly-added box a little below-right of the last one of its kind
+  // so stacks of boxes aren't all piled in the same spot.
+  function nextBoxPosition(existing: Rect[], size: number): Rect {
+    const offset = existing.length * 40;
+    const x = Math.min(CANVAS_SIZE - size, 80 + offset);
+    const y = Math.min(CANVAS_SIZE - size, 80 + offset);
+    return { x, y, width: size, height: size };
+  }
+
+  const addDefineImageBox = useCallback(() => {
+    setDefineMode((m) => {
+      if (!m) return m;
+      const rect = nextBoxPosition(m.imageRects, 260);
+      return {
+        ...m,
+        imageRects: [...m.imageRects, rect],
+        active: { kind: "image", index: m.imageRects.length },
+      };
+    });
+  }, []);
+
+  const addDefineTextBox = useCallback(() => {
+    setDefineMode((m) => {
+      if (!m) return m;
+      const rect = { ...nextBoxPosition(m.textRects, 240), height: 120 };
+      return {
+        ...m,
+        textRects: [...m.textRects, rect],
+        active: { kind: "text", index: m.textRects.length },
+      };
+    });
+  }, []);
+
+  const removeDefineBox = useCallback(
+    (kind: "image" | "text", index: number) => {
+      setDefineMode((m) => {
+        if (!m) return m;
+        const list = kind === "image" ? m.imageRects : m.textRects;
+        // Every layout needs at least one of each kind.
+        if (list.length <= 1) return m;
+        const nextList = list.filter((_, i) => i !== index);
+        return {
+          ...m,
+          imageRects: kind === "image" ? nextList : m.imageRects,
+          textRects: kind === "text" ? nextList : m.textRects,
+          active: null,
+        };
+      });
+    },
+    []
+  );
+
+  const saveCustomLayout = useCallback(async () => {
+    if (!defineMode) return;
+    const name = defineName.trim();
+    if (!name) {
+      setSaveLayoutError("Give your layout a name.");
+      return;
+    }
+    if (defineMode.imageRects.length === 0 || defineMode.textRects.length === 0) {
+      setSaveLayoutError("Layout needs at least one image and one text box.");
+      return;
+    }
+    setSaveLayoutPending(true);
+    setSaveLayoutError(null);
+    try {
+      const [primaryImage, ...extraImages] = defineMode.imageRects;
+      const [primaryText, ...extraTexts] = defineMode.textRects;
+      const res = await fetch("/api/custom-layouts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          imageRegion: primaryImage,
+          textRegion: primaryText,
+          extraImageRegions: extraImages,
+          extraTextRegions: extraTexts,
+          storyId: defineScope === "story" ? story.id : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Save failed");
+      }
+      const { layout } = (await res.json()) as { layout: CustomLayout };
+      setCustomLayouts((prev) => [layout, ...prev]);
+      setDefineMode(null);
+      // Apply immediately so the user sees their freshly-designed layout
+      // on the current page(s) without an extra click.
+      if (currentPage) {
+        const built = getLayout(layout.id, [layout]);
+        setStory((prev) => ({
+          ...prev,
+          pages: prev.pages.map((p) => ({
+            ...p,
+            layoutId: layout.id,
+            overlays: morphLayersToLayout(p.overlays ?? [], built),
+          })),
+        }));
+        setDirty((d) => {
+          const next = { ...d };
+          for (const p of story.pages) next[p.pageNumber] = true;
+          return next;
+        });
+      }
+    } catch (err) {
+      setSaveLayoutError(
+        err instanceof Error ? err.message : "Couldn't save layout."
+      );
+    } finally {
+      setSaveLayoutPending(false);
+    }
+  }, [defineMode, defineName, defineScope, story.id, story.pages, currentPage]);
 
   // Delete key removes selected (when not editing text inline).
   useEffect(() => {
@@ -505,19 +724,84 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
 
   // ---- Sidebar actions ----------------------------------------------------
 
-  async function handleUpload(file: File) {
+  async function uploadFile(file: File): Promise<string> {
     const fd = new FormData();
     fd.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Upload failed");
+    }
+    const { url } = (await res.json()) as { url: string };
+    return url;
+  }
+
+  // Persist the uploaded URL on stories.library_images so it survives layer
+  // deletion. Mirrors the server response into local state. Non-fatal: if
+  // the persist fails (table/column missing), the image still appears in
+  // the sidebar for the current session via the optimistic update below.
+  async function persistToLibrary(url: string) {
+    setStory((prev) => {
+      const existing = prev.library_images ?? [];
+      if (existing.includes(url)) return prev;
+      return { ...prev, library_images: [...existing, url] };
+    });
     try {
-      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const res = await fetch(`/api/stories/${story.id}/library`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Upload failed");
+        throw new Error(body.error || "Library save failed");
       }
-      const { url } = (await res.json()) as { url: string };
-      addLayer(makeUploadImage(url));
+      const { libraryImages } = (await res.json()) as {
+        libraryImages: string[];
+      };
+      setStory((prev) => ({ ...prev, library_images: libraryImages }));
+    } catch (err) {
+      console.error("[library] persist failed:", err);
+      setSaveError(
+        err instanceof Error
+          ? err.message
+          : "Couldn't save upload to library"
+      );
+    }
+  }
+
+  // Images tab upload: add to library only. The user drags or clicks a
+  // thumbnail to actually place it on the page — upload should not move
+  // the user off their current composition.
+  async function handleUpload(file: File) {
+    try {
+      const url = await uploadFile(file);
+      await persistToLibrary(url);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Upload failed");
+    }
+  }
+
+  const resolvePick = useCallback(
+    (url: string) => {
+      if (!pickingLayerId) return;
+      updateLayer(pickingLayerId, { src: url });
+      setPickingLayerId(null);
+    },
+    [pickingLayerId, updateLayer]
+  );
+
+  async function handlePickerUpload(file: File): Promise<void> {
+    try {
+      const url = await uploadFile(file);
+      // Persist to library first so the upload survives even if the user
+      // later deletes the layer it fills. resolvePick then writes the URL
+      // into the target image box the modal was opened for.
+      await persistToLibrary(url);
+      resolvePick(url);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Upload failed");
+      setPickingLayerId(null);
     }
   }
 
@@ -643,7 +927,7 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
         {/* Left: tools sidebar */}
         <aside className="rounded-3xl border-2 border-purple-200 bg-white p-4 shadow-sm">
           <div className="mb-4 grid grid-cols-2 gap-1">
-            {(["layouts", "text", "shapes", "upload"] as SidebarTab[]).map(
+            {(["layouts", "text", "shapes", "images"] as SidebarTab[]).map(
               (t) => (
                 <button
                   key={t}
@@ -661,8 +945,16 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
             )}
           </div>
 
-          {tab === "layouts" && (
+          {tab === "layouts" && !defineMode && (
             <div className="space-y-2">
+              <button
+                type="button"
+                onClick={startDefineLayout}
+                className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/60 px-3 py-3 text-[11px] font-black uppercase text-purple-500 transition-all hover:border-purple-400 hover:bg-purple-100"
+              >
+                <span className="text-base leading-none">+</span>
+                Custom layout
+              </button>
               {LAYOUTS.map((l) => (
                 <button
                   key={l.id}
@@ -675,14 +967,64 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
                   }`}
                 >
                   <div className="flex items-center gap-2 px-2 py-2">
-                    <LayoutThumbnail layoutId={l.id} />
+                    <LayoutThumbnail layout={l} />
                     <span className="text-[11px] font-black uppercase text-purple-500">
                       {l.name}
                     </span>
                   </div>
                 </button>
               ))}
+              {customLayouts.length > 0 && (
+                <>
+                  <div className="pt-3 pb-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+                    Your layouts
+                  </div>
+                  {customLayouts.map((l) => (
+                    <div
+                      key={l.id}
+                      className={`group relative w-full overflow-hidden rounded-2xl border-2 text-left transition-all ${
+                        currentLayoutId === l.id
+                          ? "border-purple-400 bg-purple-50 shadow-md"
+                          : "border-purple-100 bg-white hover:border-purple-300 hover:bg-purple-50"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => applyLayout(l.id)}
+                        className="flex w-full items-center gap-2 px-2 py-2 text-left"
+                      >
+                        <LayoutThumbnail layout={l} />
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate text-[11px] font-black uppercase text-purple-500">
+                            {l.name}
+                          </span>
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-purple-300">
+                            {l.scope === "global" ? "All books" : "This book"}
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
+          )}
+
+          {tab === "layouts" && defineMode && (
+            <DefineLayoutForm
+              name={defineName}
+              onNameChange={setDefineName}
+              scope={defineScope}
+              onScopeChange={setDefineScope}
+              imageCount={defineMode.imageRects.length}
+              textCount={defineMode.textRects.length}
+              onAddImage={addDefineImageBox}
+              onAddText={addDefineTextBox}
+              pending={saveLayoutPending}
+              error={saveLayoutError}
+              onCancel={cancelDefineLayout}
+              onSave={saveCustomLayout}
+            />
           )}
 
           {tab === "text" && (
@@ -691,7 +1033,7 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
               onClick={() => addLayer(makeText())}
               className="w-full rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-3 py-6 text-center font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600 hover:bg-purple-100"
             >
-              Add text
+              + Add text box
             </button>
           )}
 
@@ -705,53 +1047,138 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
             />
           )}
 
-          {tab === "upload" && (
-            <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-3 py-8 text-center text-sm font-bold text-purple-500 hover:bg-purple-100">
-              <span className="text-2xl">&#128206;</span>
-              <span className="mt-2">Upload image</span>
-              <span className="mt-1 text-xs font-medium text-purple-300">
-                PNG / JPG, max 5 MB
-              </span>
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleUpload(f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
+          {tab === "images" && (
+            <ImagesPanel
+              story={story}
+              onAddImageBox={() => addLayer(makeImageBox())}
+              onUpload={handleUpload}
+              onInsertImage={(url) => addLayer(makeUploadImage(url))}
+            />
           )}
         </aside>
 
         {/* Center: canvas */}
-        <div className="flex items-center justify-center">
+        <div className="flex flex-col items-center justify-center gap-3">
+          {defineMode && (
+            <div className="w-full max-w-[720px] rounded-2xl border-2 border-purple-300 bg-purple-50 px-4 py-2 text-center text-[11px] font-black uppercase tracking-wide text-purple-600">
+              Drag and resize the boxes to design your layout
+            </div>
+          )}
           <div
             ref={canvasRef}
             className="relative aspect-square w-full max-w-[720px] overflow-hidden rounded-3xl border-4 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50 shadow-xl"
             onPointerDown={() => {
+              if (defineMode) {
+                setDefineMode((m) => (m ? { ...m, active: null } : m));
+                return;
+              }
               setSelectedId(null);
               setEditingTextId(null);
             }}
           >
-            {/* Layers — image layers are part of this list now, no separate
-                background image. */}
-            {layers.map((layer) => (
-              <LayerView
-                key={layer.id}
-                layer={layer}
-                selected={selectedId === layer.id}
-                editingText={editingTextId === layer.id}
-                onPointerDown={(e) => startMove(e, layer)}
-                onStartResize={(e, edge) => startResize(e, layer, edge)}
-                onStartRotate={(e) => startRotate(e, layer)}
-                onChangeText={(text) => updateLayer(layer.id, { text })}
-                onDoubleClickText={() => setEditingTextId(layer.id)}
-                onBlurText={() => setEditingTextId(null)}
-              />
-            ))}
+            {/* Page layers. Dimmed while the user is defining a new layout
+                so the two design rectangles read as the foreground. */}
+            <div
+              className={
+                defineMode
+                  ? "pointer-events-none opacity-30 transition-opacity"
+                  : "contents"
+              }
+            >
+              {layers.map((layer) => (
+                <LayerView
+                  key={layer.id}
+                  layer={layer}
+                  selected={selectedId === layer.id}
+                  editingText={editingTextId === layer.id}
+                  onPointerDown={(e) => startMove(e, layer)}
+                  onStartResize={(e, edge) => startResize(e, layer, edge)}
+                  onStartRotate={(e) => startRotate(e, layer)}
+                  onChangeText={(text) => updateLayer(layer.id, { text })}
+                  onDoubleClickText={() => setEditingTextId(layer.id)}
+                  onBlurText={() => setEditingTextId(null)}
+                  onImageDrop={(src) => updateLayer(layer.id, { src })}
+                  onChooseImage={() => setPickingLayerId(layer.id)}
+                />
+              ))}
+            </div>
+
+            {defineMode && (
+              <>
+                {defineMode.imageRects.map((rect, i) => (
+                  <DefineRect
+                    key={`image-${i}`}
+                    kind="image"
+                    rect={rect}
+                    index={i}
+                    total={defineMode.imageRects.length}
+                    active={
+                      defineMode.active?.kind === "image" &&
+                      defineMode.active.index === i
+                    }
+                    canvasRef={canvasRef}
+                    onActivate={() =>
+                      setDefineMode((m) =>
+                        m ? { ...m, active: { kind: "image", index: i } } : m
+                      )
+                    }
+                    onChange={(r) =>
+                      setDefineMode((m) =>
+                        m
+                          ? {
+                              ...m,
+                              imageRects: m.imageRects.map((x, j) =>
+                                j === i ? r : x
+                              ),
+                            }
+                          : m
+                      )
+                    }
+                    onRemove={
+                      defineMode.imageRects.length > 1
+                        ? () => removeDefineBox("image", i)
+                        : undefined
+                    }
+                  />
+                ))}
+                {defineMode.textRects.map((rect, i) => (
+                  <DefineRect
+                    key={`text-${i}`}
+                    kind="text"
+                    rect={rect}
+                    index={i}
+                    total={defineMode.textRects.length}
+                    active={
+                      defineMode.active?.kind === "text" &&
+                      defineMode.active.index === i
+                    }
+                    canvasRef={canvasRef}
+                    onActivate={() =>
+                      setDefineMode((m) =>
+                        m ? { ...m, active: { kind: "text", index: i } } : m
+                      )
+                    }
+                    onChange={(r) =>
+                      setDefineMode((m) =>
+                        m
+                          ? {
+                              ...m,
+                              textRects: m.textRects.map((x, j) =>
+                                j === i ? r : x
+                              ),
+                            }
+                          : m
+                      )
+                    }
+                    onRemove={
+                      defineMode.textRects.length > 1
+                        ? () => removeDefineBox("text", i)
+                        : undefined
+                    }
+                  />
+                ))}
+              </>
+            )}
           </div>
         </div>
 
@@ -773,6 +1200,15 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
           )}
         </aside>
       </div>
+
+      {pickingLayerId && (
+        <ImagePickerModal
+          story={story}
+          onPick={resolvePick}
+          onUpload={handlePickerUpload}
+          onClose={() => setPickingLayerId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -781,8 +1217,7 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
 // LayoutThumbnail — tiny visual preview of a layout's image + text regions
 // ---------------------------------------------------------------------------
 
-function LayoutThumbnail({ layoutId }: { layoutId: string }) {
-  const layout = getLayout(layoutId);
+function LayoutThumbnail({ layout }: { layout: Layout }) {
   const toPct = (v: number) => `${(v / CANVAS_SIZE) * 100}%`;
   return (
     <div className="relative h-10 w-10 flex-none overflow-hidden rounded border border-purple-200 bg-purple-50">
@@ -822,6 +1257,8 @@ interface LayerViewProps {
   onChangeText: (t: string) => void;
   onDoubleClickText: () => void;
   onBlurText: () => void;
+  onImageDrop: (src: string) => void;
+  onChooseImage: () => void;
 }
 
 function LayerView({
@@ -834,7 +1271,35 @@ function LayerView({
   onChangeText,
   onDoubleClickText,
   onBlurText,
+  onImageDrop,
+  onChooseImage,
 }: LayerViewProps) {
+  const [dropActive, setDropActive] = useState(false);
+  const isImage = layer.type === "image";
+
+  const dragProps = isImage
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          // Only accept drops carrying our in-app image mime.
+          if (e.dataTransfer.types.includes(IMAGE_DRAG_MIME)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            if (!dropActive) setDropActive(true);
+          }
+        },
+        onDragLeave: () => setDropActive(false),
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault();
+          setDropActive(false);
+          const src =
+            e.dataTransfer.getData(IMAGE_DRAG_MIME) ||
+            e.dataTransfer.getData("text/uri-list") ||
+            e.dataTransfer.getData("text/plain");
+          if (src) onImageDrop(src);
+        },
+      }
+    : {};
+
   const style: React.CSSProperties = {
     position: "absolute",
     left: `${(layer.x / CANVAS_SIZE) * 100}%`,
@@ -847,7 +1312,7 @@ function LayerView({
   };
 
   return (
-    <div style={style} onPointerDown={onPointerDown}>
+    <div style={style} onPointerDown={onPointerDown} {...dragProps}>
       {layer.type === "text" && (
         <TextLayerContent
           layer={layer}
@@ -858,7 +1323,13 @@ function LayerView({
         />
       )}
       {layer.type === "shape" && <ShapeRenderer layer={layer} />}
-      {layer.type === "image" && <ImageLayerContent layer={layer} />}
+      {layer.type === "image" && (
+        <ImageLayerContent
+          layer={layer}
+          dropActive={dropActive}
+          onChooseImage={onChooseImage}
+        />
+      )}
 
       {selected && (
         <>
@@ -1056,24 +1527,71 @@ function TextLayerContent({
   );
 }
 
-function ImageLayerContent({ layer }: { layer: ImageLayer }) {
-  // Layout-managed images should fill the region (cover); user-uploaded
-  // images should letterbox (contain) to preserve their aspect.
-  const fit = layer.source === "layout" ? "cover" : "contain";
+function ImageLayerContent({
+  layer,
+  dropActive,
+  onChooseImage,
+}: {
+  layer: ImageLayer;
+  dropActive: boolean;
+  onChooseImage: () => void;
+}) {
+  // Explicit fit wins (set by makeImageBox → cover). Otherwise fall back to
+  // the old source-based default: layout-images cover, user-images contain.
+  const fit =
+    layer.fit ?? (layer.source === "layout" ? "cover" : "contain");
+
+  // Empty image boxes show a drop target and a "Choose image" affordance
+  // instead of a broken <img>. The outer wrapper stays pointer-events-none
+  // so clicks fall through to the layer for drag/select; the button inside
+  // is pointer-events-auto so clicking it opens the picker.
+  if (!layer.src) {
+    return (
+      <div
+        className={`pointer-events-none flex h-full w-full flex-col items-center justify-center rounded-xl border-2 border-dashed text-center ${
+          dropActive
+            ? "border-pink-500 bg-pink-50 text-pink-500"
+            : "border-purple-300 bg-purple-50/60 text-purple-400"
+        }`}
+      >
+        <span className="text-xl leading-none">&#128444;</span>
+        <span className="mt-1 px-2 text-[10px] font-black uppercase tracking-wider">
+          {dropActive ? "Drop to place" : "Drop an image"}
+        </span>
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChooseImage();
+          }}
+          className="pointer-events-auto mt-2 rounded-full bg-white px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-purple-600 shadow ring-1 ring-purple-200 hover:bg-purple-50"
+        >
+          Choose image
+        </button>
+      </div>
+    );
+  }
+
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={layer.src}
-      alt=""
-      draggable={false}
-      style={{
-        width: "100%",
-        height: "100%",
-        objectFit: fit,
-        userSelect: "none",
-        pointerEvents: "none",
-      }}
-    />
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={layer.src}
+        alt=""
+        draggable={false}
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: fit,
+          userSelect: "none",
+          pointerEvents: "none",
+        }}
+      />
+      {dropActive && (
+        <div className="pointer-events-none absolute inset-0 rounded-xl border-4 border-dashed border-pink-500 bg-pink-500/10" />
+      )}
+    </>
   );
 }
 
@@ -1496,5 +2014,653 @@ function IconButton({
         />
       )}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ImagesPanel — Images tab contents. Upload button, Add image box button,
+// and a library of every image in the comic (generated page images plus
+// any image layers the user has added). Library thumbnails are draggable
+// onto image layers on the canvas.
+// ---------------------------------------------------------------------------
+
+interface ImagesPanelProps {
+  story: Story;
+  onAddImageBox: () => void;
+  onUpload: (file: File) => void;
+  onInsertImage: (url: string) => void;
+}
+
+// Collect every image URL referenced by the comic:
+//  - stories.library_images (uploads — persist even when no layer uses them)
+//  - page.imageUrl for each page (generated illustrations)
+//  - any image layers the user has added
+// Dedup by URL. Shared by the Images tab library and the picker modal.
+function collectComicImages(
+  story: Story
+): { url: string; label: string }[] {
+  const seen = new Set<string>();
+  const out: { url: string; label: string }[] = [];
+
+  for (const url of story.library_images ?? []) {
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, label: "Upload" });
+  }
+  for (const page of story.pages) {
+    if (page.imageUrl && !seen.has(page.imageUrl)) {
+      seen.add(page.imageUrl);
+      out.push({ url: page.imageUrl, label: `Page ${page.pageNumber}` });
+    }
+    for (const layer of page.overlays ?? []) {
+      if (layer.type !== "image") continue;
+      if (!layer.src || seen.has(layer.src)) continue;
+      seen.add(layer.src);
+      out.push({ url: layer.src, label: "Added" });
+    }
+  }
+  return out;
+}
+
+function ImagesPanel({
+  story,
+  onAddImageBox,
+  onUpload,
+  onInsertImage,
+}: ImagesPanelProps) {
+  const entries = useMemo(() => collectComicImages(story), [story]);
+
+  return (
+    <div className="space-y-3">
+      <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-3 py-5 text-center text-xs font-bold text-purple-500 hover:bg-purple-100">
+        <span className="text-xl">&#128206;</span>
+        <span className="mt-1">Upload image</span>
+        <span className="mt-0.5 text-[10px] font-medium text-purple-300">
+          PNG / JPG, max 5 MB
+        </span>
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onUpload(f);
+            e.target.value = "";
+          }}
+        />
+      </label>
+
+      <button
+        type="button"
+        onClick={onAddImageBox}
+        className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/60 px-3 py-3 text-[11px] font-black uppercase text-purple-500 transition-all hover:border-purple-400 hover:bg-purple-100"
+      >
+        <span className="text-base leading-none">+</span>
+        Add image box
+      </button>
+
+      <div>
+        <div className="pb-1.5 text-[10px] font-black uppercase tracking-wider text-purple-300">
+          In this comic ({entries.length})
+        </div>
+        {entries.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-purple-200 bg-white px-2 py-4 text-center text-[10px] font-bold text-purple-300">
+            No images yet
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-1.5">
+            {entries.map((entry) => (
+              <LibraryThumb
+                key={entry.url}
+                url={entry.url}
+                label={entry.label}
+                onClick={() => onInsertImage(entry.url)}
+              />
+            ))}
+          </div>
+        )}
+        <p className="mt-2 text-[10px] leading-snug text-purple-300">
+          Drag a thumbnail onto an image box, or click to add it as a new
+          layer.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LibraryThumb({
+  url,
+  label,
+  onClick,
+}: {
+  url: string;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.setData(IMAGE_DRAG_MIME, url);
+        e.dataTransfer.setData("text/uri-list", url);
+        e.dataTransfer.setData("text/plain", url);
+      }}
+      className="group relative aspect-square overflow-hidden rounded-xl border-2 border-purple-100 bg-purple-50 transition-all hover:border-purple-400 hover:shadow"
+      title={label}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt={label}
+        draggable={false}
+        className="h-full w-full object-cover"
+      />
+      <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[9px] font-black uppercase tracking-wider text-white">
+        {label}
+      </span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ImagePickerModal — opened from an empty image box's "Choose image" button.
+// Offers upload-from-computer and a grid of every image already in this
+// comic. Picking a thumbnail or finishing an upload writes the src back to
+// the originating image layer.
+// ---------------------------------------------------------------------------
+
+interface ImagePickerModalProps {
+  story: Story;
+  onPick: (url: string) => void;
+  onUpload: (file: File) => Promise<void>;
+  onClose: () => void;
+}
+
+function ImagePickerModal({
+  story,
+  onPick,
+  onUpload,
+  onClose,
+}: ImagePickerModalProps) {
+  const entries = useMemo(() => collectComicImages(story), [story]);
+  const [uploading, setUploading] = useState(false);
+
+  // Escape to close. Only one listener while the modal is mounted.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function handleUpload(file: File) {
+    setUploading(true);
+    try {
+      await onUpload(file);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-purple-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border-4 border-purple-200 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b-2 border-purple-100 px-5 py-3">
+          <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-purple-700">
+            Choose an image
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-purple-400 hover:bg-purple-50 hover:text-purple-600"
+            title="Close"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="space-y-4 overflow-y-auto px-5 py-4">
+          <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-4 py-6 text-center text-sm font-bold text-purple-500 hover:bg-purple-100">
+            <span className="text-2xl">&#128206;</span>
+            <span className="mt-1">
+              {uploading ? "Uploading…" : "Upload from your computer"}
+            </span>
+            <span className="mt-0.5 text-[11px] font-medium text-purple-300">
+              PNG / JPG, max 5 MB
+            </span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              disabled={uploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleUpload(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+
+          <div>
+            <div className="pb-2 text-[11px] font-black uppercase tracking-wider text-purple-400">
+              From this comic ({entries.length})
+            </div>
+            {entries.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-purple-200 bg-purple-50/40 px-3 py-6 text-center text-xs font-bold text-purple-300">
+                No images in this comic yet.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {entries.map((entry) => (
+                  <button
+                    key={entry.url}
+                    type="button"
+                    onClick={() => onPick(entry.url)}
+                    className="group relative aspect-square overflow-hidden rounded-xl border-2 border-purple-100 bg-purple-50 transition-all hover:border-purple-400 hover:shadow-md"
+                    title={entry.label}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={entry.url}
+                      alt={entry.label}
+                      draggable={false}
+                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                    />
+                    <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[10px] font-black uppercase tracking-wider text-white">
+                      {entry.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DefineRect — one draggable/resizable rectangle used while the user is
+// designing a custom layout. Unlike LayerView it carries no layer state, only
+// a Rect: callers own the Rect and receive updates via onChange. Supports
+// move (on the body) and resize from N/S/E/W/SE handles.
+// ---------------------------------------------------------------------------
+
+type DefineResizeEdge = "n" | "s" | "e" | "w" | "se";
+
+type DefineDrag =
+  | { kind: "move"; startX: number; startY: number; orig: Rect }
+  | {
+      kind: "resize";
+      edge: DefineResizeEdge;
+      startX: number;
+      startY: number;
+      orig: Rect;
+    };
+
+interface DefineRectProps {
+  kind: "image" | "text";
+  rect: Rect;
+  index: number;
+  total: number;
+  active: boolean;
+  canvasRef: React.RefObject<HTMLDivElement | null>;
+  onActivate: () => void;
+  onChange: (next: Rect) => void;
+  onRemove?: () => void;
+}
+
+function DefineRect({
+  kind,
+  rect,
+  index,
+  total,
+  active,
+  canvasRef,
+  onActivate,
+  onChange,
+  onRemove,
+}: DefineRectProps) {
+  const [drag, setDrag] = useState<DefineDrag | null>(null);
+
+  const toPct = (v: number) => `${(v / CANVAS_SIZE) * 100}%`;
+  const scale = () => {
+    const r = canvasRef.current?.getBoundingClientRect();
+    if (!r || r.width === 0) return 1;
+    return CANVAS_SIZE / r.width;
+  };
+
+  const beginMove = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    onActivate();
+    setDrag({ kind: "move", startX: e.clientX, startY: e.clientY, orig: rect });
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+  const beginResize = (e: React.PointerEvent, edge: DefineResizeEdge) => {
+    e.stopPropagation();
+    onActivate();
+    setDrag({
+      kind: "resize",
+      edge,
+      startX: e.clientX,
+      startY: e.clientY,
+      orig: rect,
+    });
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    function onMove(e: PointerEvent) {
+      if (!drag) return;
+      const s = scale();
+      const dx = (e.clientX - drag.startX) * s;
+      const dy = (e.clientY - drag.startY) * s;
+      if (drag.kind === "move") {
+        // Clamp within the canvas so the rect can't slide out of view.
+        const maxX = CANVAS_SIZE - drag.orig.width;
+        const maxY = CANVAS_SIZE - drag.orig.height;
+        onChange({
+          x: Math.max(0, Math.min(maxX, drag.orig.x + dx)),
+          y: Math.max(0, Math.min(maxY, drag.orig.y + dy)),
+          width: drag.orig.width,
+          height: drag.orig.height,
+        });
+      } else {
+        let { x, y, width, height } = drag.orig;
+        const MIN = 40;
+        if (drag.edge === "e" || drag.edge === "se") {
+          const maxW = CANVAS_SIZE - drag.orig.x;
+          width = Math.max(MIN, Math.min(maxW, drag.orig.width + dx));
+        }
+        if (drag.edge === "s" || drag.edge === "se") {
+          const maxH = CANVAS_SIZE - drag.orig.y;
+          height = Math.max(MIN, Math.min(maxH, drag.orig.height + dy));
+        }
+        if (drag.edge === "w") {
+          const maxW = drag.orig.x + drag.orig.width;
+          width = Math.max(MIN, Math.min(maxW, drag.orig.width - dx));
+          x = drag.orig.x + drag.orig.width - width;
+        }
+        if (drag.edge === "n") {
+          const maxH = drag.orig.y + drag.orig.height;
+          height = Math.max(MIN, Math.min(maxH, drag.orig.height - dy));
+          y = drag.orig.y + drag.orig.height - height;
+        }
+        onChange({ x, y, width, height });
+      }
+    }
+    function onUp() {
+      setDrag(null);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag]);
+
+  const isImage = kind === "image";
+  const bodyBg = isImage ? "bg-purple-400/25" : "bg-pink-400/25";
+  const borderColor = isImage ? "border-purple-500" : "border-pink-500";
+  const baseLabel = isImage ? "Image" : "Text";
+  // Only number boxes when there's more than one of the kind.
+  const label = total > 1 ? `${baseLabel} ${index + 1}` : baseLabel;
+  const handleColor = isImage ? "bg-purple-500" : "bg-pink-500";
+
+  return (
+    <div
+      onPointerDown={beginMove}
+      style={{
+        position: "absolute",
+        left: toPct(rect.x),
+        top: toPct(rect.y),
+        width: toPct(rect.width),
+        height: toPct(rect.height),
+      }}
+      className={`cursor-move select-none border-2 border-dashed ${borderColor} ${bodyBg} ${
+        active ? "ring-2 ring-offset-2 ring-offset-white" : ""
+      } ${active ? (isImage ? "ring-purple-400" : "ring-pink-400") : ""}`}
+    >
+      <div
+        className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white ${handleColor}`}
+      >
+        {label}
+      </div>
+
+      {active && onRemove && (
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            // Keep the pointer event from starting a move on the body div.
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[13px] font-black leading-none text-rose-500 shadow ring-1 ring-rose-200 hover:bg-rose-50"
+          title="Remove box"
+        >
+          &times;
+        </button>
+      )}
+
+      {/* Edge handles. Positioned at the midpoint of each side. */}
+      <Handle
+        color={handleColor}
+        cursor="ew-resize"
+        style={{ left: "-6px", top: "50%", transform: "translate(-50%, -50%)" }}
+        onPointerDown={(e) => beginResize(e, "w")}
+      />
+      <Handle
+        color={handleColor}
+        cursor="ew-resize"
+        style={{ right: "-6px", top: "50%", transform: "translate(50%, -50%)" }}
+        onPointerDown={(e) => beginResize(e, "e")}
+      />
+      <Handle
+        color={handleColor}
+        cursor="ns-resize"
+        style={{ top: "-6px", left: "50%", transform: "translate(-50%, -50%)" }}
+        onPointerDown={(e) => beginResize(e, "n")}
+      />
+      <Handle
+        color={handleColor}
+        cursor="ns-resize"
+        style={{
+          bottom: "-6px",
+          left: "50%",
+          transform: "translate(-50%, 50%)",
+        }}
+        onPointerDown={(e) => beginResize(e, "s")}
+      />
+      <Handle
+        color={handleColor}
+        cursor="nwse-resize"
+        style={{
+          right: "-6px",
+          bottom: "-6px",
+          transform: "translate(50%, 50%)",
+        }}
+        onPointerDown={(e) => beginResize(e, "se")}
+      />
+    </div>
+  );
+}
+
+function Handle({
+  color,
+  cursor,
+  style,
+  onPointerDown,
+}: {
+  color: string;
+  cursor: string;
+  style: React.CSSProperties;
+  onPointerDown: (e: React.PointerEvent) => void;
+}) {
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      style={{ ...style, cursor }}
+      className={`absolute h-3 w-3 rounded-full border-2 border-white shadow ${color}`}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DefineLayoutForm — sidebar form shown while define-mode is on. Takes name +
+// scope and persists via /api/custom-layouts on Save.
+// ---------------------------------------------------------------------------
+
+interface DefineLayoutFormProps {
+  name: string;
+  onNameChange: (v: string) => void;
+  scope: "story" | "global";
+  onScopeChange: (s: "story" | "global") => void;
+  imageCount: number;
+  textCount: number;
+  onAddImage: () => void;
+  onAddText: () => void;
+  pending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSave: () => void;
+}
+
+function DefineLayoutForm({
+  name,
+  onNameChange,
+  scope,
+  onScopeChange,
+  imageCount,
+  textCount,
+  onAddImage,
+  onAddText,
+  pending,
+  error,
+  onCancel,
+  onSave,
+}: DefineLayoutFormProps) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border-2 border-purple-200 bg-purple-50/60 px-3 py-3">
+        <div className="text-[11px] font-black uppercase tracking-wider text-purple-500">
+          Design mode
+        </div>
+        <p className="mt-1 text-[11px] leading-snug text-purple-400">
+          Drag the purple (image) and pink (text) boxes on the canvas. Click
+          a box and press &times; to remove. Add more below.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <button
+          type="button"
+          onClick={onAddImage}
+          className="flex w-full items-center justify-between rounded-xl border-2 border-purple-200 bg-white px-3 py-2 text-[11px] font-black uppercase text-purple-600 transition-all hover:border-purple-400 hover:bg-purple-50"
+        >
+          <span>+ Image box</span>
+          <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] text-purple-500">
+            {imageCount}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onAddText}
+          className="flex w-full items-center justify-between rounded-xl border-2 border-pink-200 bg-white px-3 py-2 text-[11px] font-black uppercase text-pink-600 transition-all hover:border-pink-400 hover:bg-pink-50"
+        >
+          <span>+ Text box</span>
+          <span className="rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] text-pink-500">
+            {textCount}
+          </span>
+        </button>
+      </div>
+
+      <label className="block">
+        <span className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+          Name
+        </span>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder="My layout"
+          maxLength={60}
+          className="mt-1 w-full rounded-xl border-2 border-purple-200 bg-white px-2.5 py-1.5 text-sm font-bold text-purple-700 outline-none focus:border-purple-400"
+        />
+      </label>
+
+      <fieldset className="space-y-1.5">
+        <legend className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+          Save for
+        </legend>
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-purple-100 bg-white px-2.5 py-2 hover:border-purple-300">
+          <input
+            type="radio"
+            name="layout-scope"
+            value="story"
+            checked={scope === "story"}
+            onChange={() => onScopeChange("story")}
+            className="accent-purple-500"
+          />
+          <span className="text-xs font-bold text-purple-600">
+            Just this book
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-purple-100 bg-white px-2.5 py-2 hover:border-purple-300">
+          <input
+            type="radio"
+            name="layout-scope"
+            value="global"
+            checked={scope === "global"}
+            onChange={() => onScopeChange("global")}
+            className="accent-purple-500"
+          />
+          <span className="text-xs font-bold text-purple-600">
+            All my books
+          </span>
+        </label>
+      </fieldset>
+
+      {error && (
+        <div className="rounded-xl bg-rose-50 px-2.5 py-2 text-[11px] font-bold text-rose-500">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={pending}
+          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-3 py-2 text-xs font-black text-white shadow-md shadow-purple-200 transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+        >
+          {pending ? "Saving..." : "Save layout"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={pending}
+          className="rounded-2xl border-2 border-purple-200 bg-white px-3 py-2 text-xs font-black text-purple-500 transition-all hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
