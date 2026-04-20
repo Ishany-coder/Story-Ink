@@ -6,12 +6,12 @@ import {
   CANVAS_SIZE,
   type ImageLayer,
   type Layer,
-  type ShapeLayer,
   type Story,
   type TextLayer,
 } from "@/lib/types";
 import { resolveDisplayLayers } from "@/lib/layouts";
 import AutoFitText from "./AutoFitText";
+import ShapeRenderer from "./ShapeRenderer";
 
 export default function SlideReader({ story }: { story: Story }) {
   const [currentPage, setCurrentPage] = useState(0);
@@ -176,21 +176,9 @@ function ReadOnlyLayer({ layer }: { layer: Layer }) {
   }
 
   if (layer.type === "shape") {
-    const s = layer as ShapeLayer;
-    const inner: React.CSSProperties = {
-      width: "100%",
-      height: "100%",
-      background: s.shape === "line" ? s.stroke : s.fill,
-      border:
-        s.shape === "line"
-          ? "none"
-          : `${s.strokeWidth}px solid ${s.stroke}`,
-      borderRadius:
-        s.shape === "circle" ? "50%" : s.shape === "line" ? 999 : 12,
-    };
     return (
       <div style={style}>
-        <div style={inner} />
+        <ShapeRenderer layer={layer} />
       </div>
     );
   }

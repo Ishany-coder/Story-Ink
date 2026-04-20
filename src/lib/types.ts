@@ -27,7 +27,7 @@ export type TextLayer = LayerBase & {
   fontWeight: "normal" | "bold";
 };
 
-export type ShapeKind = "rect" | "circle" | "line";
+export type ShapeKind = "rect" | "circle" | "line" | "icon" | "path";
 
 export type ShapeLayer = LayerBase & {
   type: "shape";
@@ -35,6 +35,14 @@ export type ShapeLayer = LayerBase & {
   fill: string;
   stroke: string;
   strokeWidth: number;
+  // Present only when shape === "icon": a Lucide icon name
+  // (e.g., "star", "heart", "cake-slice").
+  iconName?: string;
+  // Present only when shape === "path": the inner SVG markup (children of
+  // the root <svg>) from a user-uploaded SVG, plus its viewBox so the
+  // artwork scales into the layer's box.
+  svgMarkup?: string;
+  viewBox?: string;
 };
 
 export type ImageLayer = LayerBase & {

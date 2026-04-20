@@ -19,6 +19,8 @@ import {
   resolveDisplayLayers,
 } from "@/lib/layouts";
 import { useAutoFitFontSize } from "./useAutoFitFontSize";
+import ShapeRenderer from "./ShapeRenderer";
+import { ICONS, ICON_CATEGORIES, getIcon } from "@/lib/shapeIcons";
 
 interface CanvasEditorProps {
   story: Story;
@@ -26,13 +28,16 @@ interface CanvasEditorProps {
 
 type SidebarTab = "layouts" | "text" | "shapes" | "upload";
 
-type ResizeAxis = "x" | "y" | "both";
+// Compass points for resize handles. The edge the user grabs determines
+// which corner stays anchored and whether width/height grows positive or
+// negative relative to the drag delta.
+type ResizeEdge = "e" | "w" | "n" | "s" | "se";
 
 type Drag =
   | { kind: "move"; layerId: string; startX: number; startY: number; origX: number; origY: number }
   | {
       kind: "resize";
-      axis: ResizeAxis;
+      edge: ResizeEdge;
       layerId: string;
       startX: number;
       startY: number;
@@ -72,7 +77,9 @@ function makeText(): TextLayer {
   };
 }
 
-function makeShape(shape: ShapeKind): ShapeLayer {
+type PrimitiveShape = "rect" | "circle" | "line";
+
+function makePrimitiveShape(shape: PrimitiveShape): ShapeLayer {
   return {
     id: uid(),
     type: "shape",
@@ -87,6 +94,76 @@ function makeShape(shape: ShapeKind): ShapeLayer {
     strokeWidth: shape === "line" ? 6 : 4,
     source: "user",
   };
+}
+
+function makeIconShape(iconName: string): ShapeLayer {
+  return {
+    id: uid(),
+    type: "shape",
+    shape: "icon",
+    iconName,
+    x: 300,
+    y: 300,
+    width: 200,
+    height: 200,
+    rotation: 0,
+    // Icons default to stroke-only (Lucide's native style). Users can
+    // fill them from the properties panel.
+    fill: "transparent",
+    stroke: "#7c3aed",
+    strokeWidth: 2,
+    source: "user",
+  };
+}
+
+function makePathShape(svgMarkup: string, viewBox: string): ShapeLayer {
+  return {
+    id: uid(),
+    type: "shape",
+    shape: "path",
+    svgMarkup,
+    viewBox,
+    x: 300,
+    y: 300,
+    width: 200,
+    height: 200,
+    rotation: 0,
+    fill: "transparent",
+    stroke: "#7c3aed",
+    strokeWidth: 1,
+    source: "user",
+  };
+}
+
+// Parse a user-uploaded SVG string into a shape layer.
+// Strips <script> elements and on* event-handler attributes so the markup
+// is safe to render via dangerouslySetInnerHTML (stored SVGs are displayed
+// to other viewers of the story, so this matters).
+function parseUploadedSvg(
+  svgText: string
+): { markup: string; viewBox: string } | null {
+  const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  const svg = doc.querySelector("svg");
+  if (!svg) return null;
+  if (doc.querySelector("parsererror")) return null;
+
+  // Strip scripts + event handlers recursively.
+  svg.querySelectorAll("script").forEach((el) => el.remove());
+  const all: Element[] = [svg, ...Array.from(svg.querySelectorAll("*"))];
+  for (const el of all) {
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.toLowerCase().startsWith("on")) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+
+  const viewBox =
+    svg.getAttribute("viewBox") ||
+    `0 0 ${svg.getAttribute("width") || 100} ${
+      svg.getAttribute("height") || 100
+    }`;
+  return { markup: svg.innerHTML, viewBox };
 }
 
 function makeUploadImage(src: string, width = 300, height = 300): ImageLayer {
@@ -133,6 +210,7 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [regenPending, setRegenPending] = useState(false);
+  const [shapeSearch, setShapeSearch] = useState("");
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -281,11 +359,15 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
     (e.target as Element).setPointerCapture?.(e.pointerId);
   }
 
-  function startResize(e: React.PointerEvent, layer: Layer, axis: ResizeAxis) {
+  function startResize(
+    e: React.PointerEvent,
+    layer: Layer,
+    edge: ResizeEdge
+  ) {
     e.stopPropagation();
     setDrag({
       kind: "resize",
-      axis,
+      edge,
       layerId: layer.id,
       startX: e.clientX,
       startY: e.clientY,
@@ -330,11 +412,44 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
         });
       } else if (drag.kind === "resize") {
         const scale = clientToCanvasScale();
-        const dx = drag.axis === "y" ? 0 : (e.clientX - drag.startX) * scale;
-        const dy = drag.axis === "x" ? 0 : (e.clientY - drag.startY) * scale;
+        const dx = (e.clientX - drag.startX) * scale;
+        const dy = (e.clientY - drag.startY) * scale;
+
+        let newX = drag.origX;
+        let newY = drag.origY;
+        let newW = drag.origW;
+        let newH = drag.origH;
+
+        // Right / southeast: grow rightward, top-left anchored. Clamp to
+        // canvas so the layer can't silently extend past the clip.
+        if (drag.edge === "e" || drag.edge === "se") {
+          const maxW = CANVAS_SIZE - drag.origX;
+          newW = Math.max(20, Math.min(maxW, drag.origW + dx));
+        }
+        // Bottom / southeast: grow downward, top-left anchored.
+        if (drag.edge === "s" || drag.edge === "se") {
+          const maxH = CANVAS_SIZE - drag.origY;
+          newH = Math.max(20, Math.min(maxH, drag.origH + dy));
+        }
+        // Left: grow leftward. Width grows by -dx, x shrinks by same.
+        // Clamp so x >= 0 (no going past the canvas left edge).
+        if (drag.edge === "w") {
+          const maxW = drag.origX + drag.origW; // x=0 → width = origRight
+          newW = Math.max(20, Math.min(maxW, drag.origW - dx));
+          newX = drag.origX + drag.origW - newW;
+        }
+        // Top: grow upward. Height grows by -dy, y shrinks.
+        if (drag.edge === "n") {
+          const maxH = drag.origY + drag.origH;
+          newH = Math.max(20, Math.min(maxH, drag.origH - dy));
+          newY = drag.origY + drag.origH - newH;
+        }
+
         updateLayer(drag.layerId, {
-          width: Math.max(20, drag.origW + dx),
-          height: Math.max(20, drag.origH + dy),
+          x: newX,
+          y: newY,
+          width: newW,
+          height: newH,
         });
       } else if (drag.kind === "rotate") {
         const angle = Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx);
@@ -403,6 +518,22 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
       addLayer(makeUploadImage(url));
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Upload failed");
+    }
+  }
+
+  async function handleSvgUpload(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = parseUploadedSvg(text);
+      if (!parsed) {
+        setSaveError("That file didn't look like a valid SVG.");
+        return;
+      }
+      addLayer(makePathShape(parsed.markup, parsed.viewBox));
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Couldn't read the SVG file."
+      );
     }
   }
 
@@ -565,26 +696,13 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
           )}
 
           {tab === "shapes" && (
-            <div className="grid grid-cols-2 gap-2">
-              {(["rect", "circle", "line"] as ShapeKind[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => addLayer(makeShape(s))}
-                  className="flex aspect-square items-center justify-center rounded-2xl border-2 border-purple-200 bg-white text-xs font-black uppercase text-purple-500 hover:border-purple-400 hover:bg-purple-50"
-                >
-                  {s === "rect" && (
-                    <div className="h-10 w-10 rounded-md bg-purple-300" />
-                  )}
-                  {s === "circle" && (
-                    <div className="h-10 w-10 rounded-full bg-pink-300" />
-                  )}
-                  {s === "line" && (
-                    <div className="h-1 w-12 rounded-full bg-purple-500" />
-                  )}
-                </button>
-              ))}
-            </div>
+            <ShapesPanel
+              search={shapeSearch}
+              onSearchChange={setShapeSearch}
+              onAddPrimitive={(s) => addLayer(makePrimitiveShape(s))}
+              onAddIcon={(name) => addLayer(makeIconShape(name))}
+              onUploadSvg={handleSvgUpload}
+            />
           )}
 
           {tab === "upload" && (
@@ -627,7 +745,7 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
                 selected={selectedId === layer.id}
                 editingText={editingTextId === layer.id}
                 onPointerDown={(e) => startMove(e, layer)}
-                onStartResize={(e, axis) => startResize(e, layer, axis)}
+                onStartResize={(e, edge) => startResize(e, layer, edge)}
                 onStartRotate={(e) => startRotate(e, layer)}
                 onChangeText={(text) => updateLayer(layer.id, { text })}
                 onDoubleClickText={() => setEditingTextId(layer.id)}
@@ -699,7 +817,7 @@ interface LayerViewProps {
   selected: boolean;
   editingText: boolean;
   onPointerDown: (e: React.PointerEvent) => void;
-  onStartResize: (e: React.PointerEvent, axis: ResizeAxis) => void;
+  onStartResize: (e: React.PointerEvent, edge: ResizeEdge) => void;
   onStartRotate: (e: React.PointerEvent) => void;
   onChangeText: (t: string) => void;
   onDoubleClickText: () => void;
@@ -739,30 +857,115 @@ function LayerView({
           onBlur={onBlurText}
         />
       )}
-      {layer.type === "shape" && <ShapeLayerContent layer={layer} />}
+      {layer.type === "shape" && <ShapeRenderer layer={layer} />}
       {layer.type === "image" && <ImageLayerContent layer={layer} />}
 
       {selected && (
         <>
-          <div className="pointer-events-none absolute inset-0 border-2 border-dashed border-purple-500" />
-          {/* Right-edge handle — width only */}
+          {/* Dashed selection outline (non-interactive). */}
           <div
-            onPointerDown={(e) => onStartResize(e, "x")}
-            className="absolute -right-1.5 top-1/2 h-8 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-purple-500 bg-white"
+            className="pointer-events-none absolute inset-0 border-2 border-dashed border-purple-500"
+            style={{ zIndex: 1 }}
           />
-          {/* Bottom-edge handle — height only */}
+
+          {/* East (right) edge — grow rightward from left anchor. */}
           <div
-            onPointerDown={(e) => onStartResize(e, "y")}
-            className="absolute -bottom-1.5 left-1/2 h-3 w-8 -translate-x-1/2 cursor-ns-resize rounded-full border-2 border-purple-500 bg-white"
+            onPointerDown={(e) => onStartResize(e, "e")}
+            style={{
+              position: "absolute",
+              top: 0,
+              right: -8,
+              width: 16,
+              height: "100%",
+              cursor: "ew-resize",
+              zIndex: 10,
+            }}
           />
-          {/* Corner handle — both axes */}
+          {/* West (left) edge — grow leftward from right anchor. */}
           <div
-            onPointerDown={(e) => onStartResize(e, "both")}
-            className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-purple-500 bg-white"
+            onPointerDown={(e) => onStartResize(e, "w")}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: -8,
+              width: 16,
+              height: "100%",
+              cursor: "ew-resize",
+              zIndex: 10,
+            }}
           />
+          {/* South (bottom) edge — grow downward from top anchor. */}
+          <div
+            onPointerDown={(e) => onStartResize(e, "s")}
+            style={{
+              position: "absolute",
+              left: 0,
+              bottom: -8,
+              width: "100%",
+              height: 16,
+              cursor: "ns-resize",
+              zIndex: 10,
+            }}
+          />
+          {/* North (top) edge — grow upward from bottom anchor. */}
+          <div
+            onPointerDown={(e) => onStartResize(e, "n")}
+            style={{
+              position: "absolute",
+              left: 0,
+              top: -8,
+              width: "100%",
+              height: 16,
+              cursor: "ns-resize",
+              zIndex: 10,
+            }}
+          />
+
+          {/* Midpoint markers (visual only — clicks go to the hit zones). */}
+          <div
+            className="pointer-events-none absolute top-1/2 h-6 w-2 -translate-y-1/2 rounded-full border-2 border-purple-500 bg-white"
+            style={{ right: -5, zIndex: 11 }}
+          />
+          <div
+            className="pointer-events-none absolute top-1/2 h-6 w-2 -translate-y-1/2 rounded-full border-2 border-purple-500 bg-white"
+            style={{ left: -5, zIndex: 11 }}
+          />
+          <div
+            className="pointer-events-none absolute left-1/2 h-2 w-6 -translate-x-1/2 rounded-full border-2 border-purple-500 bg-white"
+            style={{ bottom: -5, zIndex: 11 }}
+          />
+          <div
+            className="pointer-events-none absolute left-1/2 h-2 w-6 -translate-x-1/2 rounded-full border-2 border-purple-500 bg-white"
+            style={{ top: -5, zIndex: 11 }}
+          />
+
+          {/* Southeast corner — both axes. Sits above the edge hit zones. */}
+          <div
+            onPointerDown={(e) => onStartResize(e, "se")}
+            className="cursor-nwse-resize rounded-full border-2 border-purple-500 bg-white"
+            style={{
+              position: "absolute",
+              bottom: -9,
+              right: -9,
+              width: 18,
+              height: 18,
+              zIndex: 12,
+            }}
+          />
+
+          {/* Rotate */}
           <div
             onPointerDown={onStartRotate}
-            className="absolute -top-8 left-1/2 h-4 w-4 -translate-x-1/2 cursor-grab rounded-full border-2 border-purple-500 bg-white"
+            className="cursor-grab rounded-full border-2 border-purple-500 bg-white"
+            style={{
+              position: "absolute",
+              top: -32,
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: 16,
+              height: 16,
+              zIndex: 12,
+            }}
           />
         </>
       )}
@@ -850,45 +1053,6 @@ function TextLayerContent({
         </div>
       )}
     </div>
-  );
-}
-
-function ShapeLayerContent({ layer }: { layer: ShapeLayer }) {
-  if (layer.shape === "rect") {
-    return (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          background: layer.fill,
-          border: `${layer.strokeWidth}px solid ${layer.stroke}`,
-          borderRadius: 12,
-        }}
-      />
-    );
-  }
-  if (layer.shape === "circle") {
-    return (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          background: layer.fill,
-          border: `${layer.strokeWidth}px solid ${layer.stroke}`,
-          borderRadius: "50%",
-        }}
-      />
-    );
-  }
-  return (
-    <div
-      style={{
-        width: "100%",
-        height: "100%",
-        background: layer.stroke,
-        borderRadius: 999,
-      }}
-    />
   );
 }
 
@@ -1163,5 +1327,174 @@ function ColorField({
         ))}
       </div>
     </Field>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ShapesPanel — primitives + searchable icon grid + custom SVG upload
+// ---------------------------------------------------------------------------
+
+function ShapesPanel({
+  search,
+  onSearchChange,
+  onAddPrimitive,
+  onAddIcon,
+  onUploadSvg,
+}: {
+  search: string;
+  onSearchChange: (v: string) => void;
+  onAddPrimitive: (s: PrimitiveShape) => void;
+  onAddIcon: (name: string) => void;
+  onUploadSvg: (file: File) => void;
+}) {
+  const q = search.trim().toLowerCase();
+  const primitives: { name: string; kind: PrimitiveShape }[] = [
+    { name: "rectangle", kind: "rect" },
+    { name: "circle", kind: "circle" },
+    { name: "line", kind: "line" },
+  ];
+  const matchingPrimitives = q
+    ? primitives.filter((p) => p.name.includes(q) || p.kind.includes(q))
+    : primitives;
+
+  const matchingIcons = q
+    ? ICONS.filter(
+        (i) =>
+          i.name.includes(q) || i.category.toLowerCase().includes(q)
+      )
+    : ICONS;
+
+  return (
+    <div className="space-y-3">
+      <input
+        type="search"
+        placeholder="Search shapes..."
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        className="w-full rounded-xl border-2 border-purple-200 bg-purple-50/40 px-3 py-2 text-xs font-bold text-purple-700 placeholder-purple-300 focus:border-purple-400 focus:outline-none"
+      />
+
+      <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-2 py-3 text-center text-[11px] font-black uppercase text-purple-500 hover:bg-purple-100">
+        Upload custom SVG
+        <span className="mt-0.5 text-[9px] font-medium normal-case text-purple-300">
+          .svg file
+        </span>
+        <input
+          type="file"
+          accept=".svg,image/svg+xml"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onUploadSvg(f);
+            e.target.value = "";
+          }}
+        />
+      </label>
+
+      <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+        {matchingPrimitives.length > 0 && (
+          <div>
+            <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+              Primitives
+            </p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {matchingPrimitives.map((p) => (
+                <button
+                  key={p.kind}
+                  type="button"
+                  onClick={() => onAddPrimitive(p.kind)}
+                  title={p.name}
+                  className="flex aspect-square items-center justify-center rounded-xl border-2 border-purple-200 bg-white text-xs font-black uppercase text-purple-500 hover:border-purple-400 hover:bg-purple-50"
+                >
+                  {p.kind === "rect" && (
+                    <div className="h-7 w-7 rounded-md bg-purple-300" />
+                  )}
+                  {p.kind === "circle" && (
+                    <div className="h-7 w-7 rounded-full bg-pink-300" />
+                  )}
+                  {p.kind === "line" && (
+                    <div className="h-1 w-9 rounded-full bg-purple-500" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* When not searching, group by category with headers. When searching,
+            flatten to a single list so matches across categories are visible
+            together. */}
+        {q ? (
+          matchingIcons.length > 0 && (
+            <div>
+              <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+                Results ({matchingIcons.length})
+              </p>
+              <div className="grid grid-cols-4 gap-1">
+                {matchingIcons.map((i) => (
+                  <IconButton
+                    key={i.name}
+                    name={i.name}
+                    onClick={() => onAddIcon(i.name)}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        ) : (
+          ICON_CATEGORIES.map((cat) => {
+            const catIcons = ICONS.filter((i) => i.category === cat);
+            if (catIcons.length === 0) return null;
+            return (
+              <div key={cat}>
+                <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+                  {cat} ({catIcons.length})
+                </p>
+                <div className="grid grid-cols-4 gap-1">
+                  {catIcons.map((i) => (
+                    <IconButton
+                      key={i.name}
+                      name={i.name}
+                      onClick={() => onAddIcon(i.name)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {matchingIcons.length === 0 && matchingPrimitives.length === 0 && (
+        <p className="py-4 text-center text-[11px] font-medium text-purple-300">
+          No shapes match &quot;{search}&quot;.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function IconButton({
+  name,
+  onClick,
+}: {
+  name: string;
+  onClick: () => void;
+}) {
+  const Icon = getIcon(name);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={name}
+      className="flex aspect-square items-center justify-center rounded-lg border border-purple-100 bg-white p-1.5 text-purple-500 transition-all hover:scale-105 hover:border-purple-400 hover:bg-purple-50"
+    >
+      {Icon && (
+        <Icon
+          strokeWidth={2}
+          className="h-full w-full"
+        />
+      )}
+    </button>
   );
 }
