@@ -24,12 +24,13 @@ import {
 import { useAutoFitFontSize } from "./useAutoFitFontSize";
 import ShapeRenderer from "./ShapeRenderer";
 import { ICONS, ICON_CATEGORIES, getIcon } from "@/lib/shapeIcons";
+import AIAssistantPanel from "./AIAssistantPanel";
 
 interface CanvasEditorProps {
   story: Story;
 }
 
-type SidebarTab = "layouts" | "text" | "shapes" | "images";
+type SidebarTab = "layouts" | "text" | "shapes" | "images" | "assistant";
 
 // Compass points for resize handles. The edge the user grabs determines
 // which corner stays anchored and whether width/height grows positive or
@@ -368,6 +369,46 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
     },
     [currentPage, selectedId, updatePageLayers]
   );
+
+  // Apply an AI-regenerated text to the current page: update both page.text
+  // (so the reader stays in sync) and the layout-tagged text layer inside
+  // overlays (so the studio reflects it without the user re-opening).
+  // Mirrors the /regenerate-text route's write pattern.
+  const applyAssistantText = useCallback(
+    (newText: string) => {
+      if (!currentPage) return;
+      updatePage(currentPage.pageNumber, (p) => ({
+        ...p,
+        text: newText,
+        overlays: (p.overlays ?? []).map((l) =>
+          l.source === "layout" && l.type === "text" ? { ...l, text: newText } : l
+        ),
+      }));
+    },
+    [currentPage, updatePage]
+  );
+
+  // Apply an AI-regenerated image URL: update page.imageUrl (for the reader)
+  // and the layout-tagged image layer's src (for the studio).
+  const applyAssistantImage = useCallback(
+    (newImageUrl: string) => {
+      if (!currentPage) return;
+      updatePage(currentPage.pageNumber, (p) => ({
+        ...p,
+        imageUrl: newImageUrl,
+        overlays: (p.overlays ?? []).map((l) =>
+          l.source === "layout" && l.type === "image"
+            ? { ...l, src: newImageUrl }
+            : l
+        ),
+      }));
+    },
+    [currentPage, updatePage]
+  );
+
+  const onStoryPromptSaved = useCallback((newPrompt: string | null) => {
+    setStory((prev) => ({ ...prev, ai_system_prompt: newPrompt }));
+  }, []);
 
   const applyLayout = useCallback(
     (layoutId: string) => {
@@ -926,23 +967,29 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr_260px]">
         {/* Left: tools sidebar */}
         <aside className="rounded-3xl border-2 border-purple-200 bg-white p-4 shadow-sm">
-          <div className="mb-4 grid grid-cols-2 gap-1">
-            {(["layouts", "text", "shapes", "images"] as SidebarTab[]).map(
-              (t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTab(t)}
-                  className={`rounded-xl px-2 py-2 text-xs font-black uppercase transition-all ${
-                    tab === t
-                      ? "bg-purple-500 text-white"
-                      : "bg-purple-50 text-purple-400 hover:bg-purple-100"
-                  }`}
-                >
-                  {t}
-                </button>
-              )
-            )}
+          <div className="mb-4 grid grid-cols-3 gap-1">
+            {(
+              [
+                "layouts",
+                "text",
+                "shapes",
+                "images",
+                "assistant",
+              ] as SidebarTab[]
+            ).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={`rounded-xl px-2 py-2 text-[11px] font-black uppercase transition-all ${
+                  tab === t
+                    ? "bg-purple-500 text-white"
+                    : "bg-purple-50 text-purple-400 hover:bg-purple-100"
+                }`}
+              >
+                {t === "assistant" ? "AI" : t}
+              </button>
+            ))}
           </div>
 
           {tab === "layouts" && !defineMode && (
@@ -1053,6 +1100,17 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
               onAddImageBox={() => addLayer(makeImageBox())}
               onUpload={handleUpload}
               onInsertImage={(url) => addLayer(makeUploadImage(url))}
+            />
+          )}
+
+          {tab === "assistant" && currentPage && (
+            <AIAssistantPanel
+              storyId={story.id}
+              storyAiSystemPrompt={story.ai_system_prompt}
+              currentPage={currentPage}
+              onApplyText={applyAssistantText}
+              onApplyImage={applyAssistantImage}
+              onStoryPromptSaved={onStoryPromptSaved}
             />
           )}
         </aside>

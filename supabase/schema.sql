@@ -24,6 +24,12 @@ alter table public.stories drop column if exists mode;
 alter table public.stories
   add column if not exists library_images jsonb not null default '[]'::jsonb;
 
+-- Per-story AI assistant system prompt. Nullable because most stories
+-- don't need one. When set, gets prepended to every text/image
+-- regeneration request the user makes from the Assistant panel.
+alter table public.stories
+  add column if not exists ai_system_prompt text;
+
 create index if not exists stories_created_at_idx
   on public.stories (created_at desc);
 

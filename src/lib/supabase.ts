@@ -27,3 +27,27 @@ export function supabaseAdmin(): SupabaseClient {
   _admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
   return _admin;
 }
+
+// Upload a base64 data URI (e.g., from Gemini image gen) to the "uploads"
+// bucket and return its public URL. Keeps the stories.pages JSONB column
+// small — storing inline base64 makes the column too large to round-trip
+// on every overlay save and causes PostgREST to drop the connection.
+export async function uploadGeneratedImage(dataUri: string): Promise<string> {
+  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUri);
+  if (!match) throw new Error("uploadGeneratedImage: not a base64 data URI");
+  const [, mime, b64] = match;
+  const buf = Buffer.from(b64, "base64");
+  const ext =
+    mime === "image/svg+xml" ? "svg" : mime.split("/")[1]?.split("+")[0] || "png";
+  const path = `generated/${crypto.randomUUID()}.${ext}`;
+
+  const admin = supabaseAdmin();
+  const { error } = await admin.storage.from("uploads").upload(path, buf, {
+    contentType: mime,
+    upsert: false,
+  });
+  if (error) throw error;
+
+  const { data } = admin.storage.from("uploads").getPublicUrl(path);
+  return data.publicUrl;
+}

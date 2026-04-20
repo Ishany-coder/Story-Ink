@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateStoryText, generatePageImage } from "@/lib/gemini";
 import { buildInitialOverlays, DEFAULT_LAYOUT_ID } from "@/lib/layouts";
-import { supabase } from "@/lib/supabase";
+import { supabase, uploadGeneratedImage } from "@/lib/supabase";
 import { GenerateRequest, StoryPage } from "@/lib/types";
 
 export const maxDuration = 300;
@@ -30,11 +30,20 @@ export async function POST(request: NextRequest) {
       scriptPages.map((page) => generatePageImage(page.text, title))
     );
 
+    const imageUrls = await Promise.all(
+      imageResults.map(async (res) => {
+        if (res.status !== "fulfilled" || !res.value) return "";
+        try {
+          return await uploadGeneratedImage(res.value);
+        } catch (err) {
+          console.error("[generate] image upload to Storage failed:", err);
+          return "";
+        }
+      })
+    );
+
     const pages: StoryPage[] = scriptPages.map((page, i) => {
-      const imageUrl =
-        imageResults[i].status === "fulfilled"
-          ? (imageResults[i] as PromiseFulfilledResult<string>).value
-          : "";
+      const imageUrl = imageUrls[i];
       return {
         pageNumber: page.pageNumber,
         text: page.text,

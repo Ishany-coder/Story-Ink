@@ -2,16 +2,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import {
-  CANVAS_SIZE,
-  type ImageLayer,
-  type Layer,
-  type Story,
-  type TextLayer,
-} from "@/lib/types";
+import { type Story } from "@/lib/types";
 import { resolveDisplayLayers } from "@/lib/layouts";
-import AutoFitText from "./AutoFitText";
-import ShapeRenderer from "./ShapeRenderer";
+import ReadOnlyLayer from "./ReadOnlyLayer";
 
 export default function SlideReader({ story }: { story: Story }) {
   const [currentPage, setCurrentPage] = useState(0);
@@ -147,58 +140,3 @@ export default function SlideReader({ story }: { story: Story }) {
   );
 }
 
-function ReadOnlyLayer({ layer }: { layer: Layer }) {
-  const style: React.CSSProperties = {
-    position: "absolute",
-    left: `${(layer.x / CANVAS_SIZE) * 100}%`,
-    top: `${(layer.y / CANVAS_SIZE) * 100}%`,
-    width: `${(layer.width / CANVAS_SIZE) * 100}%`,
-    height: `${(layer.height / CANVAS_SIZE) * 100}%`,
-    transform: `rotate(${layer.rotation}deg)`,
-    transformOrigin: "center center",
-    pointerEvents: "none",
-  };
-
-  if (layer.type === "text") {
-    const t = layer as TextLayer;
-    return (
-      <div style={style}>
-        <AutoFitText
-          text={t.text}
-          logicalWidth={t.width}
-          logicalMaxFontSize={t.fontSize}
-          color={t.color}
-          fontFamily={t.fontFamily}
-          fontWeight={t.fontWeight}
-        />
-      </div>
-    );
-  }
-
-  if (layer.type === "shape") {
-    return (
-      <div style={style}>
-        <ShapeRenderer layer={layer} />
-      </div>
-    );
-  }
-
-  const im = layer as ImageLayer;
-  const fit = im.source === "layout" ? "cover" : "contain";
-  return (
-    <div style={style}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={im.src}
-        alt=""
-        draggable={false}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: fit,
-          userSelect: "none",
-        }}
-      />
-    </div>
-  );
-}

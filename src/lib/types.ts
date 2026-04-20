@@ -113,6 +113,10 @@ export interface Story {
   // layer that first referenced an image, so the Studio keeps showing it
   // in the Images tab / picker for reuse.
   library_images?: string[];
+  // Per-story system prompt prepended to every AI assistant call. Null if
+  // unset. The browser also stores a global system prompt in localStorage;
+  // both are concatenated (global first, then story) before being sent.
+  ai_system_prompt?: string | null;
 }
 
 export interface GenerateRequest {

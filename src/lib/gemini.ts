@@ -139,6 +139,158 @@ function generatePlaceholder(pageText: string): string {
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 
+// ---------------------------------------------------------------------------
+// AI Assistant helpers
+//
+// Used by the Studio's Assistant panel to regenerate a single page's text or
+// image from a freeform user prompt. The "system prompt" passed in is
+// already the composite of the user's global prompt (localStorage) and the
+// story's per-story prompt (stories.ai_system_prompt), concatenated by the
+// API route before calling these.
+// ---------------------------------------------------------------------------
+
+function buildAssistantPreamble(systemPrompt: string | null): string {
+  const trimmed = systemPrompt?.trim();
+  return trimmed
+    ? `The user has set these standing instructions for the AI assistant. Follow them unless the specific request below contradicts them:\n${trimmed}\n\n`
+    : "";
+}
+
+// Fetch an image URL and return it in Gemini's inlineData format so we can
+// pass "here's the current illustration" as context. Falls back to null if
+// the URL is empty/invalid/CORS-blocked — the caller will proceed without
+// the visual context rather than failing outright.
+async function fetchImageAsInlineData(
+  url: string | null | undefined
+): Promise<{ mimeType: string; data: string } | null> {
+  if (!url) return null;
+  try {
+    if (url.startsWith("data:")) {
+      const m = /^data:([^;]+);base64,(.+)$/.exec(url);
+      if (!m) return null;
+      return { mimeType: m[1], data: m[2] };
+    }
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    const mimeType = res.headers.get("content-type") ?? "image/png";
+    return { mimeType, data: Buffer.from(buf).toString("base64") };
+  } catch (err) {
+    console.error("[gemini] failed to fetch current image for context:", err);
+    return null;
+  }
+}
+
+export interface AssistRegenerateTextArgs {
+  systemPrompt: string | null;
+  storyTitle: string;
+  storyPrompt: string;
+  allPages: { pageNumber: number; text: string }[];
+  targetPageNumber: number;
+  userPrompt: string;
+  // Current illustration for the target page. Passed as multimodal context
+  // so the rewritten text can reference what's actually drawn.
+  currentImageUrl?: string | null;
+}
+
+export async function assistRegenerateText(
+  args: AssistRegenerateTextArgs
+): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const context = args.allPages
+    .map((p) =>
+      p.pageNumber === args.targetPageNumber
+        ? `Page ${p.pageNumber} (current text — rewrite this one): ${p.text}`
+        : `Page ${p.pageNumber}: ${p.text}`
+    )
+    .join("\n");
+
+  const textPart = {
+    text: `${buildAssistantPreamble(args.systemPrompt)}You are revising one page of a children's storybook titled "${args.storyTitle}". The original idea behind the story was: "${args.storyPrompt}". Rewrite only page ${args.targetPageNumber} according to the user's request below, while keeping the plot beat, characters, and tone consistent with the surrounding pages. Keep it to 2-4 whimsical sentences suitable for illustration. If a current illustration is attached, make sure the rewritten text matches what's actually drawn.
+
+User's request for page ${args.targetPageNumber}: ${args.userPrompt}
+
+Return JSON: { "text": "..." }
+
+Story so far:
+${context}`,
+  };
+
+  const imageInline = await fetchImageAsInlineData(args.currentImageUrl);
+  const parts = imageInline
+    ? [{ inlineData: imageInline }, textPart]
+    : [textPart];
+
+  const result = await model.generateContent({
+    contents: [{ role: "user", parts }],
+  });
+
+  const parsed = JSON.parse(result.response.text()) as { text: string };
+  return parsed.text;
+}
+
+export interface AssistRegenerateImageArgs {
+  systemPrompt: string | null;
+  storyTitle: string;
+  storyPrompt: string;
+  pageText: string;
+  userPrompt: string;
+  // The illustration currently on the page, passed as visual context so
+  // Gemini can edit it (keeping character/scene consistency) rather than
+  // starting from scratch.
+  currentImageUrl?: string | null;
+}
+
+export async function assistRegenerateImage(
+  args: AssistRegenerateImageArgs
+): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.1-flash-image-preview",
+  });
+
+  const imageInline = await fetchImageAsInlineData(args.currentImageUrl);
+  const hasCurrent = imageInline !== null;
+
+  const intro = [
+    `${buildAssistantPreamble(args.systemPrompt)}${
+      hasCurrent
+        ? `The attached image is the current illustration for this page. Produce a revised illustration that keeps its overall composition, characters, and style where possible, and applies only the user's requested changes.`
+        : `Create a beautiful children's storybook illustration for one page of the story titled "${args.storyTitle}". The original idea behind the story was: "${args.storyPrompt}".`
+    }`,
+    `CRITICAL: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. This is an illustration only — narration is overlaid separately.`,
+    `Scene on this page: ${args.pageText}`,
+    `The user's specific request for this illustration: ${args.userPrompt}`,
+    `Style: watercolor children's book illustration, whimsical, warm colors. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
+  ].join("\n\n");
+
+  const parts = imageInline
+    ? [{ inlineData: imageInline }, { text: intro }]
+    : [{ text: intro }];
+
+  const result = await model.generateContent({
+    contents: [{ role: "user", parts }],
+    generationConfig: {
+      // @ts-expect-error - field not declared in legacy SDK types
+      responseModalities: ["IMAGE", "TEXT"],
+    },
+  });
+
+  const respParts = result.response.candidates?.[0]?.content?.parts;
+  if (respParts) {
+    for (const part of respParts) {
+      if (part.inlineData?.data) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    }
+  }
+
+  throw new Error("Gemini returned no image data");
+}
+
 function hashCode(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
