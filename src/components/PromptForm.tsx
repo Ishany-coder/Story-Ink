@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import GeneratingOverlay from "./GeneratingOverlay";
+import { useJobPolling } from "@/lib/useJobPolling";
 
 const PAGE_OPTIONS = [3, 5, 7, 10, 12];
 
@@ -12,6 +13,18 @@ export default function PromptForm() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const { state, start } = useJobPolling<{ storyId: string }>();
+
+  // Watch the Inngest job to completion. On "done" we navigate to the new
+  // story; on "failed" we surface the error and unblock the form.
+  useEffect(() => {
+    if (state.kind === "done") {
+      router.push(`/read/${state.result.storyId}`);
+    } else if (state.kind === "failed") {
+      setError(state.error);
+      setGenerating(false);
+    }
+  }, [state, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -26,14 +39,12 @@ export default function PromptForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: prompt.trim(), pageCount }),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
+      if (!res.ok && res.status !== 202) {
+        const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Generation failed");
       }
-
-      const { storyId } = await res.json();
-      router.push(`/read/${storyId}`);
+      const { jobId } = (await res.json()) as { jobId: string };
+      start(jobId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setGenerating(false);

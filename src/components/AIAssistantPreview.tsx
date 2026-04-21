@@ -24,7 +24,17 @@ export type PendingImage = {
   newImageUrl: string;
 };
 
-export type Pending = PendingText | PendingImage;
+// Combined preview produced by /ai/infer when the classifier (or the user's
+// override) picks both text and image. Either payload may be missing if
+// that side's generator failed — caller should render only what's present.
+export type PendingBoth = {
+  kind: "both";
+  page: StoryPage;
+  newText?: string;
+  newImageUrl?: string;
+};
+
+export type Pending = PendingText | PendingImage | PendingBoth;
 
 interface Props {
   pending: Pending | null;
@@ -63,9 +73,9 @@ export default function AIAssistantPreview({
               AI preview · page {pending.page.pageNumber}
             </p>
             <h2 className="font-[family-name:var(--font-display)] text-xl font-bold text-purple-700">
-              {pending.kind === "text"
-                ? "Proposed text change"
-                : "Proposed illustration change"}
+              {pending.kind === "text" && "Proposed text change"}
+              {pending.kind === "image" && "Proposed illustration change"}
+              {pending.kind === "both" && "Proposed text + illustration change"}
             </h2>
           </div>
           <button
@@ -79,11 +89,9 @@ export default function AIAssistantPreview({
         </header>
 
         <div className="flex-1 overflow-auto px-6 py-5">
-          {pending.kind === "text" ? (
-            <TextDiffBody pending={pending} />
-          ) : (
-            <ImageDiffBody pending={pending} />
-          )}
+          {pending.kind === "text" && <TextDiffBody pending={pending} />}
+          {pending.kind === "image" && <ImageDiffBody pending={pending} />}
+          {pending.kind === "both" && <BothDiffBody pending={pending} />}
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-purple-100 bg-purple-50/40 px-6 py-4">
@@ -268,6 +276,58 @@ function ImageDiffBody({ pending }: { pending: PendingImage }) {
           }
         />
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BOTH mode — stacks the text diff and the image diff so the user can review
+// and apply both changes in one shot. Either side may be missing (generator
+// failure for that target) — we render only what came back, and call out
+// any failures inline.
+// ---------------------------------------------------------------------------
+
+function BothDiffBody({ pending }: { pending: PendingBoth }) {
+  const { page, newText, newImageUrl } = pending;
+  const textOk = typeof newText === "string";
+  const imageOk = typeof newImageUrl === "string";
+
+  return (
+    <div className="space-y-8">
+      {textOk && (
+        <section className="space-y-3">
+          <h3 className="text-[11px] font-black uppercase tracking-wider text-purple-400">
+            Text change
+          </h3>
+          <TextDiffBody
+            pending={{ kind: "text", page, newText: newText as string }}
+          />
+        </section>
+      )}
+      {!textOk && (
+        <section className="rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-500">
+          Text regeneration failed — keeping the current page text.
+        </section>
+      )}
+      {imageOk && (
+        <section className="space-y-3">
+          <h3 className="text-[11px] font-black uppercase tracking-wider text-purple-400">
+            Illustration change
+          </h3>
+          <ImageDiffBody
+            pending={{
+              kind: "image",
+              page,
+              newImageUrl: newImageUrl as string,
+            }}
+          />
+        </section>
+      )}
+      {!imageOk && (
+        <section className="rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-500">
+          Image regeneration failed — keeping the current illustration.
+        </section>
+      )}
     </div>
   );
 }

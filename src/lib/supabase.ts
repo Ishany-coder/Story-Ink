@@ -39,15 +39,79 @@ export async function uploadGeneratedImage(dataUri: string): Promise<string> {
   const buf = Buffer.from(b64, "base64");
   const ext =
     mime === "image/svg+xml" ? "svg" : mime.split("/")[1]?.split("+")[0] || "png";
-  const path = `generated/${crypto.randomUUID()}.${ext}`;
 
   const admin = supabaseAdmin();
-  const { error } = await admin.storage.from("uploads").upload(path, buf, {
-    contentType: mime,
-    upsert: false,
-  });
-  if (error) throw error;
+  const delays = [500, 1500];
 
-  const { data } = admin.storage.from("uploads").getPublicUrl(path);
-  return data.publicUrl;
+  // Storage uploads occasionally fail with ECONNRESET / fetch failed when
+  // the underlying fetch connection is reset mid-flight. Retry twice with
+  // short backoff before giving up. Each attempt uses a fresh UUID path so
+  // a partially-written object can't collide.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const path = `generated/${crypto.randomUUID()}.${ext}`;
+    try {
+      const { error } = await admin.storage
+        .from("uploads")
+        .upload(path, buf, { contentType: mime, upsert: false });
+      if (error) throw error;
+      const { data } = admin.storage.from("uploads").getPublicUrl(path);
+      return data.publicUrl;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient =
+        msg.includes("ECONNRESET") ||
+        msg.includes("fetch failed") ||
+        msg.includes("ETIMEDOUT");
+      if (!transient || attempt === 2) break;
+      const wait = delays[attempt] ?? 1500;
+      console.warn(
+        `[storage] upload transient failure, retrying in ${wait}ms:`,
+        msg
+      );
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
+}
+
+// Upload raw audio bytes (e.g., ElevenLabs mp3) to the "uploads" bucket and
+// return the public URL. Same retry shape as uploadGeneratedImage — storage
+// occasionally ECONNRESETs on a cold connection.
+export async function uploadGeneratedAudio(
+  buf: Buffer,
+  opts: { mime: string; ext: string; pathPrefix?: string }
+): Promise<string> {
+  const admin = supabaseAdmin();
+  const delays = [500, 1500];
+  const prefix = opts.pathPrefix ?? "narration";
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const path = `${prefix}/${crypto.randomUUID()}.${opts.ext}`;
+    try {
+      const { error } = await admin.storage
+        .from("uploads")
+        .upload(path, buf, { contentType: opts.mime, upsert: false });
+      if (error) throw error;
+      const { data } = admin.storage.from("uploads").getPublicUrl(path);
+      return data.publicUrl;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient =
+        msg.includes("ECONNRESET") ||
+        msg.includes("fetch failed") ||
+        msg.includes("ETIMEDOUT");
+      if (!transient || attempt === 2) break;
+      const wait = delays[attempt] ?? 1500;
+      console.warn(
+        `[storage] audio upload transient failure, retrying in ${wait}ms:`,
+        msg
+      );
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
 }

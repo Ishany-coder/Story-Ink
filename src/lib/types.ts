@@ -99,6 +99,12 @@ export interface StoryPage {
   imageUrl: string;
   overlays?: Layer[];
   layoutId?: string;
+  // Narration cache: when /narrate synthesizes audio for this page it writes
+  // the public mp3 URL here along with the cache key (hash of voiceId + text)
+  // that produced it. Subsequent plays with the same voice + unchanged text
+  // short-circuit to the cached URL instead of re-billing ElevenLabs.
+  narrationUrl?: string;
+  narrationCacheKey?: string;
 }
 
 export interface Story {

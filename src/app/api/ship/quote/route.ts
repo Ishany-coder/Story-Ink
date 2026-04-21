@@ -1,0 +1,82 @@
+import { NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
+import { quotePrintAndShipping, LuluError } from "@/lib/lulu";
+import type { Story, StoryPage } from "@/lib/types";
+
+// Live quote from Lulu for the given address + story. The address is sent
+// to Lulu to compute shipping but NOT persisted anywhere on our side — this
+// route reads the body, forwards it, and returns the cost breakdown.
+
+export const maxDuration = 20;
+
+interface Body {
+  storyId?: unknown;
+  address?: unknown;
+}
+
+function isAddress(v: unknown): v is {
+  name: string;
+  street1: string;
+  street2?: string;
+  city: string;
+  state_code: string;
+  country_code: string;
+  postcode: string;
+  phone_number: string;
+  email?: string;
+} {
+  if (!v || typeof v !== "object") return false;
+  const a = v as Record<string, unknown>;
+  const str = (k: string) => typeof a[k] === "string" && (a[k] as string).trim();
+  return !!(
+    str("name") &&
+    str("street1") &&
+    str("city") &&
+    str("state_code") &&
+    str("country_code") &&
+    str("postcode") &&
+    str("phone_number")
+  );
+}
+
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as Body;
+  const storyId = typeof body.storyId === "string" ? body.storyId : "";
+  if (!storyId) {
+    return NextResponse.json({ error: "storyId is required" }, { status: 400 });
+  }
+  if (!isAddress(body.address)) {
+    return NextResponse.json(
+      { error: "Invalid shipping address" },
+      { status: 400 }
+    );
+  }
+
+  const { data: story, error } = await supabase
+    .from("stories")
+    .select("id, pages")
+    .eq("id", storyId)
+    .single<Pick<Story, "id" | "pages">>();
+  if (error || !story) {
+    return NextResponse.json({ error: "Story not found" }, { status: 404 });
+  }
+
+  try {
+    const quote = await quotePrintAndShipping({
+      pageCount: (story.pages as StoryPage[]).length,
+      quantity: 1,
+      address: body.address,
+    });
+    return NextResponse.json(quote);
+  } catch (err) {
+    if (err instanceof LuluError) {
+      console.error("[ship/quote] lulu error:", err);
+      return NextResponse.json({ error: err.message }, { status: 502 });
+    }
+    console.error("[ship/quote] unexpected:", err);
+    return NextResponse.json(
+      { error: "Quote failed" },
+      { status: 500 }
+    );
+  }
+}

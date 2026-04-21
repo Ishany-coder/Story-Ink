@@ -149,6 +149,56 @@ function generatePlaceholder(pageText: string): string {
 // API route before calling these.
 // ---------------------------------------------------------------------------
 
+// Wrap a Gemini call so we automatically retry on HTTP 429 (rate limit) with
+// exponential backoff. Free-tier quotas are small and bursty — the Studio's
+// /ai/infer route fires up to 3 Gemini calls back-to-back, which can clip the
+// per-minute limit even when the user's pace is reasonable. Two retries with
+// 2s → 5s backoff recovers from those transient throttles without making the
+// user feel the app is slow.
+//
+// When all retries exhaust, the original 429 is rethrown with a clearer
+// message so the route handler can surface "please wait a minute" instead of
+// a generic failure.
+export class GeminiRateLimitError extends Error {
+  constructor(message = "Gemini rate limit hit — try again in a minute.") {
+    super(message);
+    this.name = "GeminiRateLimitError";
+  }
+}
+
+function is429(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const maybe = err as { status?: number; message?: string };
+  if (maybe.status === 429) return true;
+  return typeof maybe.message === "string" && maybe.message.includes("[429");
+}
+
+async function withGeminiRetry<T>(
+  fn: () => Promise<T>,
+  opts: { label: string; maxAttempts?: number } = { label: "gemini" }
+): Promise<T> {
+  const maxAttempts = opts.maxAttempts ?? 3;
+  const delays = [2000, 5000];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!is429(err) || attempt === maxAttempts - 1) break;
+      const wait = delays[attempt] ?? 5000;
+      console.warn(
+        `[gemini] ${opts.label} hit 429, retrying in ${wait}ms (attempt ${
+          attempt + 1
+        }/${maxAttempts})`
+      );
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  if (is429(lastErr)) throw new GeminiRateLimitError();
+  throw lastErr;
+}
+
 function buildAssistantPreamble(systemPrompt: string | null): string {
   const trimmed = systemPrompt?.trim();
   return trimmed
@@ -210,13 +260,17 @@ export async function assistRegenerateText(
     .join("\n");
 
   const textPart = {
-    text: `${buildAssistantPreamble(args.systemPrompt)}You are revising one page of a children's storybook titled "${args.storyTitle}". The original idea behind the story was: "${args.storyPrompt}". Rewrite only page ${args.targetPageNumber} according to the user's request below, while keeping the plot beat, characters, and tone consistent with the surrounding pages. Keep it to 2-4 whimsical sentences suitable for illustration. If a current illustration is attached, make sure the rewritten text matches what's actually drawn.
+    text: `${buildAssistantPreamble(args.systemPrompt)}You are revising page ${args.targetPageNumber} of a children's storybook titled "${args.storyTitle}". The original idea behind the story was: "${args.storyPrompt}".
+
+THE USER'S REQUEST BELOW IS THE PRIMARY GOAL. Rewrite this page's narration so it actually reflects the user's request. When the request conflicts with what the surrounding pages establish (e.g. the user wants a different character, species, or setting), FOLLOW THE USER — the surrounding context is only a reference, not a constraint. Don't keep a name, species, role, or scene element if the user told you to change it.
+
+Keep the rewrite to 2-4 whimsical sentences suitable for illustration. Match tone with the rest of the book where it doesn't conflict with the request. Do not include any text that doesn't belong to the narration (no labels, no meta commentary).
 
 User's request for page ${args.targetPageNumber}: ${args.userPrompt}
 
 Return JSON: { "text": "..." }
 
-Story so far:
+Story so far (for reference only — override freely to satisfy the request):
 ${context}`,
   };
 
@@ -225,9 +279,10 @@ ${context}`,
     ? [{ inlineData: imageInline }, textPart]
     : [textPart];
 
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts }],
-  });
+  const result = await withGeminiRetry(
+    () => model.generateContent({ contents: [{ role: "user", parts }] }),
+    { label: "assistRegenerateText" }
+  );
 
   const parsed = JSON.parse(result.response.text()) as { text: string };
   return parsed.text;
@@ -271,13 +326,17 @@ export async function assistRegenerateImage(
     ? [{ inlineData: imageInline }, { text: intro }]
     : [{ text: intro }];
 
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts }],
-    generationConfig: {
-      // @ts-expect-error - field not declared in legacy SDK types
-      responseModalities: ["IMAGE", "TEXT"],
-    },
-  });
+  const result = await withGeminiRetry(
+    () =>
+      model.generateContent({
+        contents: [{ role: "user", parts }],
+        generationConfig: {
+          // @ts-expect-error - field not declared in legacy SDK types
+          responseModalities: ["IMAGE", "TEXT"],
+        },
+      }),
+    { label: "assistRegenerateImage" }
+  );
 
   const respParts = result.response.candidates?.[0]?.content?.parts;
   if (respParts) {
@@ -289,6 +348,97 @@ export async function assistRegenerateImage(
   }
 
   throw new Error("Gemini returned no image data");
+}
+
+// ---------------------------------------------------------------------------
+// Intent classifier — used by /ai/infer so one prompt + one button can decide
+// whether the user's instruction should regenerate the page's text, the
+// illustration, or both. Kept on flash so the extra hop is cheap. Returns
+// at least one target; falls back to ["text","image"] if the model response
+// is unparseable so the user still gets *something* useful.
+// ---------------------------------------------------------------------------
+
+export type AssistTarget = "text" | "image";
+
+export interface ClassifyAssistIntentArgs {
+  systemPrompt: string | null;
+  // Story-wide context helps classify character/setting changes correctly:
+  // if the user says "make Timmy a cow" and the page's narration doesn't
+  // name Timmy but the story prompt or neighbor pages do, we still want
+  // BOTH so the whole book stays consistent.
+  storyPrompt?: string;
+  allPagesText?: string; // concatenated "Page N: ..." for all pages
+  pageText: string;
+  userPrompt: string;
+  currentImageUrl?: string | null;
+}
+
+export async function classifyAssistIntent(
+  args: ClassifyAssistIntentArgs
+): Promise<AssistTarget[]> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const storyContext = [
+    args.storyPrompt ? `Story premise: "${args.storyPrompt}"` : null,
+    args.allPagesText ? `All pages of the book:\n${args.allPagesText}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const textPart = {
+    text: `${buildAssistantPreamble(args.systemPrompt)}You are classifying a user's edit instruction for one page of a children's storybook. Each page has TEXT (narration) and an IMAGE (illustration).
+
+DEFAULT OUTPUT: ["text","image"] (both).
+
+Only downgrade to a single target when the instruction is UNAMBIGUOUSLY scoped:
+
+- ["text"] — the request is clearly a wording / tone / length / rhythm / vocabulary / voice rewrite with zero visual implication. Examples: "make it rhyme", "shorter", "more suspenseful", "use simpler words". If the request could ALSO affect the illustration in any way, do NOT downgrade.
+
+- ["image"] — the request is clearly a pure visual tweak that could not plausibly require rewording. Examples: "change the color palette to warmer tones", "add more texture", "make the lighting softer", "less blur". If the request introduces, removes, or changes anything the narration describes (characters, actions, setting, mood, time, weather), do NOT downgrade.
+
+Anything involving a character (name, species, role, appearance change like "Timmy is a cow"), a setting change, a new action, or a plot beat ALWAYS stays as ["text","image"]. Err on the side of ["text","image"] whenever unsure.
+
+Use the full book context — a character may appear in other pages even if this specific page's text is generic.
+
+${storyContext ? `${storyContext}\n\n` : ""}Target page text (the one being revised): "${args.pageText}"
+${args.currentImageUrl ? "The current illustration for the target page is attached." : "(No current illustration.)"}
+
+User's instruction: "${args.userPrompt}"
+
+Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "targets": ["text","image"] }.`,
+  };
+
+  const imageInline = await fetchImageAsInlineData(args.currentImageUrl);
+  const parts = imageInline
+    ? [{ inlineData: imageInline }, textPart]
+    : [textPart];
+
+  try {
+    const result = await withGeminiRetry(
+      () => model.generateContent({ contents: [{ role: "user", parts }] }),
+      { label: "classifyAssistIntent" }
+    );
+    const raw = result.response.text();
+    const parsed = JSON.parse(raw) as { targets?: unknown };
+    const targets = Array.isArray(parsed.targets)
+      ? parsed.targets.filter(
+          (t): t is AssistTarget => t === "text" || t === "image"
+        )
+      : [];
+    // Dedupe while preserving order.
+    const unique = Array.from(new Set(targets));
+    if (unique.length === 0) return ["text", "image"];
+    return unique;
+  } catch (err) {
+    // Rate limit: re-throw so the route can choose to fall back to "both"
+    // without a classifier rather than trying more Gemini calls on top.
+    if (err instanceof GeminiRateLimitError) throw err;
+    console.error("[gemini] classifyAssistIntent failed:", err);
+    return ["text", "image"];
+  }
 }
 
 function hashCode(str: string): number {

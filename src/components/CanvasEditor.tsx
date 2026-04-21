@@ -63,6 +63,33 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+// Poll /api/jobs/[id] until the Inngest function completes. Used by any
+// studio action that enqueues a Gemini job (currently just regenerate-text).
+async function pollJob<T>(jobId: string): Promise<T> {
+  const MAX = 180; // 3 min
+  for (let i = 0; i < MAX; i++) {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
+      if (res.ok) {
+        const row = (await res.json()) as {
+          status: "queued" | "running" | "done" | "failed";
+          result: T | null;
+          error: string | null;
+        };
+        if (row.status === "done") return (row.result ?? null) as T;
+        if (row.status === "failed") {
+          throw new Error(row.error ?? "Generation failed");
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Generation failed"))
+        throw err;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("Generation timed out");
+}
+
 function makeText(): TextLayer {
   return {
     id: uid(),
@@ -867,15 +894,18 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
     setRegenPending(true);
     setSaveError(null);
     try {
+      // Enqueue the Inngest job and poll it to completion. The route now
+      // returns 202 with { jobId } instead of the regenerated text inline.
       const res = await fetch(
         `/api/stories/${story.id}/pages/${currentPage.pageNumber}/regenerate-text`,
         { method: "POST" }
       );
-      if (!res.ok) {
+      if (!res.ok && res.status !== 202) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "Regeneration failed");
       }
-      const { text } = (await res.json()) as { text: string };
+      const { jobId } = (await res.json()) as { jobId: string };
+      const { text } = await pollJob<{ text: string }>(jobId);
 
       // Update page.text AND the layout-tagged text layer so both the reader
       // and the canvas stay in sync. Other text layers are untouched.

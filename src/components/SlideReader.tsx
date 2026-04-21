@@ -5,10 +5,26 @@ import Link from "next/link";
 import { type Story } from "@/lib/types";
 import { resolveDisplayLayers } from "@/lib/layouts";
 import ReadOnlyLayer from "./ReadOnlyLayer";
+import NarrationControls, {
+  readStoredVoice,
+  storeVoice,
+} from "./NarrationControls";
+import NarratorSetup from "./NarratorSetup";
 
 export default function SlideReader({ story }: { story: Story }) {
   const [currentPage, setCurrentPage] = useState(0);
+  const [voiceId, setVoiceId] = useState<string | null>(null);
+  const [voiceName, setVoiceName] = useState<string | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
   const pages = story.pages;
+
+  // Hydrate voice from localStorage on mount. Can't be initial state because
+  // localStorage isn't available during SSR.
+  useEffect(() => {
+    const stored = readStoredVoice();
+    setVoiceId(stored.voiceId);
+    setVoiceName(stored.voiceName);
+  }, []);
 
   const goNext = useCallback(() => {
     setCurrentPage((p) => Math.min(p + 1, pages.length - 1));
@@ -62,9 +78,18 @@ export default function SlideReader({ story }: { story: Story }) {
         <h2 className="font-[family-name:var(--font-display)] font-bold text-purple-700">
           {story.title}
         </h2>
-        <span className="rounded-full bg-purple-100 px-3 py-1 text-sm font-black text-purple-600">
-          {currentPage + 1} / {pages.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/ship/${story.id}`}
+            className="rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-3 py-1 text-xs font-black uppercase tracking-wider text-white shadow-sm transition-all hover:scale-[1.04]"
+            title="Order a physical copy"
+          >
+            Ship book
+          </Link>
+          <span className="rounded-full bg-purple-100 px-3 py-1 text-sm font-black text-purple-600">
+            {currentPage + 1} / {pages.length}
+          </span>
+        </div>
       </div>
 
       {/* Slide */}
@@ -121,6 +146,17 @@ export default function SlideReader({ story }: { story: Story }) {
         </div>
       </div>
 
+      {/* Narration controls (voice setup + play). Rendered above the dots
+          so the "Set up narrator" CTA has breathing room. */}
+      <NarrationControls
+        story={story}
+        currentPage={currentPage}
+        onAdvance={goNext}
+        voiceId={voiceId}
+        voiceName={voiceName}
+        onOpenSetup={() => setSetupOpen(true)}
+      />
+
       {/* Page dots */}
       <div className="flex justify-center gap-3 pb-8">
         {pages.map((_, i) => (
@@ -136,6 +172,18 @@ export default function SlideReader({ story }: { story: Story }) {
           />
         ))}
       </div>
+
+      <NarratorSetup
+        open={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        existingVoiceName={voiceName}
+        onCloned={(newVoiceId, newVoiceName) => {
+          storeVoice(newVoiceId, newVoiceName);
+          setVoiceId(newVoiceId);
+          setVoiceName(newVoiceName);
+          setSetupOpen(false);
+        }}
+      />
     </div>
   );
 }

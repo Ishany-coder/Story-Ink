@@ -3,6 +3,25 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+// Nav tabs. The route string is matched with startsWith so deep links like
+// /ship/abc-123 still highlight the "Ship" tab.
+const TABS: { label: string; href: string; matches: (p: string) => boolean }[] =
+  [
+    { label: "Create", href: "/", matches: (p) => p === "/" },
+    { label: "Read", href: "/read", matches: (p) => p.startsWith("/read") },
+    {
+      label: "Studio",
+      href: "/canvas",
+      matches: (p) => p.startsWith("/canvas"),
+    },
+    {
+      label: "Listen",
+      href: "/listen",
+      matches: (p) => p.startsWith("/listen"),
+    },
+    { label: "Ship", href: "/ship", matches: (p) => p.startsWith("/ship") },
+  ];
+
 export default function Navbar() {
   const pathname = usePathname();
 
@@ -17,37 +36,23 @@ export default function Navbar() {
           <span className="text-pink-500">Ink</span>
           <span className="ml-1 inline-block animate-wiggle text-2xl">&#9997;&#65039;</span>
         </Link>
-        <div className="flex gap-2">
-          <Link
-            href="/"
-            className={`rounded-full px-5 py-2 text-sm font-bold transition-all ${
-              pathname === "/"
-                ? "bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-md shadow-purple-200"
-                : "bg-purple-50 text-purple-400 hover:bg-purple-100 hover:text-purple-600"
-            }`}
-          >
-            Create
-          </Link>
-          <Link
-            href="/read"
-            className={`rounded-full px-5 py-2 text-sm font-bold transition-all ${
-              pathname.startsWith("/read")
-                ? "bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-md shadow-purple-200"
-                : "bg-purple-50 text-purple-400 hover:bg-purple-100 hover:text-purple-600"
-            }`}
-          >
-            Read
-          </Link>
-          <Link
-            href="/canvas"
-            className={`rounded-full px-5 py-2 text-sm font-bold transition-all ${
-              pathname.startsWith("/canvas")
-                ? "bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-md shadow-purple-200"
-                : "bg-purple-50 text-purple-400 hover:bg-purple-100 hover:text-purple-600"
-            }`}
-          >
-            Studio
-          </Link>
+        <div className="flex gap-1.5">
+          {TABS.map((tab) => {
+            const active = tab.matches(pathname);
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={`rounded-full px-4 py-2 text-sm font-bold transition-all ${
+                  active
+                    ? "bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-md shadow-purple-200"
+                    : "bg-purple-50 text-purple-400 hover:bg-purple-100 hover:text-purple-600"
+                }`}
+              >
+                {tab.label}
+              </Link>
+            );
+          })}
         </div>
       </div>
     </nav>

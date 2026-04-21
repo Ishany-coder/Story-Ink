@@ -24,6 +24,37 @@ alter table public.stories drop column if exists mode;
 alter table public.stories
   add column if not exists library_images jsonb not null default '[]'::jsonb;
 
+-- ---------------------------------------------------------------------------
+-- Jobs table — backs the Inngest-powered Gemini pipeline. HTTP routes insert
+-- a row with status='queued' and send an Inngest event; the function writes
+-- back `status`, `result`, and `error` as it runs. Clients poll
+-- /api/jobs/[id] for progress.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.jobs (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  status text not null default 'queued',
+  result jsonb,
+  error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists jobs_created_at_idx
+  on public.jobs (created_at desc);
+
+alter table public.jobs enable row level security;
+
+drop policy if exists "jobs readable" on public.jobs;
+create policy "jobs readable" on public.jobs for select using (true);
+
+drop policy if exists "anyone can insert jobs" on public.jobs;
+create policy "anyone can insert jobs" on public.jobs for insert with check (true);
+
+drop policy if exists "anyone can update jobs" on public.jobs;
+create policy "anyone can update jobs" on public.jobs for update using (true) with check (true);
+
 -- Per-story AI assistant system prompt. Nullable because most stories
 -- don't need one. When set, gets prepended to every text/image
 -- regeneration request the user makes from the Assistant panel.
@@ -145,3 +176,55 @@ drop policy if exists "anyone can delete custom layouts" on public.custom_layout
 create policy "anyone can delete custom layouts"
   on public.custom_layouts for delete
   using (true);
+
+-- ---------------------------------------------------------------------------
+-- Print orders (ship-a-storybook feature)
+--
+-- Tracks the state of physical-book orders so we can reconcile PayPal
+-- captures with Lulu print jobs. Deliberately redacted — no shipping
+-- address, no customer name, no email, no card details. The address is
+-- sent straight to Lulu at order time and dropped from memory when the
+-- request handler returns.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.print_orders (
+  id uuid primary key default gen_random_uuid(),
+  story_id uuid not null references public.stories(id) on delete cascade,
+  status text not null default 'pending',
+  amount_usd numeric(10, 2),
+  paypal_capture_id text,
+  stripe_session_id text,
+  lulu_print_job_id text,
+  interior_pdf_url text,
+  cover_pdf_url text,
+  created_at timestamptz not null default now()
+);
+
+-- Idempotent add for existing deployments.
+alter table public.print_orders
+  add column if not exists stripe_session_id text;
+create unique index if not exists print_orders_stripe_session_id_idx
+  on public.print_orders (stripe_session_id) where stripe_session_id is not null;
+
+create index if not exists print_orders_story_id_idx
+  on public.print_orders (story_id);
+create index if not exists print_orders_created_at_idx
+  on public.print_orders (created_at desc);
+
+alter table public.print_orders enable row level security;
+
+drop policy if exists "print orders readable" on public.print_orders;
+create policy "print orders readable"
+  on public.print_orders for select
+  using (true);
+
+drop policy if exists "anyone can insert print orders" on public.print_orders;
+create policy "anyone can insert print orders"
+  on public.print_orders for insert
+  with check (true);
+
+drop policy if exists "anyone can update print orders" on public.print_orders;
+create policy "anyone can update print orders"
+  on public.print_orders for update
+  using (true)
+  with check (true);
