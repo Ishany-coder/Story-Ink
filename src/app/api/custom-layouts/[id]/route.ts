@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export async function DELETE(
   _request: Request,
@@ -7,7 +7,7 @@ export async function DELETE(
 ) {
   const { id } = await ctx.params;
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin()
     .from("custom_layouts")
     .delete()
     .eq("id", id);

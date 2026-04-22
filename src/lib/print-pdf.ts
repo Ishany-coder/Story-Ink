@@ -14,6 +14,9 @@ import {
 } from "pdf-lib";
 import type { Story, StoryPage } from "@/lib/types";
 import { uploadGeneratedAudio } from "@/lib/supabase";
+import { fetchWithTimeout, isAllowedContentUrl } from "@/lib/http";
+
+const PRINT_IMAGE_FETCH_TIMEOUT_MS = 15_000;
 
 // 8.5 × 8.5 inch trim. 72 PDF points per inch. Lulu requires 0.125" bleed
 // on all outer edges for interior pages, so the final PDF page size is
@@ -39,8 +42,22 @@ function spineWidthIn(pageCount: number): number {
 async function fetchImageBytes(
   url: string
 ): Promise<{ bytes: Uint8Array; kind: "png" | "jpg" } | null> {
+  // Same SSRF guard as gemini.fetchImageAsInlineData — source URLs come
+  // from the stories table and are user-influenceable, so lock them to
+  // our Supabase Storage host.
+  if (!isAllowedContentUrl(url)) {
+    console.warn(
+      "[print-pdf] refusing to fetch image from disallowed host:",
+      url
+    );
+    return null;
+  }
   try {
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(
+      url,
+      {},
+      PRINT_IMAGE_FETCH_TIMEOUT_MS
+    );
     if (!res.ok) return null;
     const arr = new Uint8Array(await res.arrayBuffer());
     // PNG magic: 89 50 4E 47 ...; JPG magic: FF D8 FF

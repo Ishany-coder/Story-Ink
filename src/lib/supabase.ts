@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Layer } from "@/lib/types";
 
 // Browser-safe client. Uses the public anon key. RLS policies on the
 // stories table apply.
@@ -26,6 +27,46 @@ export function supabaseAdmin(): SupabaseClient {
   }
   _admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
   return _admin;
+}
+
+// Atomic, per-page update of a StoryPage inside the stories.pages JSONB
+// array. Uses the `update_story_page_fields` Postgres function so two
+// concurrent writers (e.g. the user dragging overlays while the AI is
+// regenerating that page's text) don't clobber each other via a
+// read-modify-write race on the whole array.
+//
+// Only shallow top-level StoryPage fields are supported — pass a partial
+// object such as { text, overlays, layoutId, imageUrl, narrationUrl,
+// narrationCacheKey }. The function throws if the page number doesn't
+// exist on the story.
+//
+// Runs with the service-role client so it bypasses RLS; callers must be
+// server-side. The RPC is revoked from anon in schema.sql.
+export interface StoryPagePatch {
+  text?: string;
+  imageUrl?: string;
+  overlays?: Layer[];
+  layoutId?: string;
+  narrationUrl?: string;
+  narrationCacheKey?: string;
+}
+
+export async function updateStoryPageFields(
+  storyId: string,
+  pageNumber: number,
+  patch: StoryPagePatch
+): Promise<void> {
+  const admin = supabaseAdmin();
+  const { error } = await admin.rpc("update_story_page_fields", {
+    p_story_id: storyId,
+    p_page_number: pageNumber,
+    p_patch: patch,
+  });
+  if (error) {
+    throw new Error(
+      `update_story_page_fields failed: ${error.message ?? String(error)}`
+    );
+  }
 }
 
 // Upload a base64 data URI (e.g., from Gemini image gen) to the "uploads"

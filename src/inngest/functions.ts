@@ -21,7 +21,12 @@ import {
   regeneratePageText,
   type AssistTarget,
 } from "@/lib/gemini";
-import { supabase, uploadGeneratedImage } from "@/lib/supabase";
+import {
+  supabase,
+  supabaseAdmin,
+  updateStoryPageFields,
+  uploadGeneratedImage,
+} from "@/lib/supabase";
 import { buildInitialOverlays, DEFAULT_LAYOUT_ID } from "@/lib/layouts";
 import type { Layer, Story, StoryPage } from "@/lib/types";
 
@@ -97,26 +102,45 @@ export const generateStoryFn = inngest.createFunction(
       };
     });
 
-    const imageUrls: string[] = await step.run(
-      "generate-page-images",
-      async () => {
-        const results = await Promise.allSettled(
-          scriptData.pages.map((p) =>
-            generatePageImage(p.text, scriptData.title)
-          )
-        );
-        return Promise.all(
-          results.map(async (r) => {
-            if (r.status !== "fulfilled" || !r.value) return "";
+    // Per-page image steps. Splitting one step per page gives us two
+    // properties the old bundled version lacked:
+    //   1. Resumability. Inngest memoizes step results — if page 7 fails
+    //      after pages 1–6 succeeded, a retry re-runs only page 7 and
+    //      the final save step, not all generations from scratch.
+    //   2. Independent failure handling. Promise.allSettled means one
+    //      page that exhausts its retries becomes an empty-string image
+    //      (the downstream save-story step already tolerates that) and
+    //      the rest of the book still ships.
+    //
+    // The calls fan out via Promise.all so images still run in parallel
+    // end-to-end wall-clock-wise. Each step.run is its own retry scope.
+    const imageUrls: string[] = await Promise.all(
+      scriptData.pages.map((p) =>
+        step
+          .run(`generate-page-image-${p.pageNumber}`, async () => {
+            const dataUri = await generatePageImage(p.text, scriptData.title);
+            if (!dataUri) return "";
             try {
-              return await uploadGeneratedImage(r.value);
+              return await uploadGeneratedImage(dataUri);
             } catch (err) {
-              console.error("[inngest.generate] upload failed:", err);
+              console.error(
+                `[inngest.generate] page ${p.pageNumber} upload failed:`,
+                err
+              );
               return "";
             }
           })
-        );
-      }
+          .catch((err: unknown) => {
+            // After Inngest's retry budget for this step is exhausted,
+            // record the failure and move on with an empty image URL so
+            // the story still gets saved for the user to fix in Studio.
+            console.error(
+              `[inngest.generate] page ${p.pageNumber} gave up after retries:`,
+              err
+            );
+            return "";
+          })
+      )
     );
 
     const storyRow = await step.run("save-story", async () => {
@@ -130,7 +154,7 @@ export const generateStoryFn = inngest.createFunction(
           overlays: buildInitialOverlays(imageUrl, page.text),
         };
       });
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin()
         .from("stories")
         .insert({
           title: scriptData.title,
@@ -189,18 +213,19 @@ export const regenTextFn = inngest.createFunction(
     );
 
     await step.run("persist", async () => {
-      const nextPages: StoryPage[] = story.pages.map((p) => {
-        if (p.pageNumber !== pageNumber) return p;
-        const overlays = (p.overlays ?? []).map((l): Layer =>
-          l.source === "layout" && l.type === "text" ? { ...l, text } : l
-        );
-        return { ...p, text, overlays };
+      // Atomic per-page update — only touches this page's slot in the
+      // pages JSONB array so a concurrent overlays save on another page
+      // can't be clobbered. We still need the overlays for THIS page to
+      // mirror the new narration into any layout-source text layer, so
+      // we work off the page we fetched above.
+      const page = story.pages.find((p) => p.pageNumber === pageNumber);
+      const overlays: Layer[] | undefined = page?.overlays?.map((l): Layer =>
+        l.source === "layout" && l.type === "text" ? { ...l, text } : l
+      );
+      await updateStoryPageFields(storyId, pageNumber, {
+        text,
+        ...(overlays ? { overlays } : {}),
       });
-      const { error } = await supabase
-        .from("stories")
-        .update({ pages: nextPages })
-        .eq("id", storyId);
-      if (error) throw new Error(`Persist failed: ${error.message}`);
     });
 
     await step.run("mark-done", () => markDone(jobId, { text }));

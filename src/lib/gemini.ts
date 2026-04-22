@@ -1,10 +1,73 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { fetchWithTimeout, isAllowedContentUrl, withTimeout } from "@/lib/http";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// Upper-bound how long we wait on any single Gemini call. Text is fast
+// (<5s typical, ~15s tail). Image gen is slower (~20s typical, ~60s
+// tail). Use separate budgets so a stuck text call doesn't block an
+// entire inngest function run and image-gen has headroom on cold paths.
+const GEMINI_TEXT_TIMEOUT_MS = 30_000;
+const GEMINI_IMAGE_TIMEOUT_MS = 90_000;
+const IMAGE_FETCH_TIMEOUT_MS = 10_000;
+
+// Remove ```json ... ``` / ``` ... ``` fences and surrounding whitespace
+// so JSON.parse works on mildly-chatty model output. Gemini with
+// responseMimeType=application/json usually returns bare JSON, but a
+// flaky response still occasionally includes a code block when the model
+// apologizes or prefaces — this keeps the happy path on the rails
+// without us falling back to "both targets" for a formatting hiccup.
+function stripCodeFences(raw: string): string {
+  let text = raw.trim();
+  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i;
+  const m = text.match(fence);
+  if (m) text = m[1].trim();
+  return text;
+}
+
+// Parse JSON from an LLM response, stripping code fences first. Throws a
+// typed error so callers can decide whether to fall back, reprompt, or
+// surface to the user. `raw` may be any string — we don't trust the
+// shape. Callers should validate the resulting unknown themselves.
+export class LlmJsonParseError extends Error {
+  raw: string;
+  constructor(raw: string, cause?: unknown) {
+    super(
+      `Failed to parse JSON from model response${
+        cause instanceof Error ? `: ${cause.message}` : ""
+      }`
+    );
+    this.name = "LlmJsonParseError";
+    this.raw = raw;
+  }
+}
+
+function parseJsonResponse(raw: string): unknown {
+  const cleaned = stripCodeFences(raw);
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    throw new LlmJsonParseError(raw, err);
+  }
+}
 
 export interface StoryTextResult {
   title: string;
   pages: { pageNumber: number; text: string }[];
+}
+
+function isStoryTextResult(v: unknown, pageCount: number): v is StoryTextResult {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.title !== "string" || !o.title.trim()) return false;
+  if (!Array.isArray(o.pages) || o.pages.length !== pageCount) return false;
+  for (let i = 0; i < o.pages.length; i++) {
+    const p = o.pages[i] as Record<string, unknown> | undefined;
+    if (!p || typeof p !== "object") return false;
+    if (typeof p.pageNumber !== "number") return false;
+    if (typeof p.text !== "string" || !p.text.trim()) return false;
+  }
+  return true;
 }
 
 export async function generateStoryText(
@@ -18,7 +81,7 @@ export async function generateStoryText(
     },
   });
 
-  const result = await model.generateContent(
+  const buildPrompt = (reprompt: boolean) =>
     `You are a children's storybook author. Given the user's idea, write a storybook with exactly ${pageCount} pages.
 
 Return a JSON object with this exact structure:
@@ -31,10 +94,54 @@ Return a JSON object with this exact structure:
 
 Make the story whimsical, engaging, and rich with visual imagery. Each page should paint a clear scene.
 
-User's idea: ${prompt}`
-  );
+${
+  reprompt
+    ? "IMPORTANT: your previous response was not valid JSON. Respond with ONLY the raw JSON object — no code fences, no prose, no markdown. Start with { and end with }. "
+    : ""
+}User's idea: ${prompt}`;
 
-  return JSON.parse(result.response.text()) as StoryTextResult;
+  const generate = async (reprompt: boolean) =>
+    withGeminiRetry(
+      () =>
+        withTimeout(
+          model.generateContent(buildPrompt(reprompt)),
+          GEMINI_TEXT_TIMEOUT_MS,
+          "generateStoryText"
+        ),
+      { label: "generateStoryText" }
+    );
+
+  // One retry on malformed JSON with an explicit "respond with bare JSON"
+  // reprompt. If the second pass also fails, bubble up so the Inngest
+  // function marks the job failed and the user gets a real error rather
+  // than a silently-broken story.
+  let raw: string;
+  let parsed: unknown;
+  try {
+    const res = await generate(false);
+    raw = res.response.text();
+    parsed = parseJsonResponse(raw);
+  } catch (err) {
+    if (!(err instanceof LlmJsonParseError)) throw err;
+    console.warn(
+      "[gemini] generateStoryText returned non-JSON, reprompting. head:",
+      err.raw.slice(0, 200)
+    );
+    const res = await generate(true);
+    raw = res.response.text();
+    parsed = parseJsonResponse(raw);
+  }
+
+  if (!isStoryTextResult(parsed, pageCount)) {
+    console.error(
+      "[gemini] generateStoryText schema mismatch. parsed:",
+      JSON.stringify(parsed)?.slice(0, 400)
+    );
+    throw new Error(
+      `Gemini returned a story in an unexpected shape (expected ${pageCount} pages).`
+    );
+  }
+  return parsed;
 }
 
 export async function regeneratePageText(
@@ -55,16 +162,27 @@ export async function regeneratePageText(
     )
     .join("\n");
 
-  const result = await model.generateContent(
-    `You are revising one page of a children's storybook titled "${storyTitle}". Rewrite only page ${targetPageNumber} in a fresh way — a different turn of phrase, a new sensory detail — while keeping the plot beat, characters, and tone consistent with the surrounding pages. Keep it to 2-4 whimsical sentences suitable for illustration.
+  const result = await withGeminiRetry(
+    () =>
+      withTimeout(
+        model.generateContent(
+          `You are revising one page of a children's storybook titled "${storyTitle}". Rewrite only page ${targetPageNumber} in a fresh way — a different turn of phrase, a new sensory detail — while keeping the plot beat, characters, and tone consistent with the surrounding pages. Keep it to 2-4 whimsical sentences suitable for illustration.
 
 Return JSON: { "text": "..." }
 
 Story so far:
 ${context}`
+        ),
+        GEMINI_TEXT_TIMEOUT_MS,
+        "regeneratePageText"
+      ),
+    { label: "regeneratePageText" }
   );
 
-  const parsed = JSON.parse(result.response.text()) as { text: string };
+  const parsed = parseJsonResponse(result.response.text()) as { text?: unknown };
+  if (typeof parsed.text !== "string" || !parsed.text.trim()) {
+    throw new Error("Gemini regen-text response missing text field");
+  }
   return parsed.text;
 }
 
@@ -85,15 +203,23 @@ export async function generatePageImage(
       `Style: watercolor children's book illustration, whimsical, warm colors. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
     ].join("\n\n");
 
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: intro }] }],
-      generationConfig: {
-        // responseModalities isn't in @google/generative-ai@0.24.1's types,
-        // but the SDK forwards unknown generationConfig fields to the API.
-        // @ts-expect-error - field not declared in legacy SDK types
-        responseModalities: ["IMAGE", "TEXT"],
-      },
-    });
+    const result = await withGeminiRetry(
+      () =>
+        withTimeout(
+          model.generateContent({
+            contents: [{ role: "user", parts: [{ text: intro }] }],
+            generationConfig: {
+              // responseModalities isn't in @google/generative-ai@0.24.1's types,
+              // but the SDK forwards unknown generationConfig fields to the API.
+              // @ts-expect-error - field not declared in legacy SDK types
+              responseModalities: ["IMAGE", "TEXT"],
+            },
+          }),
+          GEMINI_IMAGE_TIMEOUT_MS,
+          "generatePageImage"
+        ),
+      { label: "generatePageImage" }
+    );
 
     const respParts = result.response.candidates?.[0]?.content?.parts;
     if (respParts) {
@@ -208,8 +334,14 @@ function buildAssistantPreamble(systemPrompt: string | null): string {
 
 // Fetch an image URL and return it in Gemini's inlineData format so we can
 // pass "here's the current illustration" as context. Falls back to null if
-// the URL is empty/invalid/CORS-blocked — the caller will proceed without
-// the visual context rather than failing outright.
+// the URL is empty/invalid/disallowed — the caller proceeds without the
+// visual context rather than failing outright.
+//
+// Security: `url` is read from the stories table and is therefore
+// user-influenceable (via library_images, imageUrl, cover_image). We
+// restrict the host to our Supabase project (or ALLOWED_IMAGE_HOSTS) so
+// an attacker who inserts a story with a crafted URL can't trick the
+// server into fetching internal cloud-metadata or LAN addresses.
 async function fetchImageAsInlineData(
   url: string | null | undefined
 ): Promise<{ mimeType: string; data: string } | null> {
@@ -220,7 +352,14 @@ async function fetchImageAsInlineData(
       if (!m) return null;
       return { mimeType: m[1], data: m[2] };
     }
-    const res = await fetch(url);
+    if (!isAllowedContentUrl(url)) {
+      console.warn(
+        "[gemini] refusing to fetch image from disallowed host:",
+        safeHost(url)
+      );
+      return null;
+    }
+    const res = await fetchWithTimeout(url, {}, IMAGE_FETCH_TIMEOUT_MS);
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
     const mimeType = res.headers.get("content-type") ?? "image/png";
@@ -228,6 +367,14 @@ async function fetchImageAsInlineData(
   } catch (err) {
     console.error("[gemini] failed to fetch current image for context:", err);
     return null;
+  }
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "<invalid-url>";
   }
 }
 
@@ -280,11 +427,21 @@ ${context}`,
     : [textPart];
 
   const result = await withGeminiRetry(
-    () => model.generateContent({ contents: [{ role: "user", parts }] }),
+    () =>
+      withTimeout(
+        model.generateContent({ contents: [{ role: "user", parts }] }),
+        GEMINI_TEXT_TIMEOUT_MS,
+        "assistRegenerateText"
+      ),
     { label: "assistRegenerateText" }
   );
 
-  const parsed = JSON.parse(result.response.text()) as { text: string };
+  const parsed = parseJsonResponse(result.response.text()) as {
+    text?: unknown;
+  };
+  if (typeof parsed.text !== "string" || !parsed.text.trim()) {
+    throw new Error("Gemini assist-text response missing text field");
+  }
   return parsed.text;
 }
 
@@ -328,13 +485,17 @@ export async function assistRegenerateImage(
 
   const result = await withGeminiRetry(
     () =>
-      model.generateContent({
-        contents: [{ role: "user", parts }],
-        generationConfig: {
-          // @ts-expect-error - field not declared in legacy SDK types
-          responseModalities: ["IMAGE", "TEXT"],
-        },
-      }),
+      withTimeout(
+        model.generateContent({
+          contents: [{ role: "user", parts }],
+          generationConfig: {
+            // @ts-expect-error - field not declared in legacy SDK types
+            responseModalities: ["IMAGE", "TEXT"],
+          },
+        }),
+        GEMINI_IMAGE_TIMEOUT_MS,
+        "assistRegenerateImage"
+      ),
     { label: "assistRegenerateImage" }
   );
 
@@ -418,11 +579,16 @@ Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "
 
   try {
     const result = await withGeminiRetry(
-      () => model.generateContent({ contents: [{ role: "user", parts }] }),
+      () =>
+        withTimeout(
+          model.generateContent({ contents: [{ role: "user", parts }] }),
+          GEMINI_TEXT_TIMEOUT_MS,
+          "classifyAssistIntent"
+        ),
       { label: "classifyAssistIntent" }
     );
     const raw = result.response.text();
-    const parsed = JSON.parse(raw) as { targets?: unknown };
+    const parsed = parseJsonResponse(raw) as { targets?: unknown };
     const targets = Array.isArray(parsed.targets)
       ? parsed.targets.filter(
           (t): t is AssistTarget => t === "text" || t === "image"
@@ -436,6 +602,8 @@ Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "
     // Rate limit: re-throw so the route can choose to fall back to "both"
     // without a classifier rather than trying more Gemini calls on top.
     if (err instanceof GeminiRateLimitError) throw err;
+    // Parse failures and other transient errors: fall back to the safe
+    // default of regenerating both text and image.
     console.error("[gemini] classifyAssistIntent failed:", err);
     return ["text", "image"];
   }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export const maxDuration = 15;
 
@@ -18,7 +18,7 @@ export async function PUT(
     typeof body.systemPrompt === "string" ? body.systemPrompt.trim() : null;
   const value = trimmed ? trimmed : null;
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin()
     .from("stories")
     .update({ ai_system_prompt: value })
     .eq("id", id);

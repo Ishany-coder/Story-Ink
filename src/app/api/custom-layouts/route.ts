@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import type { CustomLayout, Rect } from "@/lib/types";
 
 export const maxDuration = 10;
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
   const storyId =
     typeof body.storyId === "string" && body.storyId ? body.storyId : null;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin()
     .from("custom_layouts")
     .insert({
       name,

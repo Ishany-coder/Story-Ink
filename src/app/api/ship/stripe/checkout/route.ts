@@ -1,19 +1,34 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { createCheckoutSession } from "@/lib/stripe";
-import type { Story } from "@/lib/types";
+import { quotePrintAndShipping, LuluError } from "@/lib/lulu";
+import type { Story, StoryPage } from "@/lib/types";
 import type { ShippingAddress } from "@/lib/lulu";
 
 // Creates a Stripe Checkout Session. The client redirects to the returned
 // URL; Stripe handles card entry on their hosted page. On success they
 // redirect back to /ship/[id]/success?session_id=...
+//
+// The total is recomputed server-side from a fresh Lulu quote — the
+// client is never allowed to dictate the amount charged. The client's
+// displayed quote may have drifted (address changed, Lulu price update),
+// in which case we return the new quote so the UI can re-confirm before
+// charging.
 
-export const maxDuration = 20;
+export const maxDuration = 30;
+
+// Safety cap on any single print order to bound the blast radius of a
+// bug or pricing change. Keep well above a realistic max-page, rush-ship
+// book total.
+const MAX_ALLOWED_USD = 150;
 
 interface Body {
   storyId?: unknown;
-  amountUsd?: unknown;
   address?: unknown;
+  // Client's display price, in USD. Not used for the charge — only for a
+  // drift check so we can tell the user "price changed, please confirm"
+  // instead of silently charging a different amount. Optional.
+  expectedAmountUsd?: unknown;
 }
 
 function isAddress(v: unknown): v is ShippingAddress {
@@ -35,18 +50,8 @@ function isAddress(v: unknown): v is ShippingAddress {
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as Body;
   const storyId = typeof body.storyId === "string" ? body.storyId : "";
-  const amountUsd = typeof body.amountUsd === "number" ? body.amountUsd : NaN;
   if (!storyId) {
     return NextResponse.json({ error: "storyId is required" }, { status: 400 });
-  }
-  if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
-    return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
-  }
-  if (amountUsd > 75) {
-    return NextResponse.json(
-      { error: "Amount exceeds guardrail" },
-      { status: 400 }
-    );
   }
   if (!isAddress(body.address)) {
     return NextResponse.json(
@@ -57,11 +62,64 @@ export async function POST(request: Request) {
 
   const { data: story, error } = await supabase
     .from("stories")
-    .select("id, title")
+    .select("id, title, pages")
     .eq("id", storyId)
-    .single<Pick<Story, "id" | "title">>();
+    .single<Pick<Story, "id" | "title" | "pages">>();
   if (error || !story) {
     return NextResponse.json({ error: "Story not found" }, { status: 404 });
+  }
+
+  // Recompute the quote from Lulu *right now*, using the address the
+  // user just submitted. This is the only amount we charge — whatever
+  // the client said is ignored.
+  let quote;
+  try {
+    quote = await quotePrintAndShipping({
+      pageCount: (story.pages as StoryPage[]).length,
+      quantity: 1,
+      address: body.address,
+    });
+  } catch (err) {
+    if (err instanceof LuluError) {
+      console.error("[stripe/checkout] lulu quote error:", err);
+      return NextResponse.json({ error: err.message }, { status: 502 });
+    }
+    console.error("[stripe/checkout] quote failed:", err);
+    return NextResponse.json(
+      { error: "Couldn't get a shipping quote. Try again." },
+      { status: 500 }
+    );
+  }
+
+  const amountUsd = Math.round(quote.totalUsd * 100) / 100;
+  if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
+    return NextResponse.json(
+      { error: "Quote returned an invalid total" },
+      { status: 502 }
+    );
+  }
+  if (amountUsd > MAX_ALLOWED_USD) {
+    return NextResponse.json(
+      { error: "Quote exceeds safety cap; contact support" },
+      { status: 400 }
+    );
+  }
+
+  // Drift check: if the caller told us what price they were shown and it
+  // disagrees with the live quote by more than 25¢, refuse and return
+  // the fresh quote so the UI can re-confirm. Prevents "price jumped in
+  // the 30 seconds between quote and checkout" surprise charges.
+  const expected =
+    typeof body.expectedAmountUsd === "number" ? body.expectedAmountUsd : null;
+  if (expected !== null && Math.abs(expected - amountUsd) > 0.25) {
+    return NextResponse.json(
+      {
+        error: "Price changed — please re-confirm the updated total.",
+        code: "price_changed",
+        quote,
+      },
+      { status: 409 }
+    );
   }
 
   const origin =
@@ -77,7 +135,7 @@ export async function POST(request: Request) {
       successUrl: `${origin}/ship/${storyId}/success`,
       cancelUrl: `${origin}/ship/${storyId}`,
     });
-    return NextResponse.json({ url });
+    return NextResponse.json({ url, amountUsd });
   } catch (err) {
     console.error("[stripe/checkout] failed:", err);
     return NextResponse.json(

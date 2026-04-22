@@ -100,3 +100,15 @@ export async function retrieveCheckoutSession(
     expand: ["payment_intent"],
   });
 }
+
+// Verify a raw webhook payload with Stripe's signing secret. Throws if
+// the signature is missing, malformed, or doesn't match — which is the
+// behavior we want: a 400 back to Stripe so they retry, and no side
+// effects from forged traffic.
+export function constructWebhookEvent(
+  rawBody: string,
+  signature: string,
+  webhookSecret: string
+): Stripe.Event {
+  return stripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
+}

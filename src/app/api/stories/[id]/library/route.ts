@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 
 // Persist a user-uploaded image URL into stories.library_images so the
 // Studio's Images tab and picker keep showing it even after every layer
@@ -39,7 +39,15 @@ export async function POST(
   // Idempotent: dedupe by URL.
   const next = current.includes(url) ? current : [...current, url];
 
-  const { error } = await supabase
+  // Soft cap so a misbehaving client can't balloon the JSONB column.
+  if (next.length > 200) {
+    return NextResponse.json(
+      { error: "Library is full (max 200 images per story)" },
+      { status: 400 }
+    );
+  }
+
+  const { error } = await supabaseAdmin()
     .from("stories")
     .update({ library_images: next })
     .eq("id", id);
@@ -72,7 +80,7 @@ export async function DELETE(
 
   const next = current.filter((u) => u !== url);
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin()
     .from("stories")
     .update({ library_images: next })
     .eq("id", id);

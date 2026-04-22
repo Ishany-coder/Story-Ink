@@ -46,14 +46,14 @@ create index if not exists jobs_created_at_idx
 
 alter table public.jobs enable row level security;
 
+-- Anon needs to READ jobs so the client can poll /api/jobs/[id]. All
+-- writes go through server routes using the service-role client, which
+-- bypasses RLS, so the insert/update policies are intentionally absent.
 drop policy if exists "jobs readable" on public.jobs;
 create policy "jobs readable" on public.jobs for select using (true);
 
 drop policy if exists "anyone can insert jobs" on public.jobs;
-create policy "anyone can insert jobs" on public.jobs for insert with check (true);
-
 drop policy if exists "anyone can update jobs" on public.jobs;
-create policy "anyone can update jobs" on public.jobs for update using (true) with check (true);
 
 -- Per-story AI assistant system prompt. Nullable because most stories
 -- don't need one. When set, gets prepended to every text/image
@@ -65,9 +65,13 @@ create index if not exists stories_created_at_idx
   on public.stories (created_at desc);
 
 -- Row Level Security
--- The app currently uses the anon key from a Next.js route handler, so we
--- need a policy that lets it read and insert. Tighten this once real auth
--- is in place.
+-- Stories are public-read so server components (and the browser anon
+-- client used for rendering lists/detail pages) can list them without
+-- auth. Writes are NOT allowed from the anon key — every mutation goes
+-- through a server route that uses the service-role client, which
+-- bypasses RLS. This keeps "view only" access from the browser and
+-- prevents a rogue script with the anon key from deleting other users'
+-- stories.
 alter table public.stories enable row level security;
 
 drop policy if exists "stories are publicly readable" on public.stories;
@@ -76,49 +80,25 @@ create policy "stories are publicly readable"
   using (true);
 
 drop policy if exists "anyone can insert stories" on public.stories;
-create policy "anyone can insert stories"
-  on public.stories for insert
-  with check (true);
-
 drop policy if exists "anyone can update stories" on public.stories;
-create policy "anyone can update stories"
-  on public.stories for update
-  using (true)
-  with check (true);
-
 drop policy if exists "anyone can delete stories" on public.stories;
-create policy "anyone can delete stories"
-  on public.stories for delete
-  using (true);
 
 -- ---------------------------------------------------------------------------
 -- Supabase Storage: "uploads" bucket policies
 --
 -- The Studio saves user-uploaded images to a Storage bucket called "uploads".
 -- Create the bucket in the dashboard FIRST (Storage → New bucket → name
--- "uploads", Public ON), then run these policies. Marking a bucket public
--- only enables READ — the anon role still needs explicit policies to
--- write/update/delete.
+-- "uploads", Public ON). Marking a bucket public only enables READ.
+--
+-- Writes go exclusively through /api/upload (and internal server helpers)
+-- which use the service-role client and bypass RLS, so the anon role has
+-- NO write policies. The previous "anon can upload/update/delete" policies
+-- are dropped here for safety on existing deployments.
 -- ---------------------------------------------------------------------------
 
 drop policy if exists "anon can upload to uploads" on storage.objects;
-create policy "anon can upload to uploads"
-  on storage.objects for insert
-  to anon
-  with check (bucket_id = 'uploads');
-
 drop policy if exists "anon can update uploads" on storage.objects;
-create policy "anon can update uploads"
-  on storage.objects for update
-  to anon
-  using (bucket_id = 'uploads')
-  with check (bucket_id = 'uploads');
-
 drop policy if exists "anon can delete uploads" on storage.objects;
-create policy "anon can delete uploads"
-  on storage.objects for delete
-  to anon
-  using (bucket_id = 'uploads');
 
 -- ---------------------------------------------------------------------------
 -- Custom layouts
@@ -156,26 +136,16 @@ create index if not exists custom_layouts_global_idx
 
 alter table public.custom_layouts enable row level security;
 
+-- Anon can list layouts (the Studio picker pulls global + per-story).
+-- Mutations go through /api/custom-layouts using the service-role client.
 drop policy if exists "custom layouts readable" on public.custom_layouts;
 create policy "custom layouts readable"
   on public.custom_layouts for select
   using (true);
 
 drop policy if exists "anyone can insert custom layouts" on public.custom_layouts;
-create policy "anyone can insert custom layouts"
-  on public.custom_layouts for insert
-  with check (true);
-
 drop policy if exists "anyone can update custom layouts" on public.custom_layouts;
-create policy "anyone can update custom layouts"
-  on public.custom_layouts for update
-  using (true)
-  with check (true);
-
 drop policy if exists "anyone can delete custom layouts" on public.custom_layouts;
-create policy "anyone can delete custom layouts"
-  on public.custom_layouts for delete
-  using (true);
 
 -- ---------------------------------------------------------------------------
 -- Print orders (ship-a-storybook feature)
@@ -213,18 +183,69 @@ create index if not exists print_orders_created_at_idx
 
 alter table public.print_orders enable row level security;
 
+-- Anon can read order status so the /ship success page can show the
+-- current state by session id. Mutations happen server-side only
+-- (Stripe webhook + confirm fallback) via the service-role client.
 drop policy if exists "print orders readable" on public.print_orders;
 create policy "print orders readable"
   on public.print_orders for select
   using (true);
 
 drop policy if exists "anyone can insert print orders" on public.print_orders;
-create policy "anyone can insert print orders"
-  on public.print_orders for insert
-  with check (true);
-
 drop policy if exists "anyone can update print orders" on public.print_orders;
-create policy "anyone can update print orders"
-  on public.print_orders for update
-  using (true)
-  with check (true);
+
+-- ---------------------------------------------------------------------------
+-- Atomic per-page updater. Used by overlay saves and AI regeneration to
+-- avoid a read-modify-write race on the entire stories.pages JSONB array
+-- (two concurrent writers would otherwise drop one of the updates).
+--
+-- Takes a JSONB patch for a single page matched by pageNumber; merges the
+-- patch into just that element's object and writes only that path back
+-- via jsonb_set. The patch is shallow — top-level StoryPage fields only
+-- (text, imageUrl, overlays, layoutId, narrationUrl, narrationCacheKey).
+--
+-- Security: SECURITY DEFINER so callers using the service-role key can
+-- update; we do NOT grant execute to anon because all callers are
+-- server-side code with the service-role client.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.update_story_page_fields(
+  p_story_id uuid,
+  p_page_number int,
+  p_patch jsonb
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  idx int;
+  updated jsonb;
+  current jsonb;
+begin
+  -- Find the array index of the element whose pageNumber matches. We
+  -- iterate rather than relying on implicit ordering because the JSONB
+  -- array may not be stored in page-number order.
+  select position - 1
+    into idx
+    from stories s,
+         jsonb_array_elements(s.pages) with ordinality as e(elem, position)
+   where s.id = p_story_id
+     and (elem->>'pageNumber')::int = p_page_number
+   limit 1;
+
+  if idx is null then
+    raise exception 'Page % not found on story %', p_page_number, p_story_id
+      using errcode = 'P0002';
+  end if;
+
+  select pages->idx into current from stories where id = p_story_id;
+  updated := coalesce(current, '{}'::jsonb) || coalesce(p_patch, '{}'::jsonb);
+
+  update stories
+     set pages = jsonb_set(pages, array[idx::text], updated, false)
+   where id = p_story_id;
+end;
+$$;
+
+revoke all on function public.update_story_page_fields(uuid, int, jsonb) from public;
+revoke all on function public.update_story_page_fields(uuid, int, jsonb) from anon;

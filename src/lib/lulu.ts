@@ -5,6 +5,13 @@
 // SKU locked to 8.5×8.5" color hardcover casewrap (LULU_DEFAULT_SKU). Swap
 // via env LULU_PRODUCT_SKU without code changes if the book spec changes.
 
+import { fetchWithTimeout } from "@/lib/http";
+
+// Hard upper bound on any outbound Lulu call. Quotes and print-job
+// creation should be <5s typical. 20s gives headroom without leaving
+// the user waiting on a stuck vendor.
+const LULU_TIMEOUT_MS = 20_000;
+
 export class LuluError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -42,7 +49,18 @@ function productSku(): string {
 
 // Lulu uses OAuth2 client-credentials. The token endpoint is inside the
 // auth realm hosted on their main domain (not api.*).
+//
+// Tokens are cached in-memory for (expiry - 60s) so the common path of
+// quote + checkout + later print-job creation doesn't do three auth
+// round-trips. A 60s safety window avoids racing expiry mid-call. The
+// cache is process-local; each serverless instance warms its own.
+let _tokenCache: { value: string; expiresAt: number } | null = null;
+const TOKEN_SAFETY_WINDOW_MS = 60_000;
+
 async function getAccessToken(): Promise<string> {
+  if (_tokenCache && _tokenCache.expiresAt > Date.now()) {
+    return _tokenCache.value;
+  }
   const authBase =
     process.env.LULU_ENV === "production"
       ? "https://api.lulu.com"
@@ -51,14 +69,18 @@ async function getAccessToken(): Promise<string> {
   const clientSecret = requireEnv("LULU_CLIENT_SECRET");
   const basic = Buffer.from(`${clientKey}:${clientSecret}`).toString("base64");
 
-  const res = await fetch(`${authBase}/auth/realms/glasstree/protocol/openid-connect/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${basic}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+  const res = await fetchWithTimeout(
+    `${authBase}/auth/realms/glasstree/protocol/openid-connect/token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
     },
-    body: "grant_type=client_credentials",
-  });
+    LULU_TIMEOUT_MS
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new LuluError(
@@ -66,8 +88,18 @@ async function getAccessToken(): Promise<string> {
       `lulu auth failed (${res.status}): ${text.slice(0, 300)}`
     );
   }
-  const json = (await res.json()) as { access_token?: string };
+  const json = (await res.json()) as {
+    access_token?: string;
+    expires_in?: number;
+  };
   if (!json.access_token) throw new LuluError(500, "lulu auth missing token");
+  // Default to 5 min if expires_in isn't returned. Subtract a safety
+  // window so we roll to a fresh token before it actually expires.
+  const ttlMs = (json.expires_in ?? 300) * 1000;
+  _tokenCache = {
+    value: json.access_token,
+    expiresAt: Date.now() + Math.max(ttlMs - TOKEN_SAFETY_WINDOW_MS, 30_000),
+  };
   return json.access_token;
 }
 
@@ -138,7 +170,7 @@ export async function quotePrintAndShipping(
     shipping_option: level,
   };
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${apiBase()}/print-job-cost-calculations/`,
     {
       method: "POST",
@@ -147,7 +179,8 @@ export async function quotePrintAndShipping(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
-    }
+    },
+    LULU_TIMEOUT_MS
   );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -229,14 +262,18 @@ export async function createPrintJob(
     shipping_level: args.shippingLevel ?? "MAIL",
   };
 
-  const res = await fetch(`${apiBase()}/print-jobs/`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+  const res = await fetchWithTimeout(
+    `${apiBase()}/print-jobs/`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    LULU_TIMEOUT_MS
+  );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new LuluError(

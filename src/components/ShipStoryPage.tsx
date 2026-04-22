@@ -131,7 +131,10 @@ export default function ShipStoryPage({ story }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           storyId: story.id,
-          amountUsd: quote.totalUsd,
+          // Display-only drift check. Server ignores for the charge and
+          // recomputes a fresh Lulu quote; sending it lets the server
+          // reject with code=price_changed when the quote has drifted.
+          expectedAmountUsd: quote.totalUsd,
           address: toPayload(address),
         }),
       });

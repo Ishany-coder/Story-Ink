@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
-import type { Layer, Story, StoryPage } from "@/lib/types";
+import { updateStoryPageFields } from "@/lib/supabase";
+import type { Layer } from "@/lib/types";
 
 export const maxDuration = 30;
 
@@ -31,37 +31,20 @@ export async function PUT(
     );
   }
 
-  const { data: story, error: fetchErr } = await supabase
-    .from("stories")
-    .select("id, pages")
-    .eq("id", id)
-    .single<Pick<Story, "id" | "pages">>();
-
-  if (fetchErr || !story) {
-    console.error("[overlays] fetch failed:", fetchErr);
-    return NextResponse.json({ error: "Story not found" }, { status: 404 });
-  }
-
-  const nextPages: StoryPage[] = story.pages.map((p) =>
-    p.pageNumber === pageNum
-      ? {
-          ...p,
-          overlays: body.overlays,
-          ...(body.layoutId ? { layoutId: body.layoutId } : {}),
-        }
-      : p
-  );
-
-  const { error: updateErr } = await supabase
-    .from("stories")
-    .update({ pages: nextPages })
-    .eq("id", id);
-
-  if (updateErr) {
-    console.error("[overlays] persist failed:", updateErr);
+  try {
+    await updateStoryPageFields(id, pageNum, {
+      overlays: body.overlays,
+      ...(body.layoutId ? { layoutId: body.layoutId } : {}),
+    });
+  } catch (err) {
+    console.error("[overlays] persist failed:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    // The RPC raises errcode P0002 for "page not found". Surface that as
+    // a 404 so the Studio can recover; anything else is a real 500.
+    const notFound = msg.includes("P0002") || msg.toLowerCase().includes("not found");
     return NextResponse.json(
-      { error: "Failed to save overlays" },
-      { status: 500 }
+      { error: notFound ? "Page not found" : "Failed to save overlays" },
+      { status: notFound ? 404 : 500 }
     );
   }
 

@@ -271,6 +271,12 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
   // prepend to the list so they appear immediately in the Layouts tab.
   const [customLayouts, setCustomLayouts] = useState<CustomLayout[]>([]);
 
+  // Does clicking a layout tile apply to the whole book or just the page the
+  // user is looking at? Default "all" preserves the original behavior (books
+  // usually read better with a consistent layout). "page" is a per-session
+  // toggle for one-off exceptions like a title spread or a full-bleed hero.
+  const [layoutScope, setLayoutScope] = useState<"all" | "page">("all");
+
   // "Define your layout" mode. Non-null while the user is arranging the
   // IMAGE and TEXT rectangles on the canvas. A layout has >=1 image region
   // and >=1 text region; extras beyond the first become empty placeholder
@@ -438,27 +444,32 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
   }, []);
 
   const applyLayout = useCallback(
-    (layoutId: string) => {
+    (layoutId: string, scope: "all" | "page" = layoutScope) => {
       if (!currentPage) return;
       const layout = getLayout(layoutId, customLayouts);
-      // Apply to every page in the book, not just the current one — keeps
-      // the book visually consistent and matches the "all pages in this
-      // story" scope the user picked when saving per-story layouts.
+      const targetPageNumber = currentPage.pageNumber;
       setStory((prev) => ({
         ...prev,
-        pages: prev.pages.map((p) => ({
-          ...p,
-          layoutId,
-          overlays: morphLayersToLayout(p.overlays ?? [], layout),
-        })),
+        pages: prev.pages.map((p) => {
+          if (scope === "page" && p.pageNumber !== targetPageNumber) return p;
+          return {
+            ...p,
+            layoutId,
+            overlays: morphLayersToLayout(p.overlays ?? [], layout),
+          };
+        }),
       }));
       setDirty((d) => {
         const next = { ...d };
-        for (const p of story.pages) next[p.pageNumber] = true;
+        if (scope === "all") {
+          for (const p of story.pages) next[p.pageNumber] = true;
+        } else {
+          next[targetPageNumber] = true;
+        }
         return next;
       });
     },
-    [currentPage, customLayouts, story.pages]
+    [currentPage, customLayouts, story.pages, layoutScope]
   );
 
   // ---- Custom layout definition -------------------------------------------
@@ -576,20 +587,30 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
       setCustomLayouts((prev) => [layout, ...prev]);
       setDefineMode(null);
       // Apply immediately so the user sees their freshly-designed layout
-      // on the current page(s) without an extra click.
+      // on the current page(s) without an extra click. Honors the same
+      // per-page / all-pages toggle as the regular Apply action.
       if (currentPage) {
         const built = getLayout(layout.id, [layout]);
+        const targetPageNumber = currentPage.pageNumber;
         setStory((prev) => ({
           ...prev,
-          pages: prev.pages.map((p) => ({
-            ...p,
-            layoutId: layout.id,
-            overlays: morphLayersToLayout(p.overlays ?? [], built),
-          })),
+          pages: prev.pages.map((p) => {
+            if (layoutScope === "page" && p.pageNumber !== targetPageNumber)
+              return p;
+            return {
+              ...p,
+              layoutId: layout.id,
+              overlays: morphLayersToLayout(p.overlays ?? [], built),
+            };
+          }),
         }));
         setDirty((d) => {
           const next = { ...d };
-          for (const p of story.pages) next[p.pageNumber] = true;
+          if (layoutScope === "all") {
+            for (const p of story.pages) next[p.pageNumber] = true;
+          } else {
+            next[targetPageNumber] = true;
+          }
           return next;
         });
       }
@@ -600,7 +621,15 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
     } finally {
       setSaveLayoutPending(false);
     }
-  }, [defineMode, defineName, defineScope, story.id, story.pages, currentPage]);
+  }, [
+    defineMode,
+    defineName,
+    defineScope,
+    story.id,
+    story.pages,
+    currentPage,
+    layoutScope,
+  ]);
 
   // Delete key removes selected (when not editing text inline).
   useEffect(() => {
@@ -790,6 +819,84 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
     }
   }
 
+  // Bulk-save every page that has pending changes. Useful after an "apply
+  // to all pages" layout change, or when the user has bounced between
+  // several pages and forgot which ones were edited.
+  //
+  // Requests fan out in parallel. Each page's save is independent at the
+  // DB layer (atomic jsonb_set on the pages array, see
+  // update_story_page_fields), so one failure won't corrupt another
+  // page. We collect all failures and surface a single summarized error
+  // so the user sees which pages still need attention.
+  async function saveAllPages() {
+    const dirtyPageNumbers = story.pages
+      .map((p) => p.pageNumber)
+      .filter((pn) => dirty[pn]);
+    if (dirtyPageNumbers.length === 0) return;
+
+    setSaving(true);
+    setSaveError(null);
+
+    const results = await Promise.all(
+      dirtyPageNumbers.map(async (pageNumber) => {
+        const page = story.pages.find((p) => p.pageNumber === pageNumber);
+        if (!page) return { pageNumber, ok: true as const };
+        try {
+          const res = await fetch(
+            `/api/stories/${story.id}/pages/${pageNumber}/overlays`,
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                overlays: page.overlays ?? [],
+                layoutId: page.layoutId ?? DEFAULT_LAYOUT_ID,
+              }),
+            }
+          );
+          if (!res.ok) {
+            const body = (await res.json().catch(() => ({}))) as {
+              error?: string;
+            };
+            return {
+              pageNumber,
+              ok: false as const,
+              error: body.error || `HTTP ${res.status}`,
+            };
+          }
+          return { pageNumber, ok: true as const };
+        } catch (err) {
+          return {
+            pageNumber,
+            ok: false as const,
+            error: err instanceof Error ? err.message : "Save failed",
+          };
+        }
+      })
+    );
+
+    const succeeded = results.filter((r) => r.ok).map((r) => r.pageNumber);
+    const failed = results.filter((r) => !r.ok);
+
+    if (succeeded.length > 0) {
+      setDirty((d) => {
+        const next = { ...d };
+        for (const pn of succeeded) next[pn] = false;
+        return next;
+      });
+    }
+
+    if (failed.length > 0) {
+      const pages = failed.map((f) => f.pageNumber).join(", ");
+      const firstMessage = failed[0].error ?? "Save failed";
+      setSaveError(
+        failed.length === 1
+          ? `Page ${pages}: ${firstMessage}`
+          : `${failed.length} pages failed to save (${pages}). First error: ${firstMessage}`
+      );
+    }
+    setSaving(false);
+  }
+
   // ---- Sidebar actions ----------------------------------------------------
 
   async function uploadFile(file: File): Promise<string> {
@@ -930,6 +1037,10 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
   // ---- Render -------------------------------------------------------------
 
   const isDirty = !!dirty[currentPage?.pageNumber ?? -1];
+  const dirtyPageCount = story.pages.reduce(
+    (n, p) => (dirty[p.pageNumber] ? n + 1 : n),
+    0
+  );
 
   const selectedIsLayoutText = useMemo(
     () =>
@@ -956,9 +1067,11 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
           {saveError && (
             <span className="text-sm font-bold text-rose-500">{saveError}</span>
           )}
-          {isDirty && !saving && (
+          {dirtyPageCount > 0 && !saving && (
             <span className="text-sm font-bold text-amber-500">
-              Unsaved changes
+              {dirtyPageCount === 1
+                ? "Unsaved changes"
+                : `${dirtyPageCount} pages unsaved`}
             </span>
           )}
           <button
@@ -968,6 +1081,23 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
             className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-5 py-2 text-sm font-black text-white shadow-md shadow-purple-200 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
           >
             {saving ? "Saving..." : "Save page"}
+          </button>
+          <button
+            type="button"
+            onClick={saveAllPages}
+            disabled={saving || dirtyPageCount < 2}
+            title={
+              dirtyPageCount < 2
+                ? "No other pages have unsaved changes"
+                : `Save ${dirtyPageCount} pages`
+            }
+            className="rounded-2xl border-2 border-purple-300 bg-white px-4 py-2 text-sm font-black text-purple-600 shadow-sm transition-all hover:border-purple-400 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving
+              ? "Saving..."
+              : dirtyPageCount > 1
+              ? `Save all (${dirtyPageCount})`
+              : "Save all"}
           </button>
         </div>
       </div>
@@ -1024,6 +1154,43 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
 
           {tab === "layouts" && !defineMode && (
             <div className="space-y-2">
+              <div>
+                <div className="mb-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+                  Apply to
+                </div>
+                <div
+                  role="radiogroup"
+                  aria-label="Layout apply scope"
+                  className="flex rounded-2xl border-2 border-purple-100 bg-purple-50/60 p-1"
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={layoutScope === "all"}
+                    onClick={() => setLayoutScope("all")}
+                    className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
+                      layoutScope === "all"
+                        ? "bg-white text-purple-600 shadow-sm"
+                        : "text-purple-400 hover:text-purple-500"
+                    }`}
+                  >
+                    All pages
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={layoutScope === "page"}
+                    onClick={() => setLayoutScope("page")}
+                    className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
+                      layoutScope === "page"
+                        ? "bg-white text-purple-600 shadow-sm"
+                        : "text-purple-400 hover:text-purple-500"
+                    }`}
+                  >
+                    This page
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={startDefineLayout}

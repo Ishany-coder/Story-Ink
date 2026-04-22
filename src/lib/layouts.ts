@@ -7,18 +7,22 @@ import {
   type TextLayer,
 } from "./types";
 
+// Order matters: LAYOUTS[0] is the default for new stories (via
+// DEFAULT_LAYOUT_ID) and the fallback for unknown/legacy layoutIds in
+// getLayout. The Studio's Layouts tab also renders in this order, so
+// the default appears first in the picker.
 export const LAYOUTS: Layout[] = [
-  {
-    id: "full-bleed-caption",
-    name: "Full bleed + caption",
-    imageRegion: { x: 0, y: 0, width: CANVAS_SIZE, height: CANVAS_SIZE },
-    textRegion: { x: 40, y: 540, width: 720, height: 220 },
-  },
   {
     id: "top-image-bottom-text",
     name: "Top image / bottom text",
     imageRegion: { x: 0, y: 0, width: CANVAS_SIZE, height: 520 },
     textRegion: { x: 40, y: 540, width: 720, height: 240 },
+  },
+  {
+    id: "full-bleed-caption",
+    name: "Full bleed + caption",
+    imageRegion: { x: 0, y: 0, width: CANVAS_SIZE, height: CANVAS_SIZE },
+    textRegion: { x: 40, y: 540, width: 720, height: 220 },
   },
   {
     id: "side-by-side",

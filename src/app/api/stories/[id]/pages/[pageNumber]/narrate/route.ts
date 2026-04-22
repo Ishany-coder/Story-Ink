@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   supabase,
-  supabaseAdmin,
+  updateStoryPageFields,
   uploadGeneratedAudio,
 } from "@/lib/supabase";
 import {
@@ -9,7 +9,7 @@ import {
   narrationCacheKey,
   textToSpeech,
 } from "@/lib/elevenlabs";
-import type { Story, StoryPage } from "@/lib/types";
+import type { Story } from "@/lib/types";
 
 // TTS can take several seconds for a longer page; give the route runtime
 // headroom for multi-paragraph pages even on cold starts.
@@ -105,19 +105,14 @@ export async function POST(
     );
   }
 
-  // Persist the cache on this page. Use the admin client because RLS may
-  // be tightened later; for now it matters that nothing silently fails.
-  const nextPages: StoryPage[] = story.pages.map((p) =>
-    p.pageNumber === pageNum
-      ? { ...p, narrationUrl: audioUrl, narrationCacheKey: cacheKey }
-      : p
-  );
-  const { error: updateErr } = await supabaseAdmin()
-    .from("stories")
-    .update({ pages: nextPages })
-    .eq("id", id);
-
-  if (updateErr) {
+  // Persist the cache on this page atomically so a concurrent overlay
+  // save (Studio) doesn't clobber it.
+  try {
+    await updateStoryPageFields(id, pageNum, {
+      narrationUrl: audioUrl,
+      narrationCacheKey: cacheKey,
+    });
+  } catch (updateErr) {
     // Non-fatal: the client still gets the URL; it just won't be cached
     // across requests so next play re-bills. Log loudly.
     console.error(
