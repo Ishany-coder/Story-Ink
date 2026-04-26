@@ -123,6 +123,75 @@ export interface Story {
   // unset. The browser also stores a global system prompt in localStorage;
   // both are concatenated (global first, then story) before being sent.
   ai_system_prompt?: string | null;
+  // Auth & visibility (introduced when the app gained Supabase Auth).
+  user_id?: string | null;
+  is_public?: boolean;
+  // Pet vs. generic story (per-story toggle from creation form).
+  kind?: "pet" | "generic";
+  pet_id?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Pet types
+// ---------------------------------------------------------------------------
+
+export type PetSpecies =
+  | "dog"
+  | "cat"
+  | "bird"
+  | "rabbit"
+  | "horse"
+  | "reptile"
+  | "fish"
+  | "other";
+
+export const PET_SPECIES: PetSpecies[] = [
+  "dog",
+  "cat",
+  "bird",
+  "rabbit",
+  "horse",
+  "reptile",
+  "fish",
+  "other",
+];
+
+// "living" → playful, present-tense adventures. "memorial" → softer
+// celebratory recollection, with guardrails against jeopardy and
+// fan-fiction (per the user's spec).
+export type PetMode = "living" | "memorial";
+
+export interface Pet {
+  id: string;
+  user_id: string;
+  name: string;
+  species: PetSpecies;
+  breed: string | null;
+  age: string | null;
+  // Free-form notes seeded into every story prompt for this pet. Kept
+  // intentionally unstructured so users can write naturally.
+  personality_notes: string | null;
+  mode: PetMode;
+  passed_at: string | null; // ISO date string when mode === "memorial"
+  // Reference photo URLs (Supabase Storage). Capped at 10 in the API.
+  photos: string[];
+  is_public: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// What the create form posts. user_id is filled in server-side from
+// the auth session, so it's not in the request body.
+export interface CreatePetInput {
+  name: string;
+  species: PetSpecies;
+  breed?: string | null;
+  age?: string | null;
+  personality_notes?: string | null;
+  mode: PetMode;
+  passed_at?: string | null;
+  photos?: string[];
+  is_public?: boolean;
 }
 
 export interface GenerateRequest {
