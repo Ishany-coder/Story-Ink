@@ -298,28 +298,28 @@ language plpgsql
 security definer
 as $$
 declare
-  idx int;
-  updated jsonb;
-  current jsonb;
+  v_idx int;
+  v_merged jsonb;
+  v_current jsonb;
 begin
-  select position - 1
-    into idx
-    from stories s,
-         jsonb_array_elements(s.pages) with ordinality as e(elem, position)
+  select pos - 1
+    into v_idx
+    from public.stories s,
+         jsonb_array_elements(s.pages) with ordinality as e(elem, pos)
    where s.id = p_story_id
      and (elem->>'pageNumber')::int = p_page_number
    limit 1;
 
-  if idx is null then
+  if v_idx is null then
     raise exception 'Page % not found on story %', p_page_number, p_story_id
       using errcode = 'P0002';
   end if;
 
-  select pages->idx into current from stories where id = p_story_id;
-  updated := coalesce(current, '{}'::jsonb) || coalesce(p_patch, '{}'::jsonb);
+  select pages->v_idx into v_current from public.stories where id = p_story_id;
+  v_merged := coalesce(v_current, '{}'::jsonb) || coalesce(p_patch, '{}'::jsonb);
 
-  update stories
-     set pages = jsonb_set(pages, array[idx::text], updated, false)
+  update public.stories
+     set pages = jsonb_set(pages, array[v_idx::text], v_merged, false)
    where id = p_story_id;
 end;
 $$;

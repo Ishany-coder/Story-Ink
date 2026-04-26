@@ -10,7 +10,13 @@
 
 import { Inngest } from "inngest";
 
-export const inngest = new Inngest({ id: "storyink" });
+export const inngest = new Inngest({
+  id: "storyink",
+  // In dev, route to the local Inngest dev server (http://localhost:8288)
+  // automatically — no INNGEST_DEV env var or event/signing keys required.
+  // Production reads the real INNGEST_EVENT_KEY / INNGEST_SIGNING_KEY.
+  isDev: process.env.NODE_ENV !== "production",
+});
 
 // Event names used across the app. Importing from here keeps typos out of
 // both the send sites (HTTP routes) and the function triggers.

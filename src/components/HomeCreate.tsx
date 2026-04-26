@@ -132,13 +132,14 @@ export default function HomeCreate({ pets }: Props) {
         <div className="mx-auto flex w-fit rounded-full border-2 border-purple-200 bg-purple-50/60 p-1">
           <ModeToggleButton
             active={kind === "pet"}
-            onClick={() => setKind("pet")}
-            label={
-              pets.length === 0
-                ? "Pet story (add a pet first)"
-                : "Pet story"
-            }
-            disabled={pets.length === 0}
+            onClick={() => {
+              if (pets.length === 0) {
+                router.push("/pets/new");
+              } else {
+                setKind("pet");
+              }
+            }}
+            label="Pet story"
           />
           <ModeToggleButton
             active={kind === "generic"}
@@ -234,19 +235,16 @@ function ModeToggleButton({
   active,
   onClick,
   label,
-  disabled = false,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
-  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
-      className={`rounded-full px-5 py-2 text-sm font-black transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`rounded-full px-5 py-2 text-sm font-black transition-all ${
         active
           ? "bg-white text-purple-600 shadow-sm"
           : "text-purple-400 hover:text-purple-500"
