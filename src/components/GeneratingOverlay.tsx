@@ -1,8 +1,11 @@
-export default function GeneratingOverlay() {
+interface Props {
+  progress?: { current: number; total: number } | null;
+}
+
+export default function GeneratingOverlay({ progress = null }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#fffbf5]/95 backdrop-blur-md">
       <div className="flex flex-col items-center gap-6">
-        {/* Animated book */}
         <div className="relative">
           <div className="animate-wiggle text-8xl">&#128218;</div>
           <div className="animate-sparkle absolute -right-4 -top-4 text-3xl">&#10024;</div>
@@ -14,24 +17,39 @@ export default function GeneratingOverlay() {
             Making your story...
           </p>
           <p className="mt-2 text-lg font-semibold text-purple-400">
-            Our magic pen is writing and drawing! &#127912;
+            {progress
+              ? `Drawing page ${progress.current} of ${progress.total}...`
+              : "Our magic pen is writing and drawing! \u{1F3A8}"}
           </p>
         </div>
 
-        {/* Bouncing dots */}
-        <div className="flex gap-3">
-          {[0, 1, 2, 3, 4].map((i) => (
+        {progress ? (
+          <div className="h-3 w-72 overflow-hidden rounded-full bg-purple-100">
             <div
-              key={i}
-              className="h-4 w-4 rounded-full"
+              className="h-full rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 transition-[width] duration-500"
               style={{
-                background: ["#a855f7", "#ec4899", "#f97316", "#22c55e", "#3b82f6"][i],
-                animation: "bounce-dot 1.4s ease-in-out infinite",
-                animationDelay: `${i * 0.15}s`,
+                width: `${Math.min(
+                  100,
+                  Math.round((progress.current / Math.max(progress.total, 1)) * 100)
+                )}%`,
               }}
             />
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="flex gap-3">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="h-4 w-4 rounded-full"
+                style={{
+                  background: ["#a855f7", "#ec4899", "#f97316", "#22c55e", "#3b82f6"][i],
+                  animation: "bounce-dot 1.4s ease-in-out infinite",
+                  animationDelay: `${i * 0.15}s`,
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -9,9 +9,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Poll cadence: 1s — fast enough for short calls, slow enough that a few
 // dozen concurrent polls won't hammer Supabase.
 
+// "running" carries any partial result the Inngest function has
+// written so far — story generation uses this to surface "Drawing
+// page 4 of 10..." style progress without a separate channel.
 export type JobState<TResult> =
   | { kind: "idle" }
   | { kind: "polling"; jobId: string }
+  | { kind: "running"; jobId: string; result: unknown | null }
   | { kind: "done"; jobId: string; result: TResult }
   | { kind: "failed"; jobId: string; error: string };
 
@@ -25,6 +29,18 @@ interface JobRow<TResult> {
   status: "queued" | "running" | "done" | "failed";
   result: TResult | null;
   error: string | null;
+}
+
+// Avoid spamming setState with the same partial-progress object on
+// every poll. Equality here is shallow JSON — fine because progress
+// payloads are tiny.
+function shallowJsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 export function useJobPolling<TResult>() {
@@ -41,6 +57,7 @@ export function useJobPolling<TResult>() {
     setState({ kind: "polling", jobId });
 
     (async () => {
+      let lastProgress: unknown = null;
       for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
         if (cancelRef.current) return;
         try {
@@ -66,6 +83,19 @@ export function useJobPolling<TResult>() {
                 });
               }
               return;
+            }
+            if (row.status === "running") {
+              if (
+                !cancelRef.current &&
+                !shallowJsonEqual(row.result, lastProgress)
+              ) {
+                lastProgress = row.result;
+                setState({
+                  kind: "running",
+                  jobId,
+                  result: row.result ?? null,
+                });
+              }
             }
           }
         } catch (err) {
