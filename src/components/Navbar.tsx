@@ -20,7 +20,7 @@ export default async function Navbar() {
           <span className="text-purple-500">Story</span>
           <span className="text-pink-500">Ink</span>
           <span className="ml-1 inline-block animate-wiggle text-2xl">
-            &#9997;&#65039;
+            &#128062;
           </span>
         </Link>
 

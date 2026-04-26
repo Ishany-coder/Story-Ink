@@ -14,9 +14,9 @@ const fredoka = Fredoka({
 });
 
 export const metadata: Metadata = {
-  title: "StoryInk — Make Your Own Storybooks!",
+  title: "StoryInk — Storybooks about your pet",
   description:
-    "Create amazing illustrated storybooks with AI! Just describe your adventure and watch the magic happen.",
+    "Upload a few photos of your pet and turn them into the hero of an illustrated storybook. Living adventures or memorial keepsakes, printed and shipped.",
 };
 
 export default function RootLayout({
