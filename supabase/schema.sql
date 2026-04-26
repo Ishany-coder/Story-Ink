@@ -32,12 +32,19 @@ create table if not exists public.pets (
   -- Reference photo URLs. Capped to 10 in the API to keep token cost
   -- and image-grounding latency reasonable.
   photos jsonb not null default '[]'::jsonb,
+  -- Optional override for the templated memorial dedication page on
+  -- printed memorial books. NULL → use the template "In loving memory
+  -- of {name}, {dates}".
+  dedication_text text,
   -- Per-pet visibility. Independent of any story's is_public — a pet
   -- can stay private even if some of its stories are public.
   is_public boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Idempotent for existing deployments that pre-date this column.
+alter table public.pets add column if not exists dedication_text text;
 
 create index if not exists pets_user_id_idx on public.pets (user_id);
 create index if not exists pets_created_at_idx on public.pets (created_at desc);

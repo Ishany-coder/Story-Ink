@@ -132,6 +132,7 @@ export async function POST(request: Request) {
     mode: body.mode,
     passed_at: passedAt,
     photos,
+    dedication_text: sanitizeStr(body.dedication_text, 600),
     is_public: body.is_public === true,
   };
 

@@ -27,6 +27,7 @@ export default function PetForm({ initial = null }: Props) {
   const [notes, setNotes] = useState(initial?.personality_notes ?? "");
   const [mode, setMode] = useState<PetMode>(initial?.mode ?? "living");
   const [passedAt, setPassedAt] = useState(initial?.passed_at ?? "");
+  const [dedication, setDedication] = useState(initial?.dedication_text ?? "");
   const [isPublic, setIsPublic] = useState(initial?.is_public ?? false);
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
 
@@ -92,6 +93,8 @@ export default function PetForm({ initial = null }: Props) {
       personality_notes: notes.trim() || null,
       mode,
       passed_at: mode === "memorial" ? passedAt : null,
+      dedication_text:
+        mode === "memorial" && dedication.trim() ? dedication.trim() : null,
       photos,
       is_public: isPublic,
     };
@@ -224,18 +227,32 @@ export default function PetForm({ initial = null }: Props) {
       </Field>
 
       {mode === "memorial" && (
-        <Field
-          label="Passed away on"
-          hint="Used for the memorial dedication page on printed books."
-        >
-          <input
-            type="date"
-            value={passedAt ?? ""}
-            onChange={(e) => setPassedAt(e.target.value)}
-            required
-            className="w-full rounded-2xl border-2 border-purple-200 bg-white px-4 py-2 text-base focus:border-purple-400 focus:outline-none"
-          />
-        </Field>
+        <>
+          <Field
+            label="Passed away on"
+            hint="Used for the memorial dedication page on printed books."
+          >
+            <input
+              type="date"
+              value={passedAt ?? ""}
+              onChange={(e) => setPassedAt(e.target.value)}
+              required
+              className="w-full rounded-2xl border-2 border-purple-200 bg-white px-4 py-2 text-base focus:border-purple-400 focus:outline-none"
+            />
+          </Field>
+          <Field
+            label="Dedication text (optional)"
+            hint='Leave blank to use the default: "In loving memory of [name], [dates]". Anything you write here replaces the default on both the front and back of the printed book.'
+          >
+            <textarea
+              value={dedication ?? ""}
+              onChange={(e) => setDedication(e.target.value)}
+              maxLength={600}
+              rows={3}
+              className="w-full resize-none rounded-2xl border-2 border-purple-200 bg-white px-4 py-3 text-base focus:border-purple-400 focus:outline-none"
+            />
+          </Field>
+        </>
       )}
 
       <Field

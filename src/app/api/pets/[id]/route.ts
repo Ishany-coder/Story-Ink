@@ -74,6 +74,7 @@ interface UpdateBody {
   mode?: unknown;
   passed_at?: unknown;
   photos?: unknown;
+  dedication_text?: unknown;
   is_public?: unknown;
 }
 
@@ -183,6 +184,13 @@ export async function PATCH(request: Request, ctx: Ctx) {
       );
     }
     patch.photos = photos;
+  }
+
+  if (body.dedication_text !== undefined) {
+    patch.dedication_text =
+      body.dedication_text === null
+        ? null
+        : sanitizeStr(body.dedication_text, 600);
   }
 
   if (body.is_public !== undefined) {

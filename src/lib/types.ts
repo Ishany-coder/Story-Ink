@@ -175,6 +175,10 @@ export interface Pet {
   passed_at: string | null; // ISO date string when mode === "memorial"
   // Reference photo URLs (Supabase Storage). Capped at 10 in the API.
   photos: string[];
+  // Optional override text for the memorial dedication page on print.
+  // Null falls back to the templated "In loving memory of {name},
+  // {dates}" when generating PDFs.
+  dedication_text?: string | null;
   is_public: boolean;
   created_at: string;
   updated_at: string;
@@ -191,6 +195,7 @@ export interface CreatePetInput {
   mode: PetMode;
   passed_at?: string | null;
   photos?: string[];
+  dedication_text?: string | null;
   is_public?: boolean;
 }
 

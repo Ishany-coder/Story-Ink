@@ -12,7 +12,7 @@ import {
   type PDFPage,
   type RGB,
 } from "pdf-lib";
-import type { Story, StoryPage } from "@/lib/types";
+import type { Pet, Story, StoryPage } from "@/lib/types";
 import { uploadGeneratedAudio } from "@/lib/supabase";
 import { fetchWithTimeout, isAllowedContentUrl } from "@/lib/http";
 
@@ -154,9 +154,20 @@ function drawCaption(
 
 const MIN_INTERIOR_PAGES = 24;
 
-export async function buildInteriorPdf(story: Story): Promise<Uint8Array> {
+export interface InteriorPdfOptions {
+  // For memorial pet stories, render dedication pages as front + back
+  // matter (per the "C: both" answer to question 6). NULL → no
+  // dedication pages, regular interior only.
+  pet?: Pet | null;
+}
+
+export async function buildInteriorPdf(
+  story: Story,
+  options: InteriorPdfOptions = {}
+): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const italic = await pdf.embedFont(StandardFonts.HelveticaOblique);
 
   const pageSize = (TRIM_IN + BLEED_IN * 2) * PT_PER_IN;
   const trimOffset = BLEED_IN * PT_PER_IN; // where the trim box starts
@@ -165,6 +176,19 @@ export async function buildInteriorPdf(story: Story): Promise<Uint8Array> {
 
   const captionBoxHeight = 1.6 * PT_PER_IN; // ~1.6" strip at the bottom
   const imageBoxHeight = trimSize - captionBoxHeight;
+
+  const memorial = options.pet?.mode === "memorial";
+
+  // Front matter: dedication page on memorial books only.
+  if (memorial && options.pet) {
+    drawDedicationPage(pdf, font, italic, options.pet, {
+      pageSize,
+      trimOffset,
+      trimSize,
+      safe,
+      placement: "front",
+    });
+  }
 
   for (const storyPage of story.pages) {
     await drawInteriorPage(pdf, storyPage, font, {
@@ -177,6 +201,17 @@ export async function buildInteriorPdf(story: Story): Promise<Uint8Array> {
     });
   }
 
+  // Back matter: a quieter "in loving memory" panel after the story.
+  if (memorial && options.pet) {
+    drawDedicationPage(pdf, font, italic, options.pet, {
+      pageSize,
+      trimOffset,
+      trimSize,
+      safe,
+      placement: "back",
+    });
+  }
+
   // Pad up to the minimum with blank pages so the physical book has enough
   // signatures for hardcover binding.
   while (pdf.getPageCount() < MIN_INTERIOR_PAGES) {
@@ -184,6 +219,108 @@ export async function buildInteriorPdf(story: Story): Promise<Uint8Array> {
   }
 
   return pdf.save();
+}
+
+// Memorial dedication page. Image-free, soft palette, two text blocks:
+// a small italic intro ("In loving memory of") and the pet's name +
+// dates centered. The pet.dedication_text override (if set) replaces
+// the templated body on both placements.
+function drawDedicationPage(
+  pdf: PDFDocument,
+  font: PDFFont,
+  italic: PDFFont,
+  pet: Pet,
+  dims: {
+    pageSize: number;
+    trimOffset: number;
+    trimSize: number;
+    safe: number;
+    placement: "front" | "back";
+  }
+) {
+  const { pageSize, trimOffset, trimSize, safe, placement } = dims;
+  const page = pdf.addPage([pageSize, pageSize]);
+
+  // Soft cream background, fills bleed.
+  page.drawRectangle({
+    x: 0,
+    y: 0,
+    width: pageSize,
+    height: pageSize,
+    color: rgb(0.985, 0.972, 0.95),
+  });
+
+  // Subtle laurel-style framing rule near the bottom.
+  page.drawLine({
+    start: { x: trimOffset + safe * 1.5, y: trimOffset + safe * 1.5 },
+    end: {
+      x: trimOffset + trimSize - safe * 1.5,
+      y: trimOffset + safe * 1.5,
+    },
+    thickness: 0.5,
+    color: rgb(0.55, 0.45, 0.7),
+  });
+
+  const intro = placement === "front" ? "In loving memory of" : "Forever in our hearts";
+  drawCaption(
+    page,
+    intro,
+    italic,
+    {
+      x: trimOffset + safe,
+      y: trimOffset + trimSize * 0.7,
+      width: trimSize - safe * 2,
+      height: 0.6 * 72,
+    },
+    rgb(0.45, 0.36, 0.65)
+  );
+
+  drawCaption(
+    page,
+    pet.name,
+    font,
+    {
+      x: trimOffset + safe,
+      y: trimOffset + trimSize * 0.5,
+      width: trimSize - safe * 2,
+      height: 1.2 * 72,
+    },
+    rgb(0.18, 0.1, 0.35)
+  );
+
+  if (pet.passed_at) {
+    drawCaption(
+      page,
+      pet.passed_at,
+      italic,
+      {
+        x: trimOffset + safe,
+        y: trimOffset + trimSize * 0.42,
+        width: trimSize - safe * 2,
+        height: 0.5 * 72,
+      },
+      rgb(0.45, 0.36, 0.65)
+    );
+  }
+
+  // Body — user override or templated default.
+  const body =
+    pet.dedication_text ||
+    (placement === "front"
+      ? `A storybook for ${pet.name}, with love.`
+      : `${pet.name} — thank you for the years.`);
+  drawCaption(
+    page,
+    body,
+    italic,
+    {
+      x: trimOffset + safe,
+      y: trimOffset + safe * 2,
+      width: trimSize - safe * 2,
+      height: trimSize * 0.25,
+    },
+    rgb(0.3, 0.22, 0.5)
+  );
 }
 
 async function drawInteriorPage(
@@ -337,11 +474,16 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
 // Convenience: build both + upload + return the two URLs. Uses the same
 // uploadGeneratedAudio helper (it just writes bytes with a mime — audio vs
 // pdf doesn't matter).
+//
+// `pet` is the pet row associated with the story (may be null for
+// generic stories). When the pet is in memorial mode, dedication
+// pages are added to the interior PDF as front + back matter.
 export async function buildAndUploadPrintPdfs(
-  story: Story
+  story: Story,
+  pet: Pet | null = null
 ): Promise<{ interiorUrl: string; coverUrl: string; pageCount: number }> {
   const [interiorBytes, coverBytes] = await Promise.all([
-    buildInteriorPdf(story),
+    buildInteriorPdf(story, { pet }),
     buildCoverPdf(story),
   ]);
 
@@ -358,9 +500,13 @@ export async function buildAndUploadPrintPdfs(
     }),
   ]);
 
-  return {
-    interiorUrl,
-    coverUrl,
-    pageCount: Math.max(story.pages.length, MIN_INTERIOR_PAGES),
-  };
+  // pageCount must match the interior PDF — Lulu uses it for spine
+  // calc + costing. Memorial books include 2 extra dedication pages.
+  const dedicationPages = pet?.mode === "memorial" ? 2 : 0;
+  const pageCount = Math.max(
+    story.pages.length + dedicationPages,
+    MIN_INTERIOR_PAGES
+  );
+
+  return { interiorUrl, coverUrl, pageCount };
 }

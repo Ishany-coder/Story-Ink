@@ -23,7 +23,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { createPrintJob, LuluError } from "@/lib/lulu";
 import { buildAndUploadPrintPdfs } from "@/lib/print-pdf";
 import { unpackAddressMetadata } from "@/lib/stripe";
-import type { Story } from "@/lib/types";
+import type { Pet, Story } from "@/lib/types";
 import type Stripe from "stripe";
 
 export type FulfillOutcome =
@@ -223,12 +223,25 @@ export async function fulfillFromSession(
     };
   }
 
+  // For memorial pet stories we add dedication pages to the interior
+  // PDF, so fetch the pet here. Generic stories pass null.
+  let pet: Pet | null = null;
+  const storyPetId = (story as Story & { pet_id?: string | null }).pet_id ?? null;
+  if (storyPetId) {
+    const { data: petRow } = await admin
+      .from("pets")
+      .select("*")
+      .eq("id", storyPetId)
+      .maybeSingle<Pet>();
+    pet = petRow ?? null;
+  }
+
   // Build and upload PDFs.
   let interiorUrl: string;
   let coverUrl: string;
   let pageCount: number;
   try {
-    const built = await buildAndUploadPrintPdfs(story);
+    const built = await buildAndUploadPrintPdfs(story, pet);
     interiorUrl = built.interiorUrl;
     coverUrl = built.coverUrl;
     pageCount = built.pageCount;
