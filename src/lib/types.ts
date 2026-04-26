@@ -78,6 +78,10 @@ export interface Layout {
   // applied, which the user can then fill via drag-drop or inline edit.
   extraImageRegions?: Rect[];
   extraTextRegions?: Rect[];
+  // Restricts where this built-in layout shows in the Studio sidebar.
+  // Undefined = show always. "memorial" = only show for stories whose
+  // pet is in memorial mode. Used by in-loving-memory.
+  modeFilter?: "memorial";
 }
 
 // User-defined layouts loaded from the custom_layouts table. scope="global"

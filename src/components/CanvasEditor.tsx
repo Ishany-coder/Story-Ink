@@ -28,6 +28,10 @@ import AIAssistantPanel from "./AIAssistantPanel";
 
 interface CanvasEditorProps {
   story: Story;
+  // The pet linked to this story, if any. Drives layout filtering
+  // (memorial-only layouts hide on living/generic stories) and is
+  // surfaced in the editor header.
+  pet?: import("@/lib/types").Pet | null;
 }
 
 type SidebarTab = "layouts" | "text" | "shapes" | "images" | "assistant";
@@ -254,8 +258,21 @@ const SWATCHES = [
   "#000000",
 ];
 
-export default function CanvasEditor({ story: initialStory }: CanvasEditorProps) {
+export default function CanvasEditor({
+  story: initialStory,
+  pet = null,
+}: CanvasEditorProps) {
   const [story, setStory] = useState<Story>(initialStory);
+  // Built-in layouts are filtered by mode: memorial-only layouts only
+  // show when the story's pet is in memorial mode. Custom layouts are
+  // never filtered (user can always reuse their own presets).
+  const visibleBuiltinLayouts = useMemo(
+    () =>
+      LAYOUTS.filter((l) =>
+        l.modeFilter === "memorial" ? pet?.mode === "memorial" : true
+      ),
+    [pet]
+  );
   const [pageIdx, setPageIdx] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<SidebarTab>("layouts");
@@ -1199,7 +1216,7 @@ export default function CanvasEditor({ story: initialStory }: CanvasEditorProps)
                 <span className="text-base leading-none">+</span>
                 Custom layout
               </button>
-              {LAYOUTS.map((l) => (
+              {visibleBuiltinLayouts.map((l) => (
                 <button
                   key={l.id}
                   type="button"

@@ -36,6 +36,49 @@ export const LAYOUTS: Layout[] = [
     imageRegion: { x: 0, y: 0, width: CANVAS_SIZE, height: CANVAS_SIZE },
     textRegion: { x: 40, y: 40, width: 380, height: 160 },
   },
+  // -------------------------------------------------------------------------
+  // Pet-specific layouts (added with the pet pivot). All use the same
+  // morph engine as the originals — they're just new region presets.
+  // -------------------------------------------------------------------------
+  {
+    // Centered square portrait of the pet with caption underneath.
+    // Generous breathing room above and below the photo.
+    id: "pet-portrait",
+    name: "Pet portrait",
+    imageRegion: { x: 80, y: 60, width: 640, height: 540 },
+    textRegion: { x: 60, y: 620, width: 680, height: 160 },
+  },
+  {
+    // Memorial-only. Soft framed portrait with name + dates strip
+    // (extra text region) and a longer caption beneath. Studio
+    // hides this layout on stories whose pet is not in memorial mode.
+    id: "in-loving-memory",
+    name: "In loving memory",
+    imageRegion: { x: 120, y: 80, width: 560, height: 460 },
+    textRegion: { x: 60, y: 560, width: 680, height: 60 },
+    extraTextRegions: [{ x: 60, y: 640, width: 680, height: 140 }],
+    modeFilter: "memorial",
+  },
+  {
+    // Three reference-style photos in a strip across the top, with
+    // the narration filling the remainder of the page.
+    id: "photo-strip",
+    name: "Photo strip + caption",
+    imageRegion: { x: 0, y: 0, width: 270, height: 270 },
+    textRegion: { x: 40, y: 320, width: 720, height: 440 },
+    extraImageRegions: [
+      { x: 270, y: 0, width: 260, height: 270 },
+      { x: 530, y: 0, width: 270, height: 270 },
+    ],
+  },
+  {
+    // Image left, oversized pull-quote right. Great for
+    // "if Bingo could talk" / talking-pet pages.
+    id: "quote-spread",
+    name: "Quote spread",
+    imageRegion: { x: 0, y: 0, width: 400, height: CANVAS_SIZE },
+    textRegion: { x: 430, y: 120, width: 340, height: 560 },
+  },
 ];
 
 export const DEFAULT_LAYOUT_ID = LAYOUTS[0].id;
