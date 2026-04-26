@@ -84,10 +84,23 @@ export const generateStoryFn = inngest.createFunction(
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, prompt, pageCount } = event.data as {
+    const {
+      jobId,
+      userId,
+      prompt,
+      pageCount,
+      kind = "generic",
+      petId = null,
+      isPublic = false,
+    } = event.data as {
       jobId: string;
+      userId: string;
       prompt: string;
       pageCount: number;
+      kind?: "pet" | "generic";
+      petId?: string | null;
+      imageMode?: "fast" | "quality";
+      isPublic?: boolean;
     };
     await step.run("mark-running", () => markRunning(jobId));
 
@@ -162,6 +175,10 @@ export const generateStoryFn = inngest.createFunction(
           page_count: pageCount,
           pages,
           cover_image: pages[0]?.imageUrl || null,
+          user_id: userId,
+          is_public: isPublic,
+          kind,
+          pet_id: petId,
         })
         .select("id")
         .single();

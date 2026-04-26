@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 import { quotePrintAndShipping, LuluError } from "@/lib/lulu";
+import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import type { Story, StoryPage } from "@/lib/types";
 
 // Live quote from Lulu for the given address + story. The address is sent
@@ -40,6 +41,10 @@ function isAddress(v: unknown): v is {
 }
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const body = (await request.json().catch(() => ({}))) as Body;
   const storyId = typeof body.storyId === "string" ? body.storyId : "";
   if (!storyId) {
@@ -52,7 +57,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: story, error } = await supabase
+  const denied = await assertOwnsStory(storyId, user.id);
+  if (denied) return denied;
+
+  const { data: story, error } = await supabaseAdmin()
     .from("stories")
     .select("id, pages")
     .eq("id", storyId)

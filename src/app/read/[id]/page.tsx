@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { getSupabaseServer } from "@/lib/supabase-server";
 import { Story } from "@/lib/types";
 import SlideReader from "@/components/SlideReader";
 import Link from "next/link";
@@ -6,6 +6,8 @@ import { notFound } from "next/navigation";
 
 export const revalidate = 0;
 
+// Reading is allowed for public stories without sign-in — RLS shows
+// is_public=true rows to anon. Owners can also read their private rows.
 export default async function ReadStoryPage({
   params,
 }: {
@@ -13,7 +15,8 @@ export default async function ReadStoryPage({
 }) {
   const { id } = await params;
 
-  const { data, error } = await supabase
+  const supa = await getSupabaseServer();
+  const { data, error } = await supa
     .from("stories")
     .select("*")
     .eq("id", id)

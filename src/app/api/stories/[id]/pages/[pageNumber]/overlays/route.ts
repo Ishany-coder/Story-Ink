@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateStoryPageFields } from "@/lib/supabase";
+import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import type { Layer } from "@/lib/types";
 
 export const maxDuration = 30;
@@ -13,6 +14,10 @@ export async function PUT(
   request: Request,
   ctx: RouteContext<"/api/stories/[id]/pages/[pageNumber]/overlays">
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const { id, pageNumber } = await ctx.params;
   const pageNum = Number(pageNumber);
 
@@ -22,6 +27,9 @@ export async function PUT(
       { status: 400 }
     );
   }
+
+  const denied = await assertOwnsStory(id, user.id);
+  if (denied) return denied;
 
   const body = (await request.json()) as SaveBody;
   if (!Array.isArray(body.overlays)) {

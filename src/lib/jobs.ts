@@ -17,10 +17,13 @@ export interface JobRow {
   updated_at: string;
 }
 
-export async function createJob(type: string): Promise<string> {
+export async function createJob(
+  type: string,
+  userId: string | null = null
+): Promise<string> {
   const { data, error } = await supabaseAdmin()
     .from("jobs")
-    .insert({ type, status: "queued" })
+    .insert({ type, status: "queued", user_id: userId })
     .select("id")
     .single<{ id: string }>();
   if (error || !data) {

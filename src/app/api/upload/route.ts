@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/supabase-server";
 
 export const maxDuration = 30;
 
@@ -7,6 +8,10 @@ const BUCKET = "uploads";
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const form = await request.formData();
   const file = form.get("file");
 

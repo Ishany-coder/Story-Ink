@@ -19,7 +19,7 @@
 // print job is only created once — the CAS on status ("paid" → "paid")
 // is how we prevent two concurrent fulfillers from double-shipping.
 
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 import { createPrintJob, LuluError } from "@/lib/lulu";
 import { buildAndUploadPrintPdfs } from "@/lib/print-pdf";
 import { unpackAddressMetadata } from "@/lib/stripe";
@@ -96,8 +96,10 @@ export async function fulfillFromSession(
     };
   }
 
-  // Fetch the full story for PDF generation.
-  const { data: story, error: fetchErr } = await supabase
+  // Fetch the full story for PDF generation. Use the admin client so
+  // we bypass RLS — the webhook path has no user session, and the
+  // confirm path has already verified ownership before getting here.
+  const { data: story, error: fetchErr } = await supabaseAdmin()
     .from("stories")
     .select("*")
     .eq("id", storyId)
@@ -125,6 +127,9 @@ export async function fulfillFromSession(
         status: "paid",
         amount_usd: amountUsd,
         stripe_session_id: sessionId,
+        // Capture the buyer so they can see their own order on /ship.
+        // RLS on print_orders is read-by-owner.
+        user_id: (story as Story & { user_id?: string | null }).user_id ?? null,
       })
       .select("id")
       .single<{ id: string }>();

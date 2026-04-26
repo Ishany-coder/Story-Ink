@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import {
-  supabase,
+  supabaseAdmin,
   updateStoryPageFields,
   uploadGeneratedAudio,
 } from "@/lib/supabase";
+import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import {
   ElevenLabsError,
   narrationCacheKey,
@@ -27,6 +28,10 @@ export async function POST(
   request: Request,
   ctx: RouteContext<"/api/stories/[id]/pages/[pageNumber]/narrate">
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const { id, pageNumber } = await ctx.params;
   const pageNum = Number(pageNumber);
   if (!Number.isFinite(pageNum)) {
@@ -35,6 +40,8 @@ export async function POST(
       { status: 400 }
     );
   }
+  const denied = await assertOwnsStory(id, user.id);
+  if (denied) return denied;
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const voiceId =
@@ -46,7 +53,7 @@ export async function POST(
     );
   }
 
-  const { data: story, error: fetchErr } = await supabase
+  const { data: story, error: fetchErr } = await supabaseAdmin()
     .from("stories")
     .select("id, pages")
     .eq("id", id)

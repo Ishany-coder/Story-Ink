@@ -1,13 +1,32 @@
 import Link from "next/link";
 import Image from "next/image";
-import { supabase } from "@/lib/supabase";
+import { getSupabaseServer, getCurrentUser } from "@/lib/supabase-server";
 
 export const revalidate = 0;
 
 export default async function CanvasIndexPage() {
-  const { data: stories, error } = await supabase
+  const user = await getCurrentUser();
+  if (!user) {
+    return (
+      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
+        <div className="text-7xl">&#128274;</div>
+        <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
+          Sign in to design your stories
+        </p>
+        <Link
+          href="/login?next=/canvas"
+          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-3 text-base font-black text-white shadow-lg shadow-purple-300/40"
+        >
+          Sign in
+        </Link>
+      </div>
+    );
+  }
+  const supa = await getSupabaseServer();
+  const { data: stories, error } = await supa
     .from("stories")
     .select("id, title, prompt, cover_image, page_count, created_at")
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
   if (error) {

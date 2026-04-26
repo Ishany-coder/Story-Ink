@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
+import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 
 // Persist a user-uploaded image URL into stories.library_images so the
 // Studio's Images tab and picker keep showing it even after every layer
@@ -10,7 +11,7 @@ interface Row {
 }
 
 async function readLibrary(id: string): Promise<string[] | null> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin()
     .from("stories")
     .select("library_images")
     .eq("id", id)
@@ -23,7 +24,13 @@ export async function POST(
   request: Request,
   ctx: RouteContext<"/api/stories/[id]/library">
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const { id } = await ctx.params;
+  const denied = await assertOwnsStory(id, user.id);
+  if (denied) return denied;
   const body = (await request.json().catch(() => ({}))) as { url?: unknown };
 
   const url = typeof body.url === "string" ? body.url.trim() : "";
@@ -65,7 +72,13 @@ export async function DELETE(
   request: Request,
   ctx: RouteContext<"/api/stories/[id]/library">
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const { id } = await ctx.params;
+  const denied = await assertOwnsStory(id, user.id);
+  if (denied) return denied;
   const body = (await request.json().catch(() => ({}))) as { url?: unknown };
 
   const url = typeof body.url === "string" ? body.url.trim() : "";

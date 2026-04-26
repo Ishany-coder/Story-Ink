@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 
 export const maxDuration = 15;
 
@@ -11,7 +12,13 @@ export async function PUT(
   request: Request,
   ctx: RouteContext<"/api/stories/[id]/ai-system-prompt">
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const { id } = await ctx.params;
+  const denied = await assertOwnsStory(id, user.id);
+  if (denied) return denied;
   const body = (await request.json()) as Body;
 
   const trimmed =

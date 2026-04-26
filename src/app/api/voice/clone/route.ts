@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cloneVoiceFromSample, ElevenLabsError } from "@/lib/elevenlabs";
+import { getCurrentUser } from "@/lib/supabase-server";
 
 // Accept a voice sample (recorded in the browser or uploaded by the user) and
 // kick off Instant Voice Cloning on ElevenLabs. Returns the newly-created
@@ -12,6 +13,10 @@ export const maxDuration = 60;
 const MAX_BYTES = 10 * 1024 * 1024;
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   let form: FormData;
   try {
     form = await request.formData();

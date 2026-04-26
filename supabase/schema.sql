@@ -1,8 +1,73 @@
 -- StoryInk database schema
--- Run this in the Supabase SQL Editor (or via `supabase db execute`) to
--- create the table StoryInk expects. If you see PGRST205
--- ("Could not find the table 'public.stories' in the schema cache"),
--- it means this script hasn't been applied yet.
+-- Run this in the Supabase SQL Editor (or via `supabase db execute`).
+--
+-- All tables are user-scoped via auth.users.id (Supabase Auth). Reads
+-- of stories are allowed when the row is marked public; everything
+-- else (private rows, all writes) requires the row's owner.
+--
+-- Idempotent: re-running this script is safe.
+
+-- ---------------------------------------------------------------------------
+-- Pets
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.pets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  species text not null check (species in (
+    'dog','cat','bird','rabbit','horse','reptile','fish','other'
+  )),
+  breed text,
+  age text,
+  -- Free-form notes the AI seeds into every story prompt for this pet.
+  -- Kept as one text blob (vs. structured fields) so the user can write
+  -- whatever feels natural — "loves the mailman, hates baths, sleeps on
+  -- my pillow." Token cost on Gemini is fine at <500 chars.
+  personality_notes text,
+  -- "living" pets get adventure-tone stories; "memorial" pets get
+  -- celebratory recollection stories with softer guardrails.
+  mode text not null default 'living' check (mode in ('living','memorial')),
+  passed_at date,
+  -- Reference photo URLs. Capped to 10 in the API to keep token cost
+  -- and image-grounding latency reasonable.
+  photos jsonb not null default '[]'::jsonb,
+  -- Per-pet visibility. Independent of any story's is_public — a pet
+  -- can stay private even if some of its stories are public.
+  is_public boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists pets_user_id_idx on public.pets (user_id);
+create index if not exists pets_created_at_idx on public.pets (created_at desc);
+
+alter table public.pets enable row level security;
+
+drop policy if exists "pets visible to owner or public" on public.pets;
+create policy "pets visible to owner or public"
+  on public.pets for select
+  using (is_public or user_id = auth.uid());
+
+drop policy if exists "pets insert by owner" on public.pets;
+create policy "pets insert by owner"
+  on public.pets for insert
+  with check (user_id = auth.uid());
+
+drop policy if exists "pets update by owner" on public.pets;
+create policy "pets update by owner"
+  on public.pets for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+drop policy if exists "pets delete by owner" on public.pets;
+create policy "pets delete by owner"
+  on public.pets for delete
+  using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- Stories
+-- ---------------------------------------------------------------------------
 
 create table if not exists public.stories (
   id uuid primary key default gen_random_uuid(),
@@ -18,17 +83,60 @@ create table if not exists public.stories (
 alter table public.stories drop column if exists entities;
 alter table public.stories drop column if exists mode;
 
--- User-uploaded images attached to a story. Survives deleting the layer
--- that first referenced them, so the Studio's Images tab / picker keeps
--- showing them for reuse. Idempotent for existing deployments.
 alter table public.stories
   add column if not exists library_images jsonb not null default '[]'::jsonb;
 
+alter table public.stories
+  add column if not exists ai_system_prompt text;
+
+-- Ownership + privacy + optional pet link. user_id is required for all
+-- new rows; existing pre-auth rows would be NULL — the legacy purge
+-- script clears the table before this migration runs in fresh setups.
+alter table public.stories
+  add column if not exists user_id uuid references auth.users(id) on delete cascade,
+  add column if not exists is_public boolean not null default false,
+  add column if not exists pet_id uuid references public.pets(id) on delete set null,
+  -- "pet" stories use the pet's profile + photos; "generic" stories
+  -- preserve the original freeform creation flow without a pet.
+  add column if not exists kind text not null default 'generic'
+    check (kind in ('pet','generic'));
+
+create index if not exists stories_created_at_idx on public.stories (created_at desc);
+create index if not exists stories_user_id_idx on public.stories (user_id);
+create index if not exists stories_pet_id_idx on public.stories (pet_id);
+create index if not exists stories_public_idx
+  on public.stories (created_at desc) where is_public;
+
+alter table public.stories enable row level security;
+
+drop policy if exists "stories are publicly readable" on public.stories;
+drop policy if exists "anyone can insert stories" on public.stories;
+drop policy if exists "anyone can update stories" on public.stories;
+drop policy if exists "anyone can delete stories" on public.stories;
+
+drop policy if exists "stories visible to owner or public" on public.stories;
+create policy "stories visible to owner or public"
+  on public.stories for select
+  using (is_public or user_id = auth.uid());
+
+drop policy if exists "stories insert by owner" on public.stories;
+create policy "stories insert by owner"
+  on public.stories for insert
+  with check (user_id = auth.uid());
+
+drop policy if exists "stories update by owner" on public.stories;
+create policy "stories update by owner"
+  on public.stories for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+drop policy if exists "stories delete by owner" on public.stories;
+create policy "stories delete by owner"
+  on public.stories for delete
+  using (user_id = auth.uid());
+
 -- ---------------------------------------------------------------------------
--- Jobs table — backs the Inngest-powered Gemini pipeline. HTTP routes insert
--- a row with status='queued' and send an Inngest event; the function writes
--- back `status`, `result`, and `error` as it runs. Clients poll
--- /api/jobs/[id] for progress.
+-- Jobs
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.jobs (
@@ -41,59 +149,31 @@ create table if not exists public.jobs (
   updated_at timestamptz not null default now()
 );
 
-create index if not exists jobs_created_at_idx
-  on public.jobs (created_at desc);
+-- Jobs belong to a user so the polling endpoint scopes results to
+-- the requester. Inngest functions write via the service-role client
+-- so they don't need explicit policies.
+alter table public.jobs
+  add column if not exists user_id uuid references auth.users(id) on delete cascade;
+
+create index if not exists jobs_created_at_idx on public.jobs (created_at desc);
+create index if not exists jobs_user_id_idx on public.jobs (user_id);
 
 alter table public.jobs enable row level security;
 
--- Anon needs to READ jobs so the client can poll /api/jobs/[id]. All
--- writes go through server routes using the service-role client, which
--- bypasses RLS, so the insert/update policies are intentionally absent.
 drop policy if exists "jobs readable" on public.jobs;
-create policy "jobs readable" on public.jobs for select using (true);
-
 drop policy if exists "anyone can insert jobs" on public.jobs;
 drop policy if exists "anyone can update jobs" on public.jobs;
 
--- Per-story AI assistant system prompt. Nullable because most stories
--- don't need one. When set, gets prepended to every text/image
--- regeneration request the user makes from the Assistant panel.
-alter table public.stories
-  add column if not exists ai_system_prompt text;
-
-create index if not exists stories_created_at_idx
-  on public.stories (created_at desc);
-
--- Row Level Security
--- Stories are public-read so server components (and the browser anon
--- client used for rendering lists/detail pages) can list them without
--- auth. Writes are NOT allowed from the anon key — every mutation goes
--- through a server route that uses the service-role client, which
--- bypasses RLS. This keeps "view only" access from the browser and
--- prevents a rogue script with the anon key from deleting other users'
--- stories.
-alter table public.stories enable row level security;
-
-drop policy if exists "stories are publicly readable" on public.stories;
-create policy "stories are publicly readable"
-  on public.stories for select
-  using (true);
-
-drop policy if exists "anyone can insert stories" on public.stories;
-drop policy if exists "anyone can update stories" on public.stories;
-drop policy if exists "anyone can delete stories" on public.stories;
+drop policy if exists "jobs readable by owner" on public.jobs;
+create policy "jobs readable by owner"
+  on public.jobs for select
+  using (user_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
--- Supabase Storage: "uploads" bucket policies
+-- Storage: "uploads" bucket
 --
--- The Studio saves user-uploaded images to a Storage bucket called "uploads".
--- Create the bucket in the dashboard FIRST (Storage → New bucket → name
--- "uploads", Public ON). Marking a bucket public only enables READ.
---
--- Writes go exclusively through /api/upload (and internal server helpers)
--- which use the service-role client and bypass RLS, so the anon role has
--- NO write policies. The previous "anon can upload/update/delete" policies
--- are dropped here for safety on existing deployments.
+-- Public-read. All writes go through /api/upload and internal helpers
+-- using the service-role client, so anon has no write policies.
 -- ---------------------------------------------------------------------------
 
 drop policy if exists "anon can upload to uploads" on storage.objects;
@@ -102,11 +182,6 @@ drop policy if exists "anon can delete uploads" on storage.objects;
 
 -- ---------------------------------------------------------------------------
 -- Custom layouts
---
--- Users can save their own image/text region presets from the Studio. A row
--- with story_id = null is "global" (shown in every story's layout picker);
--- a row with story_id set is scoped to that single story. Deletes cascade
--- when the owning story is removed.
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.custom_layouts (
@@ -114,47 +189,56 @@ create table if not exists public.custom_layouts (
   name text not null,
   image_region jsonb not null,
   text_region jsonb not null,
-  -- Additional regions for multi-slot layouts. Stored as JSON arrays of
-  -- Rect objects. Empty arrays by default so existing single-region
-  -- layouts keep working unchanged.
   extra_image_regions jsonb not null default '[]'::jsonb,
   extra_text_regions jsonb not null default '[]'::jsonb,
   story_id uuid references public.stories(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
--- For existing deployments that already created the table without the two
--- "extra" columns, add them here (idempotent).
 alter table public.custom_layouts
   add column if not exists extra_image_regions jsonb not null default '[]'::jsonb,
-  add column if not exists extra_text_regions jsonb not null default '[]'::jsonb;
+  add column if not exists extra_text_regions jsonb not null default '[]'::jsonb,
+  add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
 create index if not exists custom_layouts_story_id_idx
   on public.custom_layouts (story_id);
 create index if not exists custom_layouts_global_idx
   on public.custom_layouts (created_at desc) where story_id is null;
+create index if not exists custom_layouts_user_id_idx
+  on public.custom_layouts (user_id);
 
 alter table public.custom_layouts enable row level security;
 
--- Anon can list layouts (the Studio picker pulls global + per-story).
--- Mutations go through /api/custom-layouts using the service-role client.
 drop policy if exists "custom layouts readable" on public.custom_layouts;
-create policy "custom layouts readable"
-  on public.custom_layouts for select
-  using (true);
-
 drop policy if exists "anyone can insert custom layouts" on public.custom_layouts;
 drop policy if exists "anyone can update custom layouts" on public.custom_layouts;
 drop policy if exists "anyone can delete custom layouts" on public.custom_layouts;
 
+-- A layout is visible if (a) you own it, or (b) it's a global layout
+-- with no owner (legacy / built-in shared presets).
+drop policy if exists "custom layouts visible to owner" on public.custom_layouts;
+create policy "custom layouts visible to owner"
+  on public.custom_layouts for select
+  using (user_id = auth.uid() or user_id is null);
+
+drop policy if exists "custom layouts insert by owner" on public.custom_layouts;
+create policy "custom layouts insert by owner"
+  on public.custom_layouts for insert
+  with check (user_id = auth.uid());
+
+drop policy if exists "custom layouts update by owner" on public.custom_layouts;
+create policy "custom layouts update by owner"
+  on public.custom_layouts for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+drop policy if exists "custom layouts delete by owner" on public.custom_layouts;
+create policy "custom layouts delete by owner"
+  on public.custom_layouts for delete
+  using (user_id = auth.uid());
+
 -- ---------------------------------------------------------------------------
--- Print orders (ship-a-storybook feature)
---
--- Tracks the state of physical-book orders so we can reconcile PayPal
--- captures with Lulu print jobs. Deliberately redacted — no shipping
--- address, no customer name, no email, no card details. The address is
--- sent straight to Lulu at order time and dropped from memory when the
--- request handler returns.
+-- Print orders
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.print_orders (
@@ -170,43 +254,32 @@ create table if not exists public.print_orders (
   created_at timestamptz not null default now()
 );
 
--- Idempotent add for existing deployments.
 alter table public.print_orders
-  add column if not exists stripe_session_id text;
+  add column if not exists stripe_session_id text,
+  add column if not exists user_id uuid references auth.users(id) on delete set null;
+
 create unique index if not exists print_orders_stripe_session_id_idx
   on public.print_orders (stripe_session_id) where stripe_session_id is not null;
 
-create index if not exists print_orders_story_id_idx
-  on public.print_orders (story_id);
-create index if not exists print_orders_created_at_idx
-  on public.print_orders (created_at desc);
+create index if not exists print_orders_story_id_idx on public.print_orders (story_id);
+create index if not exists print_orders_user_id_idx on public.print_orders (user_id);
+create index if not exists print_orders_created_at_idx on public.print_orders (created_at desc);
 
 alter table public.print_orders enable row level security;
 
--- Anon can read order status so the /ship success page can show the
--- current state by session id. Mutations happen server-side only
--- (Stripe webhook + confirm fallback) via the service-role client.
 drop policy if exists "print orders readable" on public.print_orders;
-create policy "print orders readable"
-  on public.print_orders for select
-  using (true);
-
 drop policy if exists "anyone can insert print orders" on public.print_orders;
 drop policy if exists "anyone can update print orders" on public.print_orders;
 
+drop policy if exists "print orders readable by owner" on public.print_orders;
+create policy "print orders readable by owner"
+  on public.print_orders for select
+  using (user_id = auth.uid());
+
 -- ---------------------------------------------------------------------------
--- Atomic per-page updater. Used by overlay saves and AI regeneration to
--- avoid a read-modify-write race on the entire stories.pages JSONB array
--- (two concurrent writers would otherwise drop one of the updates).
---
--- Takes a JSONB patch for a single page matched by pageNumber; merges the
--- patch into just that element's object and writes only that path back
--- via jsonb_set. The patch is shallow — top-level StoryPage fields only
--- (text, imageUrl, overlays, layoutId, narrationUrl, narrationCacheKey).
---
--- Security: SECURITY DEFINER so callers using the service-role key can
--- update; we do NOT grant execute to anon because all callers are
--- server-side code with the service-role client.
+-- Atomic per-page updater (unchanged from previous schema). Used by
+-- overlay saves and AI regeneration to avoid a read-modify-write race
+-- on the entire stories.pages JSONB array.
 -- ---------------------------------------------------------------------------
 
 create or replace function public.update_story_page_fields(
@@ -222,9 +295,6 @@ declare
   updated jsonb;
   current jsonb;
 begin
-  -- Find the array index of the element whose pageNumber matches. We
-  -- iterate rather than relying on implicit ordering because the JSONB
-  -- array may not be stored in page-number order.
   select position - 1
     into idx
     from stories s,

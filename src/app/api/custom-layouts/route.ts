@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/supabase-server";
 import type { CustomLayout, Rect } from "@/lib/types";
 
 export const maxDuration = 10;
@@ -92,6 +93,10 @@ interface CreateBody {
 }
 
 export async function POST(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const body = (await request.json().catch(() => ({}))) as CreateBody;
 
   const name =
@@ -128,6 +133,7 @@ export async function POST(request: Request) {
       extra_image_regions: extraImages,
       extra_text_regions: extraTexts,
       story_id: storyId,
+      user_id: user.id,
     })
     .select(
       "id, name, image_region, text_region, extra_image_regions, extra_text_regions, story_id, created_at"

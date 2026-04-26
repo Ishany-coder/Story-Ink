@@ -2,15 +2,39 @@ import { NextRequest, NextResponse } from "next/server";
 import { GenerateRequest } from "@/lib/types";
 import { createJob } from "@/lib/jobs";
 import { inngest } from "@/inngest/client";
+import { getCurrentUser } from "@/lib/supabase-server";
 
 // Kicks off the Inngest `story/generate.requested` function. Returns a
 // jobId immediately — the client polls /api/jobs/[id] until status is
 // "done" (result.storyId) or "failed" (error).
+//
+// Two flavors of input now:
+//   - kind="generic": the original freeform-prompt flow
+//   - kind="pet":     petId required; the inngest function pulls the
+//                     pet's profile + photos and seeds the prompt
 export const maxDuration = 30;
+
+interface PetGenerateBody extends GenerateRequest {
+  kind?: "pet" | "generic";
+  petId?: string | null;
+  // "fast" → parallel image generation with reference photos only
+  // "quality" (default) → sequential, prev page passed as anchor for
+  // cross-page consistency
+  imageMode?: "fast" | "quality";
+  isPublic?: boolean;
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as GenerateRequest;
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json(
+        { error: "Sign in to create a story." },
+        { status: 401 }
+      );
+    }
+
+    const body = (await request.json()) as PetGenerateBody;
     if (!body.prompt || body.prompt.trim().length === 0) {
       return NextResponse.json(
         { error: "Prompt is required" },
@@ -18,11 +42,30 @@ export async function POST(request: NextRequest) {
       );
     }
     const pageCount = Math.min(Math.max(body.pageCount || 5, 3), 12);
+    const kind = body.kind === "pet" ? "pet" : "generic";
+    const petId = kind === "pet" ? body.petId ?? null : null;
+    if (kind === "pet" && !petId) {
+      return NextResponse.json(
+        { error: "petId is required for pet stories" },
+        { status: 400 }
+      );
+    }
+    const imageMode = body.imageMode === "fast" ? "fast" : "quality";
+    const isPublic = body.isPublic === true;
 
-    const jobId = await createJob("story.generate");
+    const jobId = await createJob("story.generate", user.id);
     await inngest.send({
       name: "story/generate.requested",
-      data: { jobId, prompt: body.prompt, pageCount },
+      data: {
+        jobId,
+        userId: user.id,
+        prompt: body.prompt,
+        pageCount,
+        kind,
+        petId,
+        imageMode,
+        isPublic,
+      },
     });
 
     return NextResponse.json({ jobId }, { status: 202 });
