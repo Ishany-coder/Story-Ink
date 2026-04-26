@@ -10,7 +10,7 @@
 // client polls /api/jobs/[id] for progress.
 
 import { inngest, EVENTS } from "./client";
-import { markDone, markFailed, markRunning } from "@/lib/jobs";
+import { markDone, markFailed, markProgress, markRunning } from "@/lib/jobs";
 import {
   assistRegenerateImage,
   assistRegenerateText,
@@ -28,7 +28,11 @@ import {
   uploadGeneratedImage,
 } from "@/lib/supabase";
 import { buildInitialOverlays, DEFAULT_LAYOUT_ID } from "@/lib/layouts";
-import type { Layer, Story, StoryPage } from "@/lib/types";
+import {
+  buildPetDescription,
+  composePetStoryPrompt,
+} from "@/lib/pet-prompt";
+import type { Layer, Pet, Story, StoryPage } from "@/lib/types";
 
 const TEXT_RETRIES = 2;
 const IMAGE_RETRIES = 3;
@@ -91,6 +95,7 @@ export const generateStoryFn = inngest.createFunction(
       pageCount,
       kind = "generic",
       petId = null,
+      imageMode = "quality",
       isPublic = false,
     } = event.data as {
       jobId: string;
@@ -104,8 +109,34 @@ export const generateStoryFn = inngest.createFunction(
     };
     await step.run("mark-running", () => markRunning(jobId));
 
+    // Pet stories pull the full pet row up front so subsequent steps
+    // can reference its photos + personality without an extra fetch.
+    const pet = await step.run("fetch-pet", async (): Promise<Pet | null> => {
+      if (kind !== "pet" || !petId) return null;
+      const { data, error } = await supabaseAdmin()
+        .from("pets")
+        .select("*")
+        .eq("id", petId)
+        .eq("user_id", userId)
+        .maybeSingle<Pet>();
+      if (error) {
+        console.error("[inngest.generate] pet fetch failed:", error);
+        return null;
+      }
+      return data ?? null;
+    });
+
+    // For pet stories, prepend the pet's profile to the user prompt so
+    // the AI plans the story around the actual character. Generic
+    // stories pass the prompt through unchanged.
+    const composedPrompt = pet
+      ? composePetStoryPrompt(prompt, pet)
+      : prompt;
+    const petDescription = pet ? buildPetDescription(pet) : null;
+    const memorial = pet?.mode === "memorial";
+
     const scriptData = await step.run("plan-story", async () => {
-      const storyText = await generateStoryText(prompt, pageCount);
+      const storyText = await generateStoryText(composedPrompt, pageCount);
       return {
         title: storyText.title,
         pages: storyText.pages.map((p) => ({
@@ -115,23 +146,35 @@ export const generateStoryFn = inngest.createFunction(
       };
     });
 
-    // Per-page image steps. Splitting one step per page gives us two
-    // properties the old bundled version lacked:
-    //   1. Resumability. Inngest memoizes step results — if page 7 fails
-    //      after pages 1–6 succeeded, a retry re-runs only page 7 and
-    //      the final save step, not all generations from scratch.
-    //   2. Independent failure handling. Promise.allSettled means one
-    //      page that exhausts its retries becomes an empty-string image
-    //      (the downstream save-story step already tolerates that) and
-    //      the rest of the book still ships.
-    //
-    // The calls fan out via Promise.all so images still run in parallel
-    // end-to-end wall-clock-wise. Each step.run is its own retry scope.
-    const imageUrls: string[] = await Promise.all(
-      scriptData.pages.map((p) =>
-        step
+    // Image generation strategy. For a pet story in Quality mode we
+    // serialize pages so each one can pass the previous page's image
+    // back to Gemini for cross-page consistency. Fast mode (and all
+    // generic stories) fan out in parallel.
+    const imageContextBase = {
+      referencePhotos: pet?.photos ?? [],
+      petDescription,
+      memorial,
+    };
+
+    let imageUrls: string[];
+    if (kind === "pet" && imageMode === "quality") {
+      imageUrls = [];
+      for (const p of scriptData.pages) {
+        await step.run(`progress-${p.pageNumber}`, () =>
+          markProgress(jobId, {
+            current: p.pageNumber,
+            total: scriptData.pages.length,
+            phase: "image",
+          })
+        );
+        const previousPageUrl =
+          imageUrls.length > 0 ? imageUrls[imageUrls.length - 1] || null : null;
+        const url: string = await step
           .run(`generate-page-image-${p.pageNumber}`, async () => {
-            const dataUri = await generatePageImage(p.text, scriptData.title);
+            const dataUri = await generatePageImage(p.text, scriptData.title, {
+              ...imageContextBase,
+              previousPageUrl,
+            });
             if (!dataUri) return "";
             try {
               return await uploadGeneratedImage(dataUri);
@@ -144,17 +187,45 @@ export const generateStoryFn = inngest.createFunction(
             }
           })
           .catch((err: unknown) => {
-            // After Inngest's retry budget for this step is exhausted,
-            // record the failure and move on with an empty image URL so
-            // the story still gets saved for the user to fix in Studio.
             console.error(
               `[inngest.generate] page ${p.pageNumber} gave up after retries:`,
               err
             );
             return "";
-          })
-      )
-    );
+          });
+        imageUrls.push(url);
+      }
+    } else {
+      imageUrls = await Promise.all(
+        scriptData.pages.map((p) =>
+          step
+            .run(`generate-page-image-${p.pageNumber}`, async () => {
+              const dataUri = await generatePageImage(
+                p.text,
+                scriptData.title,
+                imageContextBase
+              );
+              if (!dataUri) return "";
+              try {
+                return await uploadGeneratedImage(dataUri);
+              } catch (err) {
+                console.error(
+                  `[inngest.generate] page ${p.pageNumber} upload failed:`,
+                  err
+                );
+                return "";
+              }
+            })
+            .catch((err: unknown) => {
+              console.error(
+                `[inngest.generate] page ${p.pageNumber} gave up after retries:`,
+                err
+              );
+              return "";
+            })
+        )
+      );
+    }
 
     const storyRow = await step.run("save-story", async () => {
       const pages: StoryPage[] = scriptData.pages.map((page, i) => {

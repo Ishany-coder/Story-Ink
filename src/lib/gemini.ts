@@ -186,9 +186,27 @@ ${context}`
   return parsed.text;
 }
 
+// Reference photos for visual grounding. Used by pet stories so the
+// pet in every illustrated page actually looks like the user's pet.
+// `previousPageUrl` is passed in Quality mode to anchor cross-page
+// consistency (the previous page's generated illustration is shown
+// to the model as "keep this character/scene style").
+export interface PageImageContext {
+  // Pet reference photos (Supabase Storage URLs). Up to 10.
+  referencePhotos?: string[];
+  // The previous page's generated image URL. Quality mode only.
+  previousPageUrl?: string | null;
+  // Pet description seeded into the prompt so the model knows what
+  // it's drawing even when references fail to fetch.
+  petDescription?: string | null;
+  // Memorial mode softens the visual style.
+  memorial?: boolean;
+}
+
 export async function generatePageImage(
   pageText: string,
-  storyTitle: string
+  storyTitle: string,
+  context: PageImageContext = {}
 ): Promise<string> {
   try {
     const model = genAI.getGenerativeModel({
@@ -196,18 +214,57 @@ export async function generatePageImage(
       model: "gemini-3.1-flash-image-preview",
     });
 
-    const intro = [
+    const styleNote = context.memorial
+      ? "Style: soft watercolor children's book illustration with gentle, nostalgic colors and warm light. Reverent and tender."
+      : "Style: watercolor children's book illustration, whimsical, warm colors.";
+
+    const introLines: string[] = [
       `Create a beautiful children's storybook illustration for one page of the story titled "${storyTitle}".`,
       `CRITICAL: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. This is an illustration only — narration is overlaid separately.`,
-      `Scene to illustrate: ${pageText}`,
-      `Style: watercolor children's book illustration, whimsical, warm colors. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
-    ].join("\n\n");
+    ];
+    if (context.petDescription) {
+      introLines.push(
+        `The main character is a real pet the user knows: ${context.petDescription}. Reference photos are attached so you can match the pet's actual appearance — likeness matters.`
+      );
+    }
+    if (context.previousPageUrl) {
+      introLines.push(
+        `The first attached image is the illustration from the PREVIOUS page of this same book — match its art style, color palette, and the pet's appearance exactly. Continuity across pages matters.`
+      );
+    }
+    introLines.push(`Scene to illustrate: ${pageText}`);
+    introLines.push(
+      `${styleNote} REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`
+    );
+    const intro = introLines.join("\n\n");
+
+    // Build the multimodal parts list. Order matters for Gemini —
+    // putting reference imagery before the text prompt makes it more
+    // likely the model treats them as authoritative grounding.
+    const parts: Array<
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } }
+    > = [];
+
+    if (context.previousPageUrl) {
+      const prev = await fetchImageAsInlineData(context.previousPageUrl);
+      if (prev) parts.push({ inlineData: prev });
+    }
+    for (const photoUrl of context.referencePhotos ?? []) {
+      const inline = await fetchImageAsInlineData(photoUrl);
+      if (inline) parts.push({ inlineData: inline });
+      // Cap at ~5 images of context to keep the request reasonable —
+      // the SDK is fine with more, but token cost climbs fast.
+      if (parts.length >= 5) break;
+    }
+
+    parts.push({ text: intro });
 
     const result = await withGeminiRetry(
       () =>
         withTimeout(
           model.generateContent({
-            contents: [{ role: "user", parts: [{ text: intro }] }],
+            contents: [{ role: "user", parts }],
             generationConfig: {
               // responseModalities isn't in @google/generative-ai@0.24.1's types,
               // but the SDK forwards unknown generationConfig fields to the API.

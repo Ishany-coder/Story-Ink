@@ -40,6 +40,24 @@ export async function markRunning(jobId: string): Promise<void> {
     .eq("id", jobId);
 }
 
+// Write a partial-progress payload while the job is still running.
+// The polling client (useJobPolling) surfaces this as state.kind ===
+// "running" so the UI can show "page N of M" without a separate
+// channel.
+export async function markProgress(
+  jobId: string,
+  result: unknown
+): Promise<void> {
+  await supabaseAdmin()
+    .from("jobs")
+    .update({
+      status: "running",
+      result,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+}
+
 export async function markDone(jobId: string, result: unknown): Promise<void> {
   await supabaseAdmin()
     .from("jobs")
