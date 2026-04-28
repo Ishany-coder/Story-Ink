@@ -164,26 +164,26 @@ export default function ShipStoryPage({ story }: Props) {
       <div className="mb-6 flex items-center justify-between">
         <Link
           href={`/read/${story.id}`}
-          className="text-sm font-bold text-purple-400 hover:text-purple-600"
+          className="text-sm font-bold text-ink-300 hover:text-moss-700"
         >
           &larr; Back to story
         </Link>
-        <span className="rounded-full bg-purple-100 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-purple-600">
+        <span className="rounded-full bg-moss-100 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-moss-700">
           Ship story book
         </span>
       </div>
 
-      <h1 className="mb-1 font-[family-name:var(--font-display)] text-3xl font-bold text-purple-800">
+      <h1 className="mb-1 font-[family-name:var(--font-display)] text-3xl font-bold text-ink-900">
         Ship &quot;{story.title}&quot;
       </h1>
-      <p className="text-sm font-bold text-purple-400">
+      <p className="text-sm font-bold text-ink-300">
         8.5&quot; × 8.5&quot; hardcover, full-color interior, printed and
         shipped worldwide at cost.
       </p>
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.2fr]">
-        <div className="rounded-3xl border-4 border-purple-200 bg-white p-4 shadow-sm">
-          <div className="aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-purple-100 to-pink-100">
+        <div className="rounded-3xl border-4 border-cream-300 bg-cream-50 p-4 shadow-sm">
+          <div className="aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-cream-200 to-cream-100">
             {preview.cover ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -192,12 +192,12 @@ export default function ShipStoryPage({ story }: Props) {
                 className="h-full w-full object-cover"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm font-bold text-purple-400">
+              <div className="flex h-full w-full items-center justify-center text-sm font-bold text-ink-300">
                 No cover
               </div>
             )}
           </div>
-          <div className="mt-4 space-y-1 text-xs font-bold text-purple-500">
+          <div className="mt-4 space-y-1 text-xs font-bold text-ink-500">
             <div className="flex justify-between">
               <span>Pages</span>
               <span>{preview.pageCount}</span>
@@ -213,29 +213,29 @@ export default function ShipStoryPage({ story }: Props) {
           </div>
         </div>
 
-        <div className="rounded-3xl border-4 border-purple-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-black uppercase tracking-wider text-purple-500">
+        <div className="rounded-3xl border-4 border-cream-300 bg-cream-50 p-5 shadow-sm">
+          <h2 className="mb-3 text-sm font-black uppercase tracking-wider text-ink-500">
             Ship to
           </h2>
           <AddressForm address={address} onChange={setAddress} />
 
-          <div className="my-5 rounded-2xl border-2 border-purple-100 bg-purple-50/40 px-4 py-3 text-xs">
-            <h3 className="mb-2 text-[10px] font-black uppercase tracking-wider text-purple-400">
+          <div className="my-5 rounded-2xl border-2 border-cream-300 bg-cream-200/40 px-4 py-3 text-xs">
+            <h3 className="mb-2 text-[10px] font-black uppercase tracking-wider text-ink-300">
               Price
             </h3>
             {!addressComplete && (
-              <p className="font-bold text-purple-400">
+              <p className="font-bold text-ink-300">
                 Fill in your address to see the price.
               </p>
             )}
             {addressComplete && quoting && (
-              <p className="font-bold text-purple-400">Getting price…</p>
+              <p className="font-bold text-ink-300">Getting price…</p>
             )}
             {addressComplete && !quoting && quoteError && (
               <p className="font-bold text-rose-500">{quoteError}</p>
             )}
             {addressComplete && !quoting && quote && (
-              <div className="space-y-1 font-bold text-purple-600">
+              <div className="space-y-1 font-bold text-moss-700">
                 <div className="flex justify-between">
                   <span>Print</span>
                   <span>${quote.printCostUsd.toFixed(2)}</span>
@@ -250,7 +250,7 @@ export default function ShipStoryPage({ story }: Props) {
                     <span>${quote.taxUsd.toFixed(2)}</span>
                   </div>
                 )}
-                <div className="mt-1 flex justify-between border-t border-purple-200 pt-1 text-[13px] font-black text-purple-800">
+                <div className="mt-1 flex justify-between border-t border-cream-300 pt-1 text-[13px] font-black text-ink-900">
                   <span>Total</span>
                   <span>${quote.totalUsd.toFixed(2)}</span>
                 </div>
@@ -258,8 +258,8 @@ export default function ShipStoryPage({ story }: Props) {
             )}
           </div>
 
-          <div className="rounded-2xl border-2 border-dashed border-purple-200 bg-white p-3">
-            <p className="mb-3 text-[10px] font-bold text-purple-400">
+          <div className="rounded-2xl border-2 border-dashed border-cream-300 bg-cream-50 p-3">
+            <p className="mb-3 text-[10px] font-bold text-ink-300">
               Stripe handles card entry on their hosted page. We never save
               your card or address.
             </p>
@@ -267,7 +267,7 @@ export default function ShipStoryPage({ story }: Props) {
               type="button"
               onClick={startCheckout}
               disabled={!quote || checkoutPending}
-              className="w-full rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-500 to-sky-500 px-4 py-3 text-sm font-black uppercase tracking-wider text-white shadow-md shadow-purple-200 transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+              className="w-full rounded-full bg-moss-700 px-4 py-3 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {checkoutPending ? "Redirecting to Stripe…" : "Pay with Stripe"}
             </button>
@@ -396,7 +396,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+      <span className="text-[10px] font-black uppercase tracking-wider text-ink-300">
         {label}
       </span>
       <div className="mt-0.5">{children}</div>
@@ -405,4 +405,4 @@ function Field({
 }
 
 const inputCls =
-  "w-full rounded-xl border-2 border-purple-200 bg-white px-3 py-1.5 text-sm font-bold text-purple-700 outline-none focus:border-purple-400";
+  "w-full rounded-xl border-2 border-cream-300 bg-cream-50 px-3 py-1.5 text-sm font-bold text-ink-900 outline-none focus:border-moss-700";

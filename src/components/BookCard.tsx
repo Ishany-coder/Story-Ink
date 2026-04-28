@@ -14,14 +14,14 @@ interface BookCardProps {
   createdAt: string;
 }
 
-// Soft fallback gradients for stories without a generated cover. No
-// emoji inside — the gradient alone reads as "image not yet rendered."
+// Soft fallback gradients for stories without a generated cover.
+// Tonal pairs grounded in the Legacy palette — no purple/pink leftovers.
 const FALLBACK_GRADIENTS = [
-  "from-purple-100 via-purple-50 to-pink-100",
-  "from-sky-100 via-blue-50 to-indigo-100",
-  "from-amber-100 via-orange-50 to-rose-100",
-  "from-emerald-100 via-teal-50 to-cyan-100",
-  "from-pink-100 via-rose-50 to-fuchsia-100",
+  "from-cream-200 via-cream-100 to-cream-50",
+  "from-moss-100 via-cream-100 to-cream-50",
+  "from-gold-100 via-cream-100 to-cream-50",
+  "from-cream-300 via-cream-200 to-cream-100",
+  "from-moss-200/40 via-cream-100 to-cream-50",
 ];
 
 export default function BookCard({
@@ -75,15 +75,15 @@ export default function BookCard({
     >
       <Link
         href={`/read/${id}`}
-        className="flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
+        className="flex flex-col overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-gold-500 hover:shadow-[0_12px_32px_rgba(14,26,43,0.10)]"
       >
-        <div className="relative aspect-square overflow-hidden bg-stone-100">
+        <div className="relative aspect-square overflow-hidden bg-cream-200">
           {coverImage ? (
             <Image
               src={coverImage}
               alt={title}
               fill
-              className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+              className="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
               unoptimized
             />
           ) : (
@@ -91,16 +91,16 @@ export default function BookCard({
               className={`h-full w-full bg-gradient-to-br ${FALLBACK_GRADIENTS[colorIdx]}`}
             />
           )}
-          <div className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm">
+          <div className="absolute right-3 top-3 rounded-full border border-cream-300 bg-cream-50/95 px-2.5 py-1 text-[11px] font-medium text-ink-500 shadow-sm">
             {pageCount} pages
           </div>
         </div>
         <div className="flex flex-1 flex-col gap-1 p-4">
-          <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900 line-clamp-1">
+          <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900 line-clamp-1">
             {title}
           </h3>
-          <p className="text-sm text-slate-500 line-clamp-2">{prompt}</p>
-          <span className="mt-auto pt-2 text-xs text-slate-400">{date}</span>
+          <p className="text-sm text-ink-500 line-clamp-2">{prompt}</p>
+          <span className="mt-auto pt-2 text-xs text-ink-300">{date}</span>
         </div>
       </Link>
 
@@ -109,7 +109,7 @@ export default function BookCard({
         onClick={handleDelete}
         disabled={deleting}
         aria-label={`Delete ${title}`}
-        className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-slate-500 opacity-0 shadow-sm transition-all hover:bg-rose-500 hover:text-white focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 group-hover:opacity-100"
+        className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-cream-300 bg-cream-50/95 text-ink-500 opacity-0 shadow-sm transition-all hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 group-hover:opacity-100"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

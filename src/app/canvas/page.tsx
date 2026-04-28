@@ -25,7 +25,7 @@ export default async function CanvasIndexPage() {
   if (error) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
-        <p className="text-sm text-slate-500">Couldn&apos;t load your stories.</p>
+        <p className="text-sm text-ink-500">Couldn&apos;t load your stories.</p>
       </div>
     );
   }
@@ -43,11 +43,11 @@ export default async function CanvasIndexPage() {
 
   return (
     <div className="animate-rise-in mx-auto max-w-6xl px-6 py-12">
-      <div className="mb-8 border-b border-stone-200 pb-4">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+      <div className="mb-8 border-b border-cream-300 pb-4">
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
           Studio
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-ink-500">
           Pick a story to design — swap layouts, edit text, add shapes.
         </p>
       </div>
@@ -56,10 +56,10 @@ export default async function CanvasIndexPage() {
           <Link
             key={story.id}
             href={`/canvas/${story.id}`}
-            className="group animate-rise-in flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
+            className="group animate-rise-in flex flex-col overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-cream-300 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
             style={{ animationDelay: `${i * 30}ms` }}
           >
-            <div className="relative aspect-square overflow-hidden bg-stone-100">
+            <div className="relative aspect-square overflow-hidden bg-cream-200">
               {story.cover_image ? (
                 <Image
                   src={story.cover_image}
@@ -69,17 +69,17 @@ export default async function CanvasIndexPage() {
                   unoptimized
                 />
               ) : (
-                <div className="h-full w-full bg-gradient-to-br from-purple-100 via-purple-50 to-pink-100" />
+                <div className="h-full w-full bg-gradient-to-br from-cream-200 via-cream-100 to-cream-50" />
               )}
-              <div className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm">
+              <div className="absolute right-3 top-3 rounded-full bg-cream-50/95 px-2.5 py-1 text-[11px] font-medium text-ink-500 shadow-sm">
                 Design
               </div>
             </div>
             <div className="flex flex-1 flex-col gap-1 p-4">
-              <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900 line-clamp-1">
+              <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900 line-clamp-1">
                 {story.title}
               </h3>
-              <p className="text-sm text-slate-500 line-clamp-2">
+              <p className="text-sm text-ink-500 line-clamp-2">
                 {story.prompt}
               </p>
             </div>
@@ -103,15 +103,15 @@ function EmptyState({
 }) {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
-      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
         {title}
       </p>
       {subtitle && (
-        <p className="max-w-sm text-sm text-slate-500">{subtitle}</p>
+        <p className="max-w-sm text-sm text-ink-500">{subtitle}</p>
       )}
       <Link
         href={ctaHref}
-        className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+        className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
       >
         {ctaLabel}
       </Link>

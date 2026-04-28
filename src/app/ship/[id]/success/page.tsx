@@ -23,15 +23,15 @@ export default async function ShipSuccess({
   if (!sessionId) {
     return (
       <div className="mx-auto max-w-xl px-4 py-16 text-center">
-        <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold text-rose-600">
+        <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
           Missing Stripe session
         </h1>
-        <p className="mt-2 text-sm font-bold text-purple-400">
+        <p className="mt-2 text-sm text-ink-500">
           Open your story and try ordering again.
         </p>
         <Link
           href={`/read/${id}`}
-          className="mt-6 inline-block rounded-2xl bg-purple-500 px-5 py-2 text-sm font-black uppercase text-white hover:bg-purple-600"
+          className="mt-6 inline-block rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 transition-colors hover:bg-moss-900"
         >
           Back to story
         </Link>

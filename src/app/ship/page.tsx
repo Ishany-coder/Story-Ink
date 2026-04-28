@@ -29,7 +29,7 @@ export default async function ShipIndexPage() {
   if (error) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
-        <p className="text-sm text-slate-500">Couldn&apos;t load your stories.</p>
+        <p className="text-sm text-ink-500">Couldn&apos;t load your stories.</p>
       </div>
     );
   }
@@ -47,11 +47,11 @@ export default async function ShipIndexPage() {
 
   return (
     <div className="animate-rise-in mx-auto max-w-6xl px-6 py-12">
-      <div className="mb-8 border-b border-stone-200 pb-4">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+      <div className="mb-8 border-b border-cream-300 pb-4">
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
           Ship a printed book
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-ink-500">
           Pick a story to print as a real 8.5&quot; × 8.5&quot; hardcover and
           ship to your door.
         </p>
@@ -93,15 +93,15 @@ function EmptyState({
 }) {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
-      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
         {title}
       </p>
       {subtitle && (
-        <p className="max-w-sm text-sm text-slate-500">{subtitle}</p>
+        <p className="max-w-sm text-sm text-ink-500">{subtitle}</p>
       )}
       <Link
         href={ctaHref}
-        className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+        className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
       >
         {ctaLabel}
       </Link>

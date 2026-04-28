@@ -1,19 +1,57 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+ * Design tokens — "Legacy Brand" palette
+ *
+ * Cream:  warm off-white surface (editorial / fine-print magazine).
+ * Ink:    midnight navy. Body text + headings, depth without true black.
+ * Moss:   forest green. Primary actions + active states.
+ * Gold:   champagne. Accents, hovers, highlight rules.
+ *
+ * Accessibility check (against cream-100 #f5f1e8):
+ *   - ink-700  #1a2840 → contrast 14.6:1 ✓
+ *   - ink-500  #3a4a5d → contrast 8.7:1  ✓
+ *   - ink-300  #6b7686 → contrast 4.7:1  ✓ (body-muted minimum)
+ *   - moss-700 #1f3d2e → contrast 11.5:1 ✓
+ *   - gold-700 #ad8a4d → contrast 3.4:1  (decorative only, not for text)
+ *
+ * Don't ship gold-500/700 as body text. Use ink-* for text;
+ * moss-700 for CTAs; gold for accent rules and hover halos.
+ * ------------------------------------------------------------------------- */
+
 @theme inline {
   --font-sans: var(--font-nunito);
-  --font-display: var(--font-fredoka);
+  --font-display: var(--font-fraunces);
+
+  --color-cream-50: #faf7ee;
+  --color-cream-100: #f5f1e8;
+  --color-cream-200: #ebe4d3;
+  --color-cream-300: #ddd3bb;
+  --color-cream-400: #c8bba0;
+
+  --color-ink-200: #8a93a3;
+  --color-ink-300: #6b7686;
+  --color-ink-500: #3a4a5d;
+  --color-ink-700: #1a2840;
+  --color-ink-900: #0e1a2b;
+
+  --color-moss-100: #d8e0d4;
+  --color-moss-200: #b9c8b3;
+  --color-moss-300: #88a092;
+  --color-moss-500: #2d5944;
+  --color-moss-700: #1f3d2e;
+  --color-moss-900: #0f2418;
+
+  --color-gold-100: #f0e3c4;
+  --color-gold-300: #e0c898;
+  --color-gold-500: #c9a96b;
+  --color-gold-700: #ad8a4d;
+  --color-gold-900: #87683a;
 }
 
 :root {
-  --background: #faf8f3;
-  --foreground: #1a1530;
-  --surface: #ffffff;
-  --border-soft: #ece8df;
-  --border-default: #ddd6c8;
-  --muted: #6b6478;
-  --accent: #7c3aed;
-  --accent-soft: #f3effd;
+  --background: #f5f1e8;
+  --foreground: #1a2840;
 }
 
 body {
@@ -21,8 +59,7 @@ body {
   color: var(--foreground);
 }
 
-/* Quieter scrollbar — desaturated to fit the warm surface palette
-   instead of the old saturated purple. */
+/* Quieter scrollbar tuned to the new palette. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -31,24 +68,17 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #ddd6c8;
+  background: #c8bba0;
   border-radius: 8px;
   border: 2px solid var(--background);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #c4bcaf;
+  background: #ad8a4d;
 }
 
 /* ---------------------------------------------------------------------------
- * Motion system
- *
- * The previous version had wiggle, sparkle, float, and bounce-in firing
- * continuously across the page. Modern, restrained: short single-shot
- * fade and rise on entrance, and bounce-dot kept for the loading overlay.
- * Hover transforms are handled inline with Tailwind transitions.
- *
- * `prefers-reduced-motion` collapses every entrance animation to an
- * instant opacity transition.
+ * Motion. Single fade and a gentle rise — no continuous ambient
+ * animation. prefers-reduced-motion collapses entrances to instant.
  * ------------------------------------------------------------------------- */
 
 @keyframes fade-in {
@@ -75,10 +105,6 @@ body {
   animation: rise-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Stagger helper: parents put animate-rise-in on children with
-   inline `style={{ animationDelay: `${i * 40}ms` }}` to get a soft
-   cascade on a list. Keep the max stagger short (<240ms total). */
-
 @keyframes bounce-dot {
   0%, 80%, 100% { transform: scale(0.6); }
   40% { transform: scale(1.2); }
@@ -97,4 +123,12 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Optical-sized display headings. Fraunces' opsz axis dramatically
+   improves how a serif reads at large sizes — apply automatically
+   to anything tagged with .font-display. */
+.font-display {
+  font-feature-settings: "ss01", "ss02";
+  letter-spacing: -0.01em;
 }

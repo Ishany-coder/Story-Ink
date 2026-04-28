@@ -1,24 +1,24 @@
-// Compact hero. No floating decorations or sparkle emojis — the
-// brand voice now reads "thoughtful gift" rather than "kids' app."
-// Two-line headline with a single restrained gradient on the verb,
-// subline that names the audience.
+// Compact hero. No emoji. Editorial-magazine voice: short, declarative,
+// confident. The single thin gold rule under the kicker is the only
+// decoration and reads as "imprint mark" rather than "kids' app sparkle."
 
 export default function HeroSection() {
   return (
-    <div className="animate-rise-in flex flex-col items-center gap-4 text-center">
-      <span className="rounded-full border border-stone-300 bg-white/70 px-3 py-1 text-xs font-medium uppercase tracking-wider text-slate-500">
-        For pet owners
-      </span>
-      <h1 className="font-[family-name:var(--font-display)] text-4xl font-semibold leading-[1.05] tracking-tight text-slate-900 sm:text-6xl">
-        Storybooks{" "}
-        <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-          starring your pet.
+    <div className="animate-rise-in flex flex-col items-center gap-5 text-center">
+      <div className="flex flex-col items-center gap-2">
+        <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
+          The fine art of pet storytelling
         </span>
+        <span className="block h-px w-12 bg-gold-500" />
+      </div>
+      <h1 className="font-[family-name:var(--font-display)] text-4xl font-semibold leading-[1.05] tracking-tight text-ink-900 sm:text-6xl">
+        Storybooks{" "}
+        <em className="font-normal italic text-moss-700">starring your pet.</em>
       </h1>
-      <p className="max-w-xl text-base leading-relaxed text-slate-500 sm:text-lg">
-        Upload a few photos, pick a starter, and we&rsquo;ll turn your dog,
-        cat, or rabbit into the hero of an illustrated keepsake. Living
-        adventures or memorial books, printed and shipped.
+      <p className="max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
+        Hand-illustrated keepsakes built from your photos. Living
+        adventures or Rainbow Bridge memorials, printed as museum-grade
+        hardcovers.
       </p>
     </div>
   );

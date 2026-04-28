@@ -183,7 +183,7 @@ export default function PetForm({ initial = null }: Props) {
       onSubmit={handleSubmit}
       className="animate-rise-in mx-auto max-w-2xl space-y-6 px-6 py-10"
     >
-      <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+      <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
         {editing ? `Edit ${initial!.name}` : "Add a pet"}
       </h1>
 
@@ -247,18 +247,18 @@ export default function PetForm({ initial = null }: Props) {
         />
       </Field>
 
-      <section className="rounded-2xl border border-stone-200 bg-white p-5">
+      <section className="rounded-2xl border border-cream-300 bg-cream-50 p-5">
         <div className="mb-3 flex items-baseline justify-between">
           <div>
-            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900">
+            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
               Personality DNA
             </h2>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-ink-500">
               Specific quirks make stories feel like your pet, not a generic
               one. Skip whatever doesn&rsquo;t apply.
             </p>
           </div>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-ink-300">
             {filledQuirkCount} answered
           </span>
         </div>
@@ -269,13 +269,13 @@ export default function PetForm({ initial = null }: Props) {
             if (prompts.length === 0) return null;
             return (
               <div key={cat.id}>
-                <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">
+                <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-500">
                   {cat.label}
                 </div>
                 <div className="space-y-2">
                   {prompts.map((p) => (
                     <div key={p.id}>
-                      <label className="mb-1 block text-xs font-medium text-slate-700">
+                      <label className="mb-1 block text-xs font-medium text-ink-700">
                         {p.prompt}
                       </label>
                       <input
@@ -289,7 +289,7 @@ export default function PetForm({ initial = null }: Props) {
                         }
                         maxLength={400}
                         placeholder={p.placeholder}
-                        className="w-full rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-slate-900 placeholder-slate-400 transition focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100"
+                        className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-sm text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
                       />
                     </div>
                   ))}
@@ -301,7 +301,7 @@ export default function PetForm({ initial = null }: Props) {
       </section>
 
       <Field label="Mode">
-        <div className="flex rounded-full border border-stone-300 bg-white p-1">
+        <div className="flex rounded-full border border-cream-300 bg-cream-50 p-1">
           <ModeButton
             value="living"
             current={mode}
@@ -356,7 +356,7 @@ export default function PetForm({ initial = null }: Props) {
               {photos.map((url) => (
                 <div
                   key={url}
-                  className="relative aspect-square overflow-hidden rounded-xl border border-stone-200"
+                  className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -367,7 +367,7 @@ export default function PetForm({ initial = null }: Props) {
                   <button
                     type="button"
                     onClick={() => removePhoto(url)}
-                    className="absolute right-1 top-1 rounded-full bg-white/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-white"
+                    className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
                   >
                     Remove
                   </button>
@@ -376,7 +376,7 @@ export default function PetForm({ initial = null }: Props) {
             </div>
           )}
           {photos.length < MAX_PHOTOS && (
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-6 text-sm font-medium text-slate-500 transition-colors hover:border-slate-400 hover:bg-stone-50">
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-sm font-medium text-ink-500 transition-colors hover:border-moss-500 hover:bg-cream-100">
               {uploading ? "Uploading…" : "+ Upload photos"}
               <input
                 type="file"
@@ -392,18 +392,18 @@ export default function PetForm({ initial = null }: Props) {
       </Field>
 
       <Field label="Visibility">
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-stone-200 bg-white px-4 py-3 transition-colors hover:border-stone-300">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-cream-300 bg-cream-50 px-4 py-3 transition-colors hover:border-cream-300">
           <input
             type="checkbox"
             checked={isPublic}
             onChange={(e) => setIsPublic(e.target.checked)}
-            className="h-4 w-4 accent-purple-600"
+            className="h-4 w-4 accent-moss-700"
           />
           <div className="flex-1">
-            <div className="text-sm font-medium text-slate-900">
+            <div className="text-sm font-medium text-ink-900">
               Make this pet&rsquo;s profile public
             </div>
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-ink-500">
               Off by default. Public stories about this pet are still
               controlled per-story.
             </div>
@@ -417,7 +417,7 @@ export default function PetForm({ initial = null }: Props) {
         <button
           type="submit"
           disabled={pending || uploading}
-          className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110 disabled:opacity-50"
+          className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:opacity-50"
         >
           {pending ? "Saving…" : editing ? "Save changes" : "Add pet"}
         </button>
@@ -426,7 +426,7 @@ export default function PetForm({ initial = null }: Props) {
             type="button"
             onClick={handleDelete}
             disabled={pending}
-            className="rounded-full border border-rose-200 bg-white px-4 py-2.5 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-50"
+            className="rounded-full border border-rose-200 bg-cream-50 px-4 py-2.5 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-50"
           >
             Delete pet
           </button>
@@ -437,7 +437,7 @@ export default function PetForm({ initial = null }: Props) {
 }
 
 const inputCls =
-  "w-full rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-base text-slate-900 placeholder-slate-400 transition focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100";
+  "w-full rounded-xl border border-cream-300 bg-cream-50 px-4 py-2.5 text-base text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60";
 
 function Field({
   label,
@@ -450,9 +450,9 @@ function Field({
 }) {
   return (
     <label className="block">
-      <div className="mb-1.5 text-xs font-medium text-slate-700">{label}</div>
+      <div className="mb-1.5 text-xs font-medium text-ink-700">{label}</div>
       {children}
-      {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
+      {hint && <div className="mt-1 text-xs text-ink-500">{hint}</div>}
     </label>
   );
 }
@@ -475,8 +475,8 @@ function ModeButton({
       onClick={onClick}
       className={`flex-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
         active
-          ? "bg-slate-900 text-white"
-          : "text-slate-500 hover:text-slate-900"
+          ? "bg-ink-900 text-cream-50"
+          : "text-ink-500 hover:text-ink-900"
       }`}
     >
       {label}

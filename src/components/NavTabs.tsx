@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// The tab strip in the navbar. Pulled out to its own client component
-// so the parent navbar can stay a server component (and read the user
-// session without a re-render).
+// Tab strip in the navbar. Pulled out as a client component so the
+// parent navbar can stay a server component (and read user session
+// without a re-render).
+//
+// The "+ New story" CTA lives outside this strip — see Navbar.tsx.
+// These tabs are pure browse/destination links.
 
 const TABS: { label: string; href: string; matches: (p: string) => boolean }[] =
   [
@@ -33,8 +36,8 @@ export default function NavTabs() {
             href={tab.href}
             className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
               active
-                ? "bg-slate-900 text-white"
-                : "text-slate-600 hover:bg-stone-200/70 hover:text-slate-900"
+                ? "bg-ink-900 text-cream-50"
+                : "text-ink-500 hover:bg-cream-200 hover:text-ink-900"
             }`}
           >
             {tab.label}

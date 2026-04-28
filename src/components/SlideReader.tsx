@@ -37,12 +37,12 @@ export default function SlideReader({ story }: { story: Story }) {
   const layers = useMemo(() => resolveDisplayLayers(page), [page]);
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-gradient-to-b from-purple-50 to-[#fffbf5]">
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-gradient-to-b from-cream-200 to-cream-100">
       {/* Header */}
-      <div className="flex items-center justify-between border-b-2 border-dashed border-purple-200 px-6 py-3">
+      <div className="flex items-center justify-between border-b-2 border-dashed border-cream-300 px-6 py-3">
         <Link
           href="/read"
-          className="flex items-center gap-1.5 text-sm font-bold text-purple-400 transition-colors hover:text-purple-600"
+          className="flex items-center gap-1.5 text-sm font-bold text-ink-300 transition-colors hover:text-moss-700"
         >
           <svg
             className="h-4 w-4"
@@ -59,18 +59,18 @@ export default function SlideReader({ story }: { story: Story }) {
           </svg>
           Back to Stories
         </Link>
-        <h2 className="font-[family-name:var(--font-display)] font-bold text-purple-700">
+        <h2 className="font-[family-name:var(--font-display)] font-bold text-ink-900">
           {story.title}
         </h2>
         <div className="flex items-center gap-2">
           <Link
             href={`/ship/${story.id}`}
-            className="rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-3 py-1 text-xs font-black uppercase tracking-wider text-white shadow-sm transition-all hover:scale-[1.04]"
+            className="rounded-full bg-moss-700 px-3 py-1 text-xs font-black uppercase tracking-wider text-cream-50 shadow-sm transition-all hover:scale-[1.04]"
             title="Order a physical copy"
           >
             Ship book
           </Link>
-          <span className="rounded-full bg-purple-100 px-3 py-1 text-sm font-black text-purple-600">
+          <span className="rounded-full bg-moss-100 px-3 py-1 text-sm font-black text-moss-700">
             {currentPage + 1} / {pages.length}
           </span>
         </div>
@@ -79,8 +79,8 @@ export default function SlideReader({ story }: { story: Story }) {
       {/* Slide */}
       <div className="flex flex-1 items-center justify-center px-4 py-6">
         <div className="relative mx-auto w-full max-w-3xl">
-          <div className="overflow-hidden rounded-3xl border-4 border-purple-200 bg-white shadow-xl shadow-purple-100/50">
-            <div className="relative aspect-square w-full bg-gradient-to-br from-purple-50 to-pink-50">
+          <div className="overflow-hidden rounded-3xl border-4 border-cream-300 bg-cream-50 shadow-xl shadow-cream-200/50">
+            <div className="relative aspect-square w-full bg-gradient-to-br from-cream-100 to-cream-200">
               {layers.map((layer) => (
                 <ReadOnlyLayer key={layer.id} layer={layer} />
               ))}
@@ -90,7 +90,7 @@ export default function SlideReader({ story }: { story: Story }) {
           <button
             onClick={goPrev}
             disabled={currentPage === 0}
-            className="absolute left-0 top-1/2 -translate-x-14 -translate-y-1/2 rounded-full border-3 border-purple-300 bg-white p-3 text-purple-500 shadow-lg transition-all hover:scale-110 hover:bg-purple-50 disabled:opacity-0"
+            className="absolute left-0 top-1/2 -translate-x-14 -translate-y-1/2 rounded-full border-3 border-cream-400 bg-cream-50 p-3 text-ink-500 shadow-lg transition-all hover:scale-110 hover:bg-cream-200 disabled:opacity-0"
             aria-label="Previous page"
           >
             <svg
@@ -110,7 +110,7 @@ export default function SlideReader({ story }: { story: Story }) {
           <button
             onClick={goNext}
             disabled={currentPage === pages.length - 1}
-            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-14 rounded-full border-3 border-purple-300 bg-white p-3 text-purple-500 shadow-lg transition-all hover:scale-110 hover:bg-purple-50 disabled:opacity-0"
+            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-14 rounded-full border-3 border-cream-400 bg-cream-50 p-3 text-ink-500 shadow-lg transition-all hover:scale-110 hover:bg-cream-200 disabled:opacity-0"
             aria-label="Next page"
           >
             <svg
@@ -138,8 +138,8 @@ export default function SlideReader({ story }: { story: Story }) {
             onClick={() => setCurrentPage(i)}
             className={`rounded-full transition-all ${
               i === currentPage
-                ? "h-4 w-10 bg-gradient-to-r from-purple-400 to-pink-400 shadow-md shadow-purple-200"
-                : "h-4 w-4 bg-purple-200 hover:bg-purple-300"
+                ? "h-4 w-10 bg-moss-500 shadow-md shadow-cream-300"
+                : "h-4 w-4 bg-cream-300 hover:bg-cream-400"
             }`}
             aria-label={`Go to page ${i + 1}`}
           />

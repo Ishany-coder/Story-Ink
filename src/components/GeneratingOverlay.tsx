@@ -3,8 +3,8 @@ interface Props {
 }
 
 // Modal-style loading overlay shown while the Inngest pipeline runs.
-// No emojis, no wiggle. A clean spinner ring + a determinate progress
-// bar when the worker has reported a current/total page.
+// Editorial + restrained: a quiet ring spinner, deep navy heading,
+// and a moss progress bar that fills as pages render.
 export default function GeneratingOverlay({ progress = null }: Props) {
   const pct = progress
     ? Math.min(
@@ -14,15 +14,15 @@ export default function GeneratingOverlay({ progress = null }: Props) {
     : null;
 
   return (
-    <div className="animate-fade-in fixed inset-0 z-50 flex flex-col items-center justify-center bg-stone-50/90 backdrop-blur-md">
-      <div className="flex w-full max-w-sm flex-col items-center gap-6 rounded-3xl border border-stone-200 bg-white px-8 py-10 shadow-xl shadow-stone-300/30">
+    <div className="animate-fade-in fixed inset-0 z-50 flex flex-col items-center justify-center bg-cream-100/92 backdrop-blur-md">
+      <div className="flex w-full max-w-sm flex-col items-center gap-6 rounded-3xl border border-cream-300 bg-cream-50 px-8 py-10 shadow-[0_24px_60px_rgba(14,26,43,0.10)]">
         <SpinnerRing />
 
         <div className="text-center">
-          <p className="font-[family-name:var(--font-display)] text-xl font-semibold text-slate-900">
+          <p className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
             Building your storybook
           </p>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-500">
             {progress
               ? `Drawing page ${progress.current} of ${progress.total}…`
               : "This usually takes a minute or two."}
@@ -31,14 +31,14 @@ export default function GeneratingOverlay({ progress = null }: Props) {
 
         {pct !== null && (
           <div
-            className="h-1.5 w-full overflow-hidden rounded-full bg-stone-100"
+            className="h-1.5 w-full overflow-hidden rounded-full bg-cream-200"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={pct}
           >
             <div
-              className="h-full rounded-full bg-gradient-to-r from-purple-600 to-pink-600 transition-[width] duration-500 ease-out"
+              className="h-full rounded-full bg-moss-700 transition-[width] duration-500 ease-out"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -49,7 +49,7 @@ export default function GeneratingOverlay({ progress = null }: Props) {
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
-                className="h-1.5 w-1.5 rounded-full bg-purple-500"
+                className="h-1.5 w-1.5 rounded-full bg-moss-700"
                 style={{
                   animation: "bounce-dot 1.4s ease-in-out infinite",
                   animationDelay: `${i * 0.16}s`,
@@ -63,8 +63,8 @@ export default function GeneratingOverlay({ progress = null }: Props) {
   );
 }
 
-// Indeterminate ring spinner with a soft track + a single-arc tip in
-// the brand gradient. CSS-only, no extra deps.
+// Indeterminate ring spinner with a soft cream track + a single
+// moss arc tip. Champagne gold inner dot reads as a small "imprint."
 function SpinnerRing() {
   return (
     <div
@@ -77,16 +77,10 @@ function SpinnerRing() {
         xmlns="http://www.w3.org/2000/svg"
         className="h-full w-full"
       >
-        <defs>
-          <linearGradient id="spinner-grad" x1="0" y1="0" x2="48" y2="48">
-            <stop offset="0%" stopColor="#9333ea" />
-            <stop offset="100%" stopColor="#db2777" />
-          </linearGradient>
-        </defs>
-        <circle cx="24" cy="24" r="18" stroke="#f0eadf" strokeWidth="4" />
+        <circle cx="24" cy="24" r="18" stroke="#ebe4d3" strokeWidth="4" />
         <path
           d="M24 6 a18 18 0 0 1 18 18"
-          stroke="url(#spinner-grad)"
+          stroke="#1f3d2e"
           strokeWidth="4"
           strokeLinecap="round"
           fill="none"

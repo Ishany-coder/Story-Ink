@@ -27,7 +27,7 @@ export default async function ReadPage() {
   if (error) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
-        <p className="text-sm text-slate-500">Couldn&apos;t load your stories.</p>
+        <p className="text-sm text-ink-500">Couldn&apos;t load your stories.</p>
       </div>
     );
   }
@@ -45,19 +45,19 @@ export default async function ReadPage() {
 
   return (
     <div className="animate-rise-in mx-auto max-w-6xl px-6 py-12">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-4">
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-3 border-b border-cream-300 pb-4">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+          <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
             Your stories
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-500">
             {stories.length} {stories.length === 1 ? "book" : "books"} — pick
             one to read.
           </p>
         </div>
         <Link
           href="/"
-          className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+          className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
         >
           New story
         </Link>
@@ -97,13 +97,13 @@ function EmptyState({
 }) {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
-      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
         {title}
       </p>
-      <p className="max-w-sm text-sm text-slate-500">{subtitle}</p>
+      <p className="max-w-sm text-sm text-ink-500">{subtitle}</p>
       <Link
         href={ctaHref}
-        className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+        className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
       >
         {ctaLabel}
       </Link>

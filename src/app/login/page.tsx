@@ -82,24 +82,24 @@ export default function LoginPage() {
 
   return (
     <div className="animate-rise-in mx-auto flex min-h-[calc(100vh-4rem)] max-w-md flex-col items-center justify-center px-6 py-16">
-      <div className="w-full rounded-2xl border border-stone-200 bg-white px-8 py-10 shadow-[0_8px_32px_rgba(0,0,0,0.06)]">
-        <h1 className="mb-1 text-center font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+      <div className="w-full rounded-2xl border border-cream-300 bg-cream-50 px-8 py-10 shadow-[0_8px_32px_rgba(0,0,0,0.06)]">
+        <h1 className="mb-1 text-center font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
           {mode === "signin" ? "Sign in" : "Create account"}
         </h1>
-        <p className="mb-6 text-center text-sm text-slate-500">
+        <p className="mb-6 text-center text-sm text-ink-500">
           {mode === "signin"
             ? "Welcome back."
             : "Pick a password and you're in."}
         </p>
 
         {confirmEmailNotice ? (
-          <div className="rounded-xl border border-stone-200 bg-stone-50 px-5 py-6 text-center">
-            <p className="text-sm text-slate-700">
+          <div className="rounded-xl border border-cream-300 bg-cream-100 px-5 py-6 text-center">
+            <p className="text-sm text-ink-700">
               Check your inbox at{" "}
-              <span className="font-semibold text-slate-900">{email}</span> to
+              <span className="font-semibold text-ink-900">{email}</span> to
               confirm.
             </p>
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-ink-500">
               Tip: disable &ldquo;Confirm email&rdquo; in your Supabase
               dashboard (Authentication → Providers → Email) to skip this
               step in dev.
@@ -114,7 +114,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               autoComplete="email"
-              className="w-full rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-base text-slate-900 placeholder-slate-400 transition focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100"
+              className="w-full rounded-xl border border-cream-300 bg-cream-50 px-4 py-2.5 text-base text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
             />
             <input
               type="password"
@@ -126,12 +126,12 @@ export default function LoginPage() {
               autoComplete={
                 mode === "signin" ? "current-password" : "new-password"
               }
-              className="w-full rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-base text-slate-900 placeholder-slate-400 transition focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100"
+              className="w-full rounded-xl border border-cream-300 bg-cream-50 px-4 py-2.5 text-base text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
             />
             <button
               type="submit"
               disabled={pending || !email.trim() || !password}
-              className="w-full rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending
                 ? mode === "signin"
@@ -149,14 +149,14 @@ export default function LoginPage() {
           </form>
         )}
 
-        <div className="mt-6 text-center text-sm text-slate-500">
+        <div className="mt-6 text-center text-sm text-ink-500">
           {mode === "signin" ? (
             <>
               New here?{" "}
               <button
                 type="button"
                 onClick={() => flipMode("signup")}
-                className="font-medium text-purple-600 hover:text-purple-700"
+                className="font-medium text-moss-700 hover:text-ink-900"
               >
                 Create an account
               </button>
@@ -167,7 +167,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => flipMode("signin")}
-                className="font-medium text-purple-600 hover:text-purple-700"
+                className="font-medium text-moss-700 hover:text-ink-900"
               >
                 Sign in
               </button>

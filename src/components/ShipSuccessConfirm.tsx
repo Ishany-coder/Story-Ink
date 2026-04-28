@@ -66,12 +66,12 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
   return (
     <div className="animate-rise-in mx-auto max-w-xl px-4 py-12">
       {state.kind === "loading" && (
-        <div className="rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <div className="rounded-2xl border border-cream-300 bg-cream-50 p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <Spinner />
-          <h1 className="mt-4 font-[family-name:var(--font-display)] text-xl font-semibold text-slate-900">
+          <h1 className="mt-4 font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
             Finalizing your order
           </h1>
-          <p className="mt-2 text-sm text-slate-500">
+          <p className="mt-2 text-sm text-ink-500">
             Building the print files and handing them to Lulu. Don&apos;t
             close this page.
           </p>
@@ -79,26 +79,26 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
       )}
 
       {state.kind === "success" && (
-        <div className="rounded-2xl border border-emerald-200 bg-white p-8 text-center shadow-[0_8px_24px_rgba(16,185,129,0.08)]">
+        <div className="rounded-2xl border border-emerald-200 bg-cream-50 p-8 text-center shadow-[0_8px_24px_rgba(16,185,129,0.08)]">
           <CheckmarkCircle />
-          <h1 className="mt-4 font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+          <h1 className="mt-4 font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
             Your book is on its way
           </h1>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-2 text-sm text-ink-500">
             {state.alreadyProcessed
               ? "This order was already submitted. Here are the details:"
               : "We've handed your order to the print partner."}
           </p>
-          <div className="mt-6 space-y-1 rounded-xl bg-stone-50 px-4 py-3 text-left text-xs text-slate-600">
+          <div className="mt-6 space-y-1 rounded-xl bg-cream-100 px-4 py-3 text-left text-xs text-ink-500">
             <div>
               Order ID:{" "}
-              <span className="font-mono text-[11px] text-slate-900">
+              <span className="font-mono text-[11px] text-ink-900">
                 {state.orderId || "—"}
               </span>
             </div>
             <div>
               Print job:{" "}
-              <span className="font-mono text-[11px] text-slate-900">
+              <span className="font-mono text-[11px] text-ink-900">
                 {state.luluJobId || "—"}
               </span>
             </div>
@@ -106,7 +106,7 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
           <div className="mt-6">
             <Link
               href={`/read/${storyId}`}
-              className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+              className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
             >
               Back to story
             </Link>
@@ -115,18 +115,18 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
       )}
 
       {state.kind === "error" && (
-        <div className="rounded-2xl border border-rose-200 bg-white p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h1 className="font-[family-name:var(--font-display)] text-xl font-semibold text-slate-900">
+        <div className="rounded-2xl border border-rose-200 bg-cream-50 p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <h1 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
             Something went wrong finalizing your order
           </h1>
           <p className="mt-2 text-sm text-rose-600">{state.message}</p>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-ink-500">
             Your card may or may not have been charged. Support can look up
             Stripe session {sessionId.slice(0, 14)}…
           </p>
           <Link
             href={`/ship/${storyId}`}
-            className="mt-6 inline-block rounded-full border border-stone-300 bg-white px-5 py-2 text-sm font-medium text-slate-700 hover:bg-stone-50"
+            className="mt-6 inline-block rounded-full border border-cream-300 bg-cream-50 px-5 py-2 text-sm font-medium text-ink-700 hover:bg-cream-100"
           >
             Try again
           </Link>
@@ -143,10 +143,10 @@ function Spinner() {
       style={{ animation: "spin 1.1s linear infinite" }}
     >
       <svg viewBox="0 0 40 40" fill="none" className="h-full w-full">
-        <circle cx="20" cy="20" r="15" stroke="#f0eadf" strokeWidth="3.5" />
+        <circle cx="20" cy="20" r="15" stroke="#ebe4d3" strokeWidth="3.5" />
         <path
           d="M20 5 a15 15 0 0 1 15 15"
-          stroke="#9333ea"
+          stroke="#1f3d2e"
           strokeWidth="3.5"
           strokeLinecap="round"
           fill="none"
