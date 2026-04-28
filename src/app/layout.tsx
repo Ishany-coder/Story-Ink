@@ -7,8 +7,12 @@ import "./globals.css";
 // surfaces (Read mode), readable enough for grieving copy. Fraunces
 // is the new display face: a variable optical-size editorial serif
 // that gives the brand an "art book / fine-print" feel rather than
-// "kids' app." Optical sizing axis (opsz) is enabled so titles set
-// at 56px don't look like body text scaled up.
+// "kids' app."
+//
+// next/font/google requires either weight (for static cuts) OR axes
+// (for variable cuts), but not both, and only Google-Fonts-exposed
+// axes are accepted. Fraunces' wght is the default variable axis;
+// listing it explicitly via `axes` is enough to get the full range.
 const nunito = Nunito({
   variable: "--font-nunito",
   subsets: ["latin"],
@@ -17,8 +21,6 @@ const nunito = Nunito({
 const fraunces = Fraunces({
   variable: "--font-fraunces",
   subsets: ["latin"],
-  axes: ["opsz", "SOFT"],
-  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
