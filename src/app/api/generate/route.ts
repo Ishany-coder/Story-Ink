@@ -3,6 +3,7 @@ import { GenerateRequest } from "@/lib/types";
 import { createJob } from "@/lib/jobs";
 import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/supabase-server";
+import { DEFAULT_IMAGE_STYLE, isImageStyleId } from "@/lib/image-styles";
 
 // Kicks off the Inngest `story/generate.requested` function. Returns a
 // jobId immediately — the client polls /api/jobs/[id] until status is
@@ -18,10 +19,13 @@ interface PetGenerateBody extends GenerateRequest {
   kind?: "pet" | "generic";
   petId?: string | null;
   // "fast" → parallel image generation with reference photos only
-  // "quality" (default) → sequential, prev page passed as anchor for
-  // cross-page consistency
+  // "quality" (default) → sequential, page 1 + previous page passed
+  // as anchors for cross-page character consistency
   imageMode?: "fast" | "quality";
   isPublic?: boolean;
+  // Art-style preset id from src/lib/image-styles.ts. Defaults to
+  // watercolor server-side when missing or unknown.
+  imageStyle?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -52,6 +56,9 @@ export async function POST(request: NextRequest) {
     }
     const imageMode = body.imageMode === "fast" ? "fast" : "quality";
     const isPublic = body.isPublic === true;
+    const imageStyle = isImageStyleId(body.imageStyle)
+      ? body.imageStyle
+      : DEFAULT_IMAGE_STYLE;
 
     const jobId = await createJob("story.generate", user.id);
     await inngest.send({
@@ -65,6 +72,7 @@ export async function POST(request: NextRequest) {
         petId,
         imageMode,
         isPublic,
+        imageStyle,
       },
     });
 

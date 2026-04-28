@@ -106,7 +106,10 @@ alter table public.stories
   -- "pet" stories use the pet's profile + photos; "generic" stories
   -- preserve the original freeform creation flow without a pet.
   add column if not exists kind text not null default 'generic'
-    check (kind in ('pet','generic'));
+    check (kind in ('pet','generic')),
+  -- Image-style preset id (see src/lib/image-styles.ts). Stored so
+  -- regenerations and AI Assistant tweaks pick up the same look.
+  add column if not exists image_style text not null default 'watercolor';
 
 create index if not exists stories_created_at_idx on public.stories (created_at desc);
 create index if not exists stories_user_id_idx on public.stories (user_id);

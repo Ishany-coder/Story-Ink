@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { fetchWithTimeout, isAllowedContentUrl, withTimeout } from "@/lib/http";
+import { getImageStyle, type ImageStyleId } from "@/lib/image-styles";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -188,19 +189,34 @@ ${context}`
 
 // Reference photos for visual grounding. Used by pet stories so the
 // pet in every illustrated page actually looks like the user's pet.
-// `previousPageUrl` is passed in Quality mode to anchor cross-page
-// consistency (the previous page's generated illustration is shown
-// to the model as "keep this character/scene style").
+//
+// Cross-page identity lock-in:
+//  - `firstPageUrl` (page 2..N): the canonical illustration that
+//    page 1 produced. Drift accumulates a lot less if every page
+//    after page 1 is anchored to page 1, not just to its immediate
+//    predecessor.
+//  - `previousPageUrl` (page 2..N): the page just before this one,
+//    for art-style continuity inside the run.
+//
+// Both are passed only in Quality mode. Fast mode skips them and
+// just uses reference photos in parallel.
 export interface PageImageContext {
   // Pet reference photos (Supabase Storage URLs). Up to 10.
   referencePhotos?: string[];
-  // The previous page's generated image URL. Quality mode only.
+  // First page's image — passed on every page after page 1 as the
+  // canonical visual anchor for the pet. Bounds drift.
+  firstPageUrl?: string | null;
+  // Immediately preceding page's image — passed on every page after
+  // page 1 for art-style continuity.
   previousPageUrl?: string | null;
   // Pet description seeded into the prompt so the model knows what
   // it's drawing even when references fail to fetch.
   petDescription?: string | null;
-  // Memorial mode softens the visual style.
+  // Memorial mode softens the visual mood.
   memorial?: boolean;
+  // Art-style preset id (see src/lib/image-styles.ts). Defaults to
+  // watercolor when omitted.
+  styleId?: ImageStyleId | string | null;
 }
 
 export async function generatePageImage(
@@ -214,38 +230,66 @@ export async function generatePageImage(
       model: "gemini-3.1-flash-image-preview",
     });
 
-    const styleNote = context.memorial
-      ? "Style: soft watercolor children's book illustration with gentle, nostalgic colors and warm light. Reverent and tender."
-      : "Style: watercolor children's book illustration, whimsical, warm colors.";
+    // Style preset (default watercolor). The selected preset's prompt
+    // fragment is the literal sentence the model sees, so we store it
+    // verbatim — see src/lib/image-styles.ts for the canonical list.
+    const style = getImageStyle(context.styleId ?? null);
+    const memorialMoodNote = context.memorial
+      ? "Mood: tender, nostalgic, gentle, reverent."
+      : "Mood: warm, observational, full of small specific detail.";
 
+    // Identity lock-in is the difference between "AI book tools where
+    // the dog turns into a different dog by page 4" and a keepsake
+    // worth printing. We anchor the model with explicit language and,
+    // in quality mode, with the first page + previous page images.
     const introLines: string[] = [
-      `Create a beautiful children's storybook illustration for one page of the story titled "${storyTitle}".`,
-      `CRITICAL: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. This is an illustration only — narration is overlaid separately.`,
+      `Create a single high-fidelity, professionally illustrated children's storybook page for the book titled "${storyTitle}".`,
+      `ABSOLUTE RULE: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. Illustration only — narration is overlaid separately.`,
     ];
     if (context.petDescription) {
       introLines.push(
-        `The main character is a real pet the user knows: ${context.petDescription}. Reference photos are attached so you can match the pet's actual appearance — likeness matters.`
+        `The main character is a REAL pet the user knows: ${context.petDescription}. Likeness is the most important thing in this image. Match the actual pet from the reference photos — fur color, fur pattern and markings, eye color, ear shape, body proportions, breed-specific features. Do not generalize. Do not invent a different-looking version.`
       );
     }
-    if (context.previousPageUrl) {
-      introLines.push(
-        `The first attached image is the illustration from the PREVIOUS page of this same book — match its art style, color palette, and the pet's appearance exactly. Continuity across pages matters.`
+    const hasFirst = !!context.firstPageUrl;
+    const hasPrev = !!context.previousPageUrl;
+    if (hasFirst || hasPrev) {
+      const lockLines: string[] = [];
+      if (hasFirst) {
+        lockLines.push(
+          "The FIRST attached image is the canonical illustration from page 1 of this same book — that is exactly how the character is supposed to look in this whole book. Treat it as a character sheet."
+        );
+      }
+      if (hasPrev) {
+        lockLines.push(
+          `The ${hasFirst ? "second" : "first"} attached image is the previous page's illustration — match its art style, palette, lighting, and character details exactly.`
+        );
+      }
+      lockLines.push(
+        "DO NOT redesign the character between pages. Same fur, same markings, same proportions, same coat — every page."
       );
+      introLines.push(lockLines.join(" "));
     }
     introLines.push(`Scene to illustrate: ${pageText}`);
     introLines.push(
-      `${styleNote} REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`
+      `${style.prompt} ${memorialMoodNote} High-fidelity, fully resolved illustration — no rough sketches, no placeholder shapes, no watermark. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`
     );
     const intro = introLines.join("\n\n");
 
     // Build the multimodal parts list. Order matters for Gemini —
     // putting reference imagery before the text prompt makes it more
     // likely the model treats them as authoritative grounding.
+    // We push in priority order: page 1 (canonical), previous page
+    // (style continuity), then up to a few reference photos.
     const parts: Array<
       | { text: string }
       | { inlineData: { mimeType: string; data: string } }
     > = [];
 
+    if (context.firstPageUrl) {
+      const first = await fetchImageAsInlineData(context.firstPageUrl);
+      if (first) parts.push({ inlineData: first });
+    }
     if (context.previousPageUrl) {
       const prev = await fetchImageAsInlineData(context.previousPageUrl);
       if (prev) parts.push({ inlineData: prev });
@@ -253,9 +297,9 @@ export async function generatePageImage(
     for (const photoUrl of context.referencePhotos ?? []) {
       const inline = await fetchImageAsInlineData(photoUrl);
       if (inline) parts.push({ inlineData: inline });
-      // Cap at ~5 images of context to keep the request reasonable —
-      // the SDK is fine with more, but token cost climbs fast.
-      if (parts.length >= 5) break;
+      // Cap parts list at ~6 images of context to keep the request
+      // reasonable — the SDK is fine with more, but token cost climbs.
+      if (parts.length >= 6) break;
     }
 
     parts.push({ text: intro });
@@ -512,6 +556,9 @@ export interface AssistRegenerateImageArgs {
   // Gemini can edit it (keeping character/scene consistency) rather than
   // starting from scratch.
   currentImageUrl?: string | null;
+  // Story's chosen art style. Gets folded into the prompt so the
+  // regenerated image stays in the same look as the rest of the book.
+  styleId?: ImageStyleId | string | null;
 }
 
 export async function assistRegenerateImage(
@@ -524,16 +571,18 @@ export async function assistRegenerateImage(
   const imageInline = await fetchImageAsInlineData(args.currentImageUrl);
   const hasCurrent = imageInline !== null;
 
+  const style = getImageStyle(args.styleId ?? null);
+
   const intro = [
     `${buildAssistantPreamble(args.systemPrompt)}${
       hasCurrent
-        ? `The attached image is the current illustration for this page. Produce a revised illustration that keeps its overall composition, characters, and style where possible, and applies only the user's requested changes.`
+        ? `The attached image is the current illustration for this page. Produce a revised illustration that keeps its overall composition, characters, and style where possible, and applies only the user's requested changes. Keep the character's identity (fur, markings, proportions) IDENTICAL — do not redesign the character.`
         : `Create a beautiful children's storybook illustration for one page of the story titled "${args.storyTitle}". The original idea behind the story was: "${args.storyPrompt}".`
     }`,
     `CRITICAL: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. This is an illustration only — narration is overlaid separately.`,
     `Scene on this page: ${args.pageText}`,
     `The user's specific request for this illustration: ${args.userPrompt}`,
-    `Style: watercolor children's book illustration, whimsical, warm colors. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
+    `${style.prompt} High-fidelity finished illustration. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
   ].join("\n\n");
 
   const parts = imageInline

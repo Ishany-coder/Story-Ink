@@ -7,6 +7,11 @@ import GeneratingOverlay from "./GeneratingOverlay";
 import PetAvatar from "./PetAvatar";
 import { useJobPolling } from "@/lib/useJobPolling";
 import { startersForMode } from "@/lib/story-starters";
+import {
+  DEFAULT_IMAGE_STYLE,
+  IMAGE_STYLES,
+  type ImageStyleId,
+} from "@/lib/image-styles";
 import type { Pet } from "@/lib/types";
 
 const PAGE_OPTIONS = [3, 5, 7, 10, 12];
@@ -30,6 +35,8 @@ export default function HomeCreate({ pets }: Props) {
   const [prompt, setPrompt] = useState("");
   const [pageCount, setPageCount] = useState(5);
   const [imageMode, setImageMode] = useState<"fast" | "quality">("quality");
+  const [imageStyle, setImageStyle] =
+    useState<ImageStyleId>(DEFAULT_IMAGE_STYLE);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const [generatingProgress, setGeneratingProgress] = useState<{
@@ -90,6 +97,7 @@ export default function HomeCreate({ pets }: Props) {
           kind,
           petId: kind === "pet" ? petId : null,
           imageMode,
+          imageStyle,
           isPublic: false,
         }),
       });
@@ -184,6 +192,8 @@ export default function HomeCreate({ pets }: Props) {
             </div>
           </div>
         </div>
+
+        <StylePicker value={imageStyle} onChange={setImageStyle} />
 
         {kind === "pet" && (
           <ImageModePicker mode={imageMode} onChange={setImageMode} />
@@ -323,6 +333,43 @@ function StarterPicker({
             {s.label}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function StylePicker({
+  value,
+  onChange,
+}: {
+  value: ImageStyleId;
+  onChange: (v: ImageStyleId) => void;
+}) {
+  const selected = IMAGE_STYLES.find((s) => s.id === value) ?? IMAGE_STYLES[0];
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-xs font-medium text-slate-500">Art style</span>
+        <span className="text-xs text-slate-400">{selected.blurb}</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {IMAGE_STYLES.map((s) => {
+          const active = s.id === value;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onChange(s.id)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-stone-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-stone-50"
+              }`}
+            >
+              {s.name}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

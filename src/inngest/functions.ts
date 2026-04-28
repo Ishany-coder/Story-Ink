@@ -65,10 +65,18 @@ function composeSystemPrompt(
 async function fetchStoryAndPage(storyId: string, pageNumber: number) {
   const { data, error } = await supabase
     .from("stories")
-    .select("id, title, prompt, pages, ai_system_prompt")
+    .select("id, title, prompt, pages, ai_system_prompt, image_style")
     .eq("id", storyId)
     .single<
-      Pick<Story, "id" | "title" | "prompt" | "pages" | "ai_system_prompt">
+      Pick<
+        Story,
+        | "id"
+        | "title"
+        | "prompt"
+        | "pages"
+        | "ai_system_prompt"
+        | "image_style"
+      >
     >();
   if (error || !data) throw new Error("Story not found");
   const page = data.pages.find((p) => p.pageNumber === pageNumber);
@@ -97,6 +105,7 @@ export const generateStoryFn = inngest.createFunction(
       petId = null,
       imageMode = "quality",
       isPublic = false,
+      imageStyle = "watercolor",
     } = event.data as {
       jobId: string;
       userId: string;
@@ -106,6 +115,7 @@ export const generateStoryFn = inngest.createFunction(
       petId?: string | null;
       imageMode?: "fast" | "quality";
       isPublic?: boolean;
+      imageStyle?: string;
     };
     await step.run("mark-running", () => markRunning(jobId));
 
@@ -148,17 +158,21 @@ export const generateStoryFn = inngest.createFunction(
 
     // Image generation strategy. For a pet story in Quality mode we
     // serialize pages so each one can pass the previous page's image
-    // back to Gemini for cross-page consistency. Fast mode (and all
-    // generic stories) fan out in parallel.
+    // AND the first page's image back to Gemini — that's how we lock
+    // the character's look across the whole book instead of letting it
+    // drift page-to-page. Fast mode (and all generic stories) fan out
+    // in parallel and only use reference photos.
     const imageContextBase = {
       referencePhotos: pet?.photos ?? [],
       petDescription,
       memorial,
+      styleId: imageStyle,
     };
 
     let imageUrls: string[];
     if (kind === "pet" && imageMode === "quality") {
       imageUrls = [];
+      let firstPageUrl: string | null = null;
       for (const p of scriptData.pages) {
         await step.run(`progress-${p.pageNumber}`, () =>
           markProgress(jobId, {
@@ -169,10 +183,15 @@ export const generateStoryFn = inngest.createFunction(
         );
         const previousPageUrl =
           imageUrls.length > 0 ? imageUrls[imageUrls.length - 1] || null : null;
+        // Page 1 has no anchor yet — the photos do the grounding. Page
+        // 2..N pass page 1 (canonical) AND the immediately-previous
+        // page (style continuity), which bounds drift.
+        const isFirstPage = imageUrls.length === 0;
         const url: string = await step
           .run(`generate-page-image-${p.pageNumber}`, async () => {
             const dataUri = await generatePageImage(p.text, scriptData.title, {
               ...imageContextBase,
+              firstPageUrl: isFirstPage ? null : firstPageUrl,
               previousPageUrl,
             });
             if (!dataUri) return "";
@@ -194,6 +213,7 @@ export const generateStoryFn = inngest.createFunction(
             return "";
           });
         imageUrls.push(url);
+        if (isFirstPage && url) firstPageUrl = url;
       }
     } else {
       imageUrls = await Promise.all(
@@ -250,6 +270,7 @@ export const generateStoryFn = inngest.createFunction(
           is_public: isPublic,
           kind,
           pet_id: petId,
+          image_style: imageStyle,
         })
         .select("id")
         .single();
@@ -409,6 +430,7 @@ export const assistImageFn = inngest.createFunction(
         pageText: page.text,
         userPrompt: prompt,
         currentImageUrl: page.imageUrl,
+        styleId: story.image_style ?? null,
       });
       return uploadGeneratedImage(dataUri);
     });
@@ -514,6 +536,7 @@ export const assistInferFn = inngest.createFunction(
                 pageText: page.text,
                 userPrompt: prompt,
                 currentImageUrl: page.imageUrl,
+                styleId: story.image_style ?? null,
               });
               return uploadGeneratedImage(dataUri);
             })

@@ -127,6 +127,9 @@ export interface Story {
   // Pet vs. generic story (per-story toggle from creation form).
   kind?: "pet" | "generic";
   pet_id?: string | null;
+  // Art-style preset id (see src/lib/image-styles.ts). Default
+  // "watercolor". Stored so AI Assistant regenerations stay in style.
+  image_style?: string;
 }
 
 // ---------------------------------------------------------------------------
