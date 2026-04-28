@@ -64,14 +64,14 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
   }, [sessionId]);
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-12">
+    <div className="animate-rise-in mx-auto max-w-xl px-4 py-12">
       {state.kind === "loading" && (
-        <div className="rounded-3xl border-4 border-purple-200 bg-white p-8 text-center shadow-sm">
-          <div className="mb-3 text-4xl">&#128230;</div>
-          <h1 className="font-[family-name:var(--font-display)] text-xl font-bold text-purple-700">
-            Finalizing your order…
+        <div className="rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <Spinner />
+          <h1 className="mt-4 font-[family-name:var(--font-display)] text-xl font-semibold text-slate-900">
+            Finalizing your order
           </h1>
-          <p className="mt-2 text-sm font-bold text-purple-400">
+          <p className="mt-2 text-sm text-slate-500">
             Building the print files and handing them to Lulu. Don&apos;t
             close this page.
           </p>
@@ -79,26 +79,26 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
       )}
 
       {state.kind === "success" && (
-        <div className="rounded-3xl border-4 border-emerald-300 bg-emerald-50 p-8 text-center shadow-lg shadow-emerald-100">
-          <div className="mb-2 text-5xl">&#127881;</div>
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold text-emerald-700">
-            Your book is on its way!
+        <div className="rounded-2xl border border-emerald-200 bg-white p-8 text-center shadow-[0_8px_24px_rgba(16,185,129,0.08)]">
+          <CheckmarkCircle />
+          <h1 className="mt-4 font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+            Your book is on its way
           </h1>
-          <p className="mt-2 text-sm font-bold text-emerald-600">
+          <p className="mt-2 text-sm text-slate-600">
             {state.alreadyProcessed
               ? "This order was already submitted. Here are the details:"
               : "We've handed your order to the print partner."}
           </p>
-          <div className="mt-6 space-y-1 rounded-2xl bg-white px-4 py-3 text-left text-xs font-bold text-emerald-700">
+          <div className="mt-6 space-y-1 rounded-xl bg-stone-50 px-4 py-3 text-left text-xs text-slate-600">
             <div>
               Order ID:{" "}
-              <span className="font-mono text-[11px]">
+              <span className="font-mono text-[11px] text-slate-900">
                 {state.orderId || "—"}
               </span>
             </div>
             <div>
               Print job:{" "}
-              <span className="font-mono text-[11px]">
+              <span className="font-mono text-[11px] text-slate-900">
                 {state.luluJobId || "—"}
               </span>
             </div>
@@ -106,7 +106,7 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
           <div className="mt-6">
             <Link
               href={`/read/${storyId}`}
-              className="rounded-2xl bg-emerald-500 px-5 py-2 text-sm font-black uppercase text-white hover:bg-emerald-600"
+              className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
             >
               Back to story
             </Link>
@@ -115,23 +115,63 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
       )}
 
       {state.kind === "error" && (
-        <div className="rounded-3xl border-4 border-rose-300 bg-rose-50 p-8 text-center shadow-lg">
-          <h1 className="font-[family-name:var(--font-display)] text-xl font-bold text-rose-700">
+        <div className="rounded-2xl border border-rose-200 bg-white p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <h1 className="font-[family-name:var(--font-display)] text-xl font-semibold text-slate-900">
             Something went wrong finalizing your order
           </h1>
-          <p className="mt-2 text-sm font-bold text-rose-600">{state.message}</p>
-          <p className="mt-3 text-[11px] font-bold text-rose-400">
+          <p className="mt-2 text-sm text-rose-600">{state.message}</p>
+          <p className="mt-3 text-xs text-slate-500">
             Your card may or may not have been charged. Support can look up
             Stripe session {sessionId.slice(0, 14)}…
           </p>
           <Link
             href={`/ship/${storyId}`}
-            className="mt-6 inline-block rounded-2xl bg-rose-500 px-5 py-2 text-sm font-black uppercase text-white hover:bg-rose-600"
+            className="mt-6 inline-block rounded-full border border-stone-300 bg-white px-5 py-2 text-sm font-medium text-slate-700 hover:bg-stone-50"
           >
             Try again
           </Link>
         </div>
       )}
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <div
+      className="inline-block h-10 w-10"
+      style={{ animation: "spin 1.1s linear infinite" }}
+    >
+      <svg viewBox="0 0 40 40" fill="none" className="h-full w-full">
+        <circle cx="20" cy="20" r="15" stroke="#f0eadf" strokeWidth="3.5" />
+        <path
+          d="M20 5 a15 15 0 0 1 15 15"
+          stroke="#9333ea"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          fill="none"
+        />
+      </svg>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+function CheckmarkCircle() {
+  return (
+    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-6 w-6"
+        aria-hidden="true"
+      >
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
     </div>
   );
 }

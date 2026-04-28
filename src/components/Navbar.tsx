@@ -11,17 +11,14 @@ export default async function Navbar() {
   const user = await getCurrentUser();
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 border-b-4 border-yellow-300 bg-white/90 backdrop-blur-md shadow-sm">
+    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-stone-200 bg-[#faf8f3]/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         <Link
           href="/"
-          className="font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight"
+          className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-slate-900 hover:text-slate-700"
         >
-          <span className="text-purple-500">Story</span>
-          <span className="text-pink-500">Ink</span>
-          <span className="ml-1 inline-block animate-wiggle text-2xl">
-            &#128062;
-          </span>
+          <span className="text-purple-600">Story</span>
+          <span className="text-pink-600">Ink</span>
         </Link>
 
         <div className="flex items-center gap-3">
@@ -31,19 +28,20 @@ export default async function Navbar() {
             <form action="/auth/signout" method="post">
               <button
                 type="submit"
-                className="hidden items-center gap-2 rounded-full border-2 border-purple-200 bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wider text-purple-500 hover:border-purple-400 hover:bg-purple-50 sm:flex"
+                className="hidden items-center gap-2 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-stone-400 hover:bg-stone-50 sm:flex"
                 title={user.email ?? "Signed in"}
               >
-                <span className="hidden md:inline">{user.email}</span>
-                <span className="md:hidden">Sign out</span>
-                <span className="hidden md:inline text-purple-300">·</span>
-                <span className="hidden md:inline">Sign out</span>
+                <span className="hidden md:inline text-slate-500">
+                  {user.email}
+                </span>
+                <span className="hidden md:inline text-stone-300">·</span>
+                <span>Sign out</span>
               </button>
             </form>
           ) : (
             <Link
               href="/login"
-              className="rounded-full bg-gradient-to-r from-purple-400 to-pink-400 px-4 py-1.5 text-sm font-black text-white shadow-md shadow-purple-200 transition-all hover:scale-105"
+              className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
             >
               Sign in
             </Link>

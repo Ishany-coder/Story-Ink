@@ -1486,6 +1486,48 @@ export default function CanvasEditor({
 }
 
 // ---------------------------------------------------------------------------
+// Inline icons used by the image upload + drop zones. Stroke-only,
+// matches the rest of the redesigned site visual language.
+function ImageDropIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="9" cy="9" r="1.5" />
+      <path d="M21 15l-5-5L5 21" />
+    </svg>
+  );
+}
+
+function UploadIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="M17 8l-5-5-5 5" />
+      <path d="M12 3v12" />
+    </svg>
+  );
+}
+
 // LayoutThumbnail — tiny visual preview of a layout's image + text regions
 // ---------------------------------------------------------------------------
 
@@ -1826,7 +1868,7 @@ function ImageLayerContent({
             : "border-purple-300 bg-purple-50/60 text-purple-400"
         }`}
       >
-        <span className="text-xl leading-none">&#128444;</span>
+        <ImageDropIcon />
         <span className="mt-1 px-2 text-[10px] font-black uppercase tracking-wider">
           {dropActive ? "Drop to place" : "Drop an image"}
         </span>
@@ -2345,7 +2387,7 @@ function ImagesPanel({
   return (
     <div className="space-y-3">
       <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-3 py-5 text-center text-xs font-bold text-purple-500 hover:bg-purple-100">
-        <span className="text-xl">&#128206;</span>
+        <UploadIcon />
         <span className="mt-1">Upload image</span>
         <span className="mt-0.5 text-[10px] font-medium text-purple-300">
           PNG / JPG, max 5 MB
@@ -2503,7 +2545,7 @@ function ImagePickerModal({
 
         <div className="space-y-4 overflow-y-auto px-5 py-4">
           <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-4 py-6 text-center text-sm font-bold text-purple-500 hover:bg-purple-100">
-            <span className="text-2xl">&#128206;</span>
+            <UploadIcon size={24} />
             <span className="mt-1">
               {uploading ? "Uploading…" : "Upload from your computer"}
             </span>

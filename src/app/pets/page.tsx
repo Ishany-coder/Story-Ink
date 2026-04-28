@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PetAvatar from "@/components/PetAvatar";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import type { Pet } from "@/lib/types";
 
@@ -8,18 +9,10 @@ export default async function PetsPage() {
   const user = await getCurrentUser();
   if (!user) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
-        <div className="text-7xl">&#128062;</div>
-        <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
-          Sign in to add your pets
-        </p>
-        <Link
-          href="/login?next=/pets"
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-3 text-base font-black text-white shadow-lg shadow-purple-300/40"
-        >
-          Sign in
-        </Link>
-      </div>
+      <SignedOutEmpty
+        title="Sign in to add your pets"
+        href="/login?next=/pets"
+      />
     );
   }
 
@@ -33,48 +26,58 @@ export default async function PetsPage() {
   if (error) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
-        <p className="text-lg font-bold text-purple-400">
-          Couldn&apos;t load your pets.
-        </p>
+        <p className="text-sm text-slate-500">Couldn&apos;t load your pets.</p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+    <div className="animate-rise-in mx-auto max-w-5xl px-6 py-12">
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-4">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-4xl font-bold text-purple-700">
-            Your pets &#128062;
+          <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+            Your pets
           </h1>
-          <p className="mt-1 text-lg font-semibold text-purple-400">
-            Add a pet to make stories that actually look like them.
+          <p className="mt-1 text-sm text-slate-500">
+            Reference photos let the AI keep your pet looking like your pet
+            across every page.
           </p>
         </div>
         <Link
           href="/pets/new"
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-6 py-3 text-base font-black text-white shadow-md shadow-purple-200 transition-all hover:scale-105"
+          className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
         >
-          + Add a pet
+          Add a pet
         </Link>
       </div>
 
       {(!pets || pets.length === 0) && (
-        <div className="flex flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed border-purple-200 bg-white px-6 py-16 text-center">
-          <div className="text-6xl">&#129420;</div>
-          <p className="font-[family-name:var(--font-display)] text-xl font-bold text-purple-600">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-stone-300 bg-white px-6 py-16 text-center">
+          <p className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900">
             No pets yet.
           </p>
-          <p className="text-sm font-semibold text-purple-400">
-            Adding photos lets the AI keep your pet looking like your pet
-            across every page.
+          <p className="max-w-sm text-sm text-slate-500">
+            Adding 3–5 clear photos in different poses gives the AI enough to
+            keep your pet recognizable on every page.
           </p>
+          <Link
+            href="/pets/new"
+            className="mt-2 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+          >
+            Add your first pet
+          </Link>
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {(pets ?? []).map((p) => (
-          <PetCard key={p.id} pet={p as Pet} />
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {(pets ?? []).map((p, i) => (
+          <div
+            key={p.id}
+            className="animate-rise-in"
+            style={{ animationDelay: `${i * 40}ms` }}
+          >
+            <PetCard pet={p as Pet} />
+          </div>
         ))}
       </div>
     </div>
@@ -86,38 +89,36 @@ function PetCard({ pet }: { pet: Pet }) {
   return (
     <Link
       href={`/pets/${pet.id}`}
-      className="group flex flex-col overflow-hidden rounded-3xl border-3 border-purple-200 bg-white shadow-md transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-purple-200/50"
+      className="group flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
     >
-      <div className="relative aspect-square overflow-hidden">
+      <div className="relative aspect-square overflow-hidden bg-stone-100">
         {cover ? (
-          // Plain <img> here — pet photos can be any Supabase Storage URL
-          // and we don't want to deal with next/image domain config.
-          // eslint-disable-next-line @next/next/no-img-element
+          /* eslint-disable-next-line @next/next/no-img-element */
           <img
             src={cover}
             alt={pet.name}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           />
         ) : (
-          <div className="flex h-full items-center justify-center bg-gradient-to-br from-purple-100 to-pink-100">
-            <span className="text-7xl">{speciesEmoji(pet.species)}</span>
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-purple-100 via-purple-50 to-pink-100">
+            <PetAvatar pet={pet} size={96} />
           </div>
         )}
         <div
-          className={`absolute right-3 top-3 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider shadow-sm ${
+          className={`absolute right-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider shadow-sm ${
             pet.mode === "memorial"
               ? "bg-purple-100 text-purple-700"
-              : "bg-white/90 text-purple-600"
+              : "bg-white/95 text-slate-600"
           }`}
         >
           {pet.mode === "memorial" ? "In memory" : "Living"}
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-1 p-5">
-        <h3 className="font-[family-name:var(--font-display)] text-xl font-bold text-purple-700">
+      <div className="flex flex-1 flex-col gap-1 p-4">
+        <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900">
           {pet.name}
         </h3>
-        <p className="text-xs font-bold uppercase tracking-wider text-purple-300">
+        <p className="text-xs uppercase tracking-wider text-slate-400">
           {pet.species}
           {pet.breed ? ` · ${pet.breed}` : ""}
         </p>
@@ -126,23 +127,18 @@ function PetCard({ pet }: { pet: Pet }) {
   );
 }
 
-function speciesEmoji(s: string): string {
-  switch (s) {
-    case "dog":
-      return "\u{1F436}";
-    case "cat":
-      return "\u{1F431}";
-    case "bird":
-      return "\u{1F426}";
-    case "rabbit":
-      return "\u{1F430}";
-    case "horse":
-      return "\u{1F434}";
-    case "reptile":
-      return "\u{1F98E}";
-    case "fish":
-      return "\u{1F41F}";
-    default:
-      return "\u{1F43E}";
-  }
+function SignedOutEmpty({ title, href }: { title: string; href: string }) {
+  return (
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
+      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+        {title}
+      </p>
+      <Link
+        href={href}
+        className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+      >
+        Sign in
+      </Link>
+    </div>
+  );
 }

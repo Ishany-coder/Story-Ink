@@ -24,17 +24,17 @@ export default function NavTabs() {
   const pathname = usePathname();
 
   return (
-    <div className="flex gap-1.5">
+    <div className="hidden items-center gap-1 sm:flex">
       {TABS.map((tab) => {
         const active = tab.matches(pathname);
         return (
           <Link
             key={tab.href}
             href={tab.href}
-            className={`rounded-full px-3 py-2 text-xs font-bold transition-all sm:text-sm sm:px-4 ${
+            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
               active
-                ? "bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-md shadow-purple-200"
-                : "bg-purple-50 text-purple-400 hover:bg-purple-100 hover:text-purple-600"
+                ? "bg-slate-900 text-white"
+                : "text-slate-600 hover:bg-stone-200/70 hover:text-slate-900"
             }`}
           >
             {tab.label}

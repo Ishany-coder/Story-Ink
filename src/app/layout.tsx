@@ -26,7 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${nunito.variable} ${fredoka.variable} h-full`}>
-      <body className="min-h-full bg-[#fffbf5] font-[family-name:var(--font-nunito)] text-[#2d1b69] antialiased">
+      <body className="min-h-full bg-[#faf8f3] font-[family-name:var(--font-nunito)] text-slate-800 antialiased">
         <Navbar />
         <main className="pt-16">{children}</main>
       </body>

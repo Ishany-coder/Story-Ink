@@ -8,18 +8,11 @@ export default async function CanvasIndexPage() {
   const user = await getCurrentUser();
   if (!user) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
-        <div className="text-7xl">&#128274;</div>
-        <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
-          Sign in to design your stories
-        </p>
-        <Link
-          href="/login?next=/canvas"
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-3 text-base font-black text-white shadow-lg shadow-purple-300/40"
-        >
-          Sign in
-        </Link>
-      </div>
+      <EmptyState
+        title="Sign in to design your stories"
+        ctaLabel="Sign in"
+        ctaHref="/login?next=/canvas"
+      />
     );
   }
   const supa = await getSupabaseServer();
@@ -32,81 +25,96 @@ export default async function CanvasIndexPage() {
   if (error) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
-        <p className="text-lg font-bold text-purple-400">
-          Oops! We couldn&apos;t load your stories.
-        </p>
+        <p className="text-sm text-slate-500">Couldn&apos;t load your stories.</p>
       </div>
     );
   }
 
   if (!stories || stories.length === 0) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
-        <div className="text-8xl">&#127912;</div>
-        <div className="text-center">
-          <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
-            No stories to design yet!
-          </p>
-          <p className="mt-1 text-lg font-semibold text-purple-400">
-            Create one first, then come back to decorate it.
-          </p>
-        </div>
-        <Link
-          href="/"
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-4 text-lg font-black text-white shadow-lg shadow-purple-300/40 transition-all hover:scale-105"
-        >
-          Create a Story &#10024;
-        </Link>
-      </div>
+      <EmptyState
+        title="No stories to design yet"
+        subtitle="Create a story first, then come back here to lay it out."
+        ctaLabel="Create a story"
+        ctaHref="/"
+      />
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-10">
-      <div className="mb-8 text-center sm:text-left">
-        <h1 className="font-[family-name:var(--font-display)] text-4xl font-bold text-purple-700">
-          Studio &#127912;
+    <div className="animate-rise-in mx-auto max-w-6xl px-6 py-12">
+      <div className="mb-8 border-b border-stone-200 pb-4">
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+          Studio
         </h1>
-        <p className="mt-1 text-lg font-semibold text-purple-400">
+        <p className="mt-1 text-sm text-slate-500">
           Pick a story to design — swap layouts, edit text, add shapes.
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-        {stories.map((story) => (
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {stories.map((story, i) => (
           <Link
             key={story.id}
             href={`/canvas/${story.id}`}
-            className="group flex flex-col overflow-hidden rounded-3xl border-3 border-purple-200 bg-white shadow-md transition-all hover:-translate-y-2 hover:shadow-xl hover:shadow-purple-200/50"
+            className="group animate-rise-in flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
+            style={{ animationDelay: `${i * 30}ms` }}
           >
-            <div className="relative aspect-square overflow-hidden">
+            <div className="relative aspect-square overflow-hidden bg-stone-100">
               {story.cover_image ? (
                 <Image
                   src={story.cover_image}
                   alt={story.title}
                   fill
-                  className="object-cover transition-transform duration-500 group-hover:scale-110"
+                  className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                   unoptimized
                 />
               ) : (
-                <div className="flex h-full items-center justify-center bg-gradient-to-br from-purple-100 to-pink-100">
-                  <span className="text-7xl">&#127912;</span>
-                </div>
+                <div className="h-full w-full bg-gradient-to-br from-purple-100 via-purple-50 to-pink-100" />
               )}
-              <div className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-black text-purple-600 shadow-sm">
+              <div className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm">
                 Design
               </div>
             </div>
-            <div className="flex flex-1 flex-col gap-1 p-5">
-              <h3 className="font-[family-name:var(--font-display)] text-xl font-bold text-purple-700 line-clamp-1">
+            <div className="flex flex-1 flex-col gap-1 p-4">
+              <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900 line-clamp-1">
                 {story.title}
               </h3>
-              <p className="text-sm font-medium text-purple-300 line-clamp-2">
+              <p className="text-sm text-slate-500 line-clamp-2">
                 {story.prompt}
               </p>
             </div>
           </Link>
         ))}
       </div>
+    </div>
+  );
+}
+
+function EmptyState({
+  title,
+  subtitle,
+  ctaLabel,
+  ctaHref,
+}: {
+  title: string;
+  subtitle?: string;
+  ctaLabel: string;
+  ctaHref: string;
+}) {
+  return (
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
+      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+        {title}
+      </p>
+      {subtitle && (
+        <p className="max-w-sm text-sm text-slate-500">{subtitle}</p>
+      )}
+      <Link
+        href={ctaHref}
+        className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+      >
+        {ctaLabel}
+      </Link>
     </div>
   );
 }

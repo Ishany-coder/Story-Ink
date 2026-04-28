@@ -7,12 +7,16 @@ export const revalidate = 0;
 export default async function ReadPage() {
   const user = await getCurrentUser();
   if (!user) {
-    return <SignedOutEmpty />;
+    return (
+      <EmptyState
+        title="Sign in to see your stories"
+        subtitle="Stories are private to your account."
+        ctaLabel="Sign in"
+        ctaHref="/login?next=/read"
+      />
+    );
   }
 
-  // Authed Supabase client → RLS shows only stories you own (plus
-  // public ones, which currently are not surfaced on this private
-  // library page; revisit if/when we add a public discovery feed).
   const supa = await getSupabaseServer();
   const { data: stories, error } = await supa
     .from("stories")
@@ -23,80 +27,85 @@ export default async function ReadPage() {
   if (error) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
-        <p className="text-lg font-bold text-purple-400">
-          Oops! We couldn&apos;t load the stories. Try again!
-        </p>
+        <p className="text-sm text-slate-500">Couldn&apos;t load your stories.</p>
       </div>
     );
   }
 
   if (!stories || stories.length === 0) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
-        <div className="text-8xl">&#128214;</div>
-        <div className="text-center">
-          <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
-            No stories yet!
-          </p>
-          <p className="mt-1 text-lg font-semibold text-purple-400">
-            Let&apos;s make your very first one!
-          </p>
-        </div>
-        <Link
-          href="/"
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-4 text-lg font-black text-white shadow-lg shadow-purple-300/40 transition-all hover:scale-105"
-        >
-          Create a Story &#10024;
-        </Link>
-      </div>
+      <EmptyState
+        title="No stories yet"
+        subtitle="Make your first one and it'll show up here."
+        ctaLabel="Create a story"
+        ctaHref="/"
+      />
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-10">
-      <div className="mb-8 text-center sm:text-left">
-        <h1 className="font-[family-name:var(--font-display)] text-4xl font-bold text-purple-700">
-          Your Stories &#128218;
-        </h1>
-        <p className="mt-1 text-lg font-semibold text-purple-400">
-          {stories.length} {stories.length === 1 ? "story" : "stories"} — pick
-          one to read!
-        </p>
+    <div className="animate-rise-in mx-auto max-w-6xl px-6 py-12">
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-3 border-b border-stone-200 pb-4">
+        <div>
+          <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+            Your stories
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {stories.length} {stories.length === 1 ? "book" : "books"} — pick
+            one to read.
+          </p>
+        </div>
+        <Link
+          href="/"
+          className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+        >
+          New story
+        </Link>
       </div>
-      <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-        {stories.map((story) => (
-          <BookCard
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {stories.map((story, i) => (
+          <div
             key={story.id}
-            id={story.id}
-            title={story.title}
-            prompt={story.prompt}
-            coverImage={story.cover_image}
-            pageCount={story.page_count}
-            createdAt={story.created_at}
-          />
+            className="animate-rise-in"
+            style={{ animationDelay: `${i * 30}ms` }}
+          >
+            <BookCard
+              id={story.id}
+              title={story.title}
+              prompt={story.prompt}
+              coverImage={story.cover_image}
+              pageCount={story.page_count}
+              createdAt={story.created_at}
+            />
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function SignedOutEmpty() {
+function EmptyState({
+  title,
+  subtitle,
+  ctaLabel,
+  ctaHref,
+}: {
+  title: string;
+  subtitle: string;
+  ctaLabel: string;
+  ctaHref: string;
+}) {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
-      <div className="text-7xl">&#128274;</div>
-      <div className="text-center">
-        <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
-          Sign in to see your stories
-        </p>
-        <p className="mt-1 text-base font-semibold text-purple-400">
-          Stories are private to your account.
-        </p>
-      </div>
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
+      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+        {title}
+      </p>
+      <p className="max-w-sm text-sm text-slate-500">{subtitle}</p>
       <Link
-        href="/login?next=/read"
-        className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-3 text-base font-black text-white shadow-lg shadow-purple-300/40 transition-all hover:scale-105"
+        href={ctaHref}
+        className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
       >
-        Sign in
+        {ctaLabel}
       </Link>
     </div>
   );

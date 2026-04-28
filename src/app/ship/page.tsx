@@ -12,18 +12,11 @@ export default async function ShipIndexPage() {
   const user = await getCurrentUser();
   if (!user) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
-        <div className="text-7xl">&#128274;</div>
-        <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
-          Sign in to ship your books
-        </p>
-        <Link
-          href="/login?next=/ship"
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-3 text-base font-black text-white shadow-lg shadow-purple-300/40"
-        >
-          Sign in
-        </Link>
-      </div>
+      <EmptyState
+        title="Sign in to ship your books"
+        ctaLabel="Sign in"
+        ctaHref="/login?next=/ship"
+      />
     );
   }
   const supa = await getSupabaseServer();
@@ -36,61 +29,82 @@ export default async function ShipIndexPage() {
   if (error) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
-        <p className="text-lg font-bold text-purple-400">
-          Couldn&apos;t load your stories. Try again!
-        </p>
+        <p className="text-sm text-slate-500">Couldn&apos;t load your stories.</p>
       </div>
     );
   }
 
   if (!stories || stories.length === 0) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-6 px-6">
-        <div className="text-8xl">&#128230;</div>
-        <div className="text-center">
-          <p className="font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600">
-            No stories to ship yet!
-          </p>
-          <p className="mt-1 text-lg font-semibold text-purple-400">
-            Write one first, then come back to print it.
-          </p>
-        </div>
-        <Link
-          href="/"
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-8 py-4 text-lg font-black text-white shadow-lg shadow-purple-300/40 transition-all hover:scale-105"
-        >
-          Create a Story &#10024;
-        </Link>
-      </div>
+      <EmptyState
+        title="No stories to ship yet"
+        subtitle="Write one first, then come back to print it."
+        ctaLabel="Create a story"
+        ctaHref="/"
+      />
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-10">
-      <div className="mb-8 text-center sm:text-left">
-        <h1 className="font-[family-name:var(--font-display)] text-4xl font-bold text-purple-700">
-          Ship Your Books &#128230;
+    <div className="animate-rise-in mx-auto max-w-6xl px-6 py-12">
+      <div className="mb-8 border-b border-stone-200 pb-4">
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
+          Ship a printed book
         </h1>
-        <p className="mt-1 text-lg font-semibold text-purple-400">
-          Pick a story to print as a real 8.5&quot; × 8.5&quot; hardcover
-          and ship to your door.
+        <p className="mt-1 text-sm text-slate-500">
+          Pick a story to print as a real 8.5&quot; × 8.5&quot; hardcover and
+          ship to your door.
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-        {stories.map((story) => (
-          <StoryLinkCard
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {stories.map((story, i) => (
+          <div
             key={story.id}
-            id={story.id}
-            title={story.title}
-            prompt={story.prompt}
-            coverImage={story.cover_image}
-            pageCount={story.page_count}
-            createdAt={story.created_at}
-            href={`/ship/${story.id}`}
-            badge="Ship"
-          />
+            className="animate-rise-in"
+            style={{ animationDelay: `${i * 30}ms` }}
+          >
+            <StoryLinkCard
+              id={story.id}
+              title={story.title}
+              prompt={story.prompt}
+              coverImage={story.cover_image}
+              pageCount={story.page_count}
+              createdAt={story.created_at}
+              href={`/ship/${story.id}`}
+              badge="Ship"
+            />
+          </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function EmptyState({
+  title,
+  subtitle,
+  ctaLabel,
+  ctaHref,
+}: {
+  title: string;
+  subtitle?: string;
+  ctaLabel: string;
+  ctaHref: string;
+}) {
+  return (
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
+      <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-slate-900">
+        {title}
+      </p>
+      {subtitle && (
+        <p className="max-w-sm text-sm text-slate-500">{subtitle}</p>
+      )}
+      <Link
+        href={ctaHref}
+        className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110"
+      >
+        {ctaLabel}
+      </Link>
     </div>
   );
 }

@@ -11,9 +11,9 @@ interface Props {
   initial?: Pet | null;
 }
 
-// Single form used by /pets/new and /pets/[id]. Keeps the create vs.
-// edit branching to the action it takes on submit so the field UX
-// stays identical between the two flows.
+// Single form used by /pets/new and /pets/[id]. Visual language matches
+// the rest of the redesigned site: white surface, soft stone borders,
+// purple accent only on the focus ring + primary CTA.
 export default function PetForm({ initial = null }: Props) {
   const router = useRouter();
   const editing = !!initial;
@@ -144,8 +144,11 @@ export default function PetForm({ initial = null }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mx-auto max-w-2xl space-y-6 px-6 py-8">
-      <h1 className="font-[family-name:var(--font-display)] text-3xl font-bold text-purple-700">
+    <form
+      onSubmit={handleSubmit}
+      className="animate-rise-in mx-auto max-w-2xl space-y-6 px-6 py-10"
+    >
+      <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-slate-900">
         {editing ? `Edit ${initial!.name}` : "Add a pet"}
       </h1>
 
@@ -156,7 +159,7 @@ export default function PetForm({ initial = null }: Props) {
           onChange={(e) => setName(e.target.value)}
           maxLength={80}
           required
-          className="w-full rounded-2xl border-2 border-purple-200 bg-white px-4 py-2 text-base focus:border-purple-400 focus:outline-none"
+          className={inputCls}
         />
       </Field>
 
@@ -164,7 +167,7 @@ export default function PetForm({ initial = null }: Props) {
         <select
           value={species}
           onChange={(e) => setSpecies(e.target.value as PetSpecies)}
-          className="w-full rounded-2xl border-2 border-purple-200 bg-white px-4 py-2 text-base focus:border-purple-400 focus:outline-none"
+          className={inputCls}
         >
           {PET_SPECIES.map((s) => (
             <option key={s} value={s}>
@@ -181,7 +184,7 @@ export default function PetForm({ initial = null }: Props) {
             value={breed ?? ""}
             onChange={(e) => setBreed(e.target.value)}
             maxLength={80}
-            className="w-full rounded-2xl border-2 border-purple-200 bg-white px-4 py-2 text-base focus:border-purple-400 focus:outline-none"
+            className={inputCls}
           />
         </Field>
         <Field label="Age (optional)">
@@ -191,7 +194,7 @@ export default function PetForm({ initial = null }: Props) {
             onChange={(e) => setAge(e.target.value)}
             maxLength={40}
             placeholder="e.g. 7 years"
-            className="w-full rounded-2xl border-2 border-purple-200 bg-white px-4 py-2 text-base focus:border-purple-400 focus:outline-none"
+            className={inputCls}
           />
         </Field>
       </div>
@@ -205,12 +208,12 @@ export default function PetForm({ initial = null }: Props) {
           onChange={(e) => setNotes(e.target.value)}
           maxLength={2000}
           rows={4}
-          className="w-full resize-none rounded-2xl border-2 border-purple-200 bg-white px-4 py-3 text-base focus:border-purple-400 focus:outline-none"
+          className={`${inputCls} resize-none`}
         />
       </Field>
 
       <Field label="Mode">
-        <div className="flex rounded-2xl border-2 border-purple-200 bg-purple-50/50 p-1">
+        <div className="flex rounded-full border border-stone-300 bg-white p-1">
           <ModeButton
             value="living"
             current={mode}
@@ -237,7 +240,7 @@ export default function PetForm({ initial = null }: Props) {
               value={passedAt ?? ""}
               onChange={(e) => setPassedAt(e.target.value)}
               required
-              className="w-full rounded-2xl border-2 border-purple-200 bg-white px-4 py-2 text-base focus:border-purple-400 focus:outline-none"
+              className={inputCls}
             />
           </Field>
           <Field
@@ -249,7 +252,7 @@ export default function PetForm({ initial = null }: Props) {
               onChange={(e) => setDedication(e.target.value)}
               maxLength={600}
               rows={3}
-              className="w-full resize-none rounded-2xl border-2 border-purple-200 bg-white px-4 py-3 text-base focus:border-purple-400 focus:outline-none"
+              className={`${inputCls} resize-none`}
             />
           </Field>
         </>
@@ -265,7 +268,7 @@ export default function PetForm({ initial = null }: Props) {
               {photos.map((url) => (
                 <div
                   key={url}
-                  className="relative aspect-square overflow-hidden rounded-xl border-2 border-purple-200"
+                  className="relative aspect-square overflow-hidden rounded-xl border border-stone-200"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -276,7 +279,7 @@ export default function PetForm({ initial = null }: Props) {
                   <button
                     type="button"
                     onClick={() => removePhoto(url)}
-                    className="absolute right-1 top-1 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black text-white shadow-sm hover:bg-rose-600"
+                    className="absolute right-1 top-1 rounded-full bg-white/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-white"
                   >
                     Remove
                   </button>
@@ -285,8 +288,8 @@ export default function PetForm({ initial = null }: Props) {
             </div>
           )}
           {photos.length < MAX_PHOTOS && (
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-4 py-6 text-sm font-bold text-purple-500 hover:bg-purple-100">
-              {uploading ? "Uploading..." : "+ Upload photos"}
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white px-4 py-6 text-sm font-medium text-slate-500 transition-colors hover:border-slate-400 hover:bg-stone-50">
+              {uploading ? "Uploading…" : "+ Upload photos"}
               <input
                 type="file"
                 accept="image/*"
@@ -301,43 +304,41 @@ export default function PetForm({ initial = null }: Props) {
       </Field>
 
       <Field label="Visibility">
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-purple-200 bg-white px-4 py-3">
+        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-stone-200 bg-white px-4 py-3 transition-colors hover:border-stone-300">
           <input
             type="checkbox"
             checked={isPublic}
             onChange={(e) => setIsPublic(e.target.checked)}
-            className="h-5 w-5"
+            className="h-4 w-4 accent-purple-600"
           />
           <div className="flex-1">
-            <div className="text-sm font-bold text-purple-600">
-              Make this pet&apos;s profile public
+            <div className="text-sm font-medium text-slate-900">
+              Make this pet&rsquo;s profile public
             </div>
-            <div className="text-xs font-semibold text-purple-400">
-              Off by default. Public stories about this pet are still controlled
-              per-story.
+            <div className="text-xs text-slate-500">
+              Off by default. Public stories about this pet are still
+              controlled per-story.
             </div>
           </div>
         </label>
       </Field>
 
-      {error && (
-        <p className="text-sm font-bold text-rose-500">{error}</p>
-      )}
+      {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
         <button
           type="submit"
           disabled={pending || uploading}
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-6 py-3 text-base font-black text-white shadow-md shadow-purple-200 disabled:opacity-50"
+          className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-[filter] hover:brightness-110 disabled:opacity-50"
         >
-          {pending ? "Saving..." : editing ? "Save changes" : "Add pet"}
+          {pending ? "Saving…" : editing ? "Save changes" : "Add pet"}
         </button>
         {editing && (
           <button
             type="button"
             onClick={handleDelete}
             disabled={pending}
-            className="rounded-2xl border-2 border-rose-300 bg-white px-4 py-3 text-sm font-black text-rose-500 hover:bg-rose-50 disabled:opacity-50"
+            className="rounded-full border border-rose-200 bg-white px-4 py-2.5 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50 disabled:opacity-50"
           >
             Delete pet
           </button>
@@ -346,6 +347,9 @@ export default function PetForm({ initial = null }: Props) {
     </form>
   );
 }
+
+const inputCls =
+  "w-full rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-base text-slate-900 placeholder-slate-400 transition focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100";
 
 function Field({
   label,
@@ -358,13 +362,9 @@ function Field({
 }) {
   return (
     <label className="block">
-      <div className="mb-1 text-[11px] font-black uppercase tracking-wider text-purple-500">
-        {label}
-      </div>
+      <div className="mb-1.5 text-xs font-medium text-slate-700">{label}</div>
       {children}
-      {hint && (
-        <div className="mt-1 text-xs font-semibold text-purple-400">{hint}</div>
-      )}
+      {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
     </label>
   );
 }
@@ -385,10 +385,10 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded-xl px-3 py-2 text-xs font-black uppercase tracking-wider transition-all ${
+      className={`flex-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
         active
-          ? "bg-white text-purple-600 shadow-sm"
-          : "text-purple-400 hover:text-purple-500"
+          ? "bg-slate-900 text-white"
+          : "text-slate-500 hover:text-slate-900"
       }`}
     >
       {label}

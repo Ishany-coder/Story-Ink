@@ -14,12 +14,14 @@ interface BookCardProps {
   createdAt: string;
 }
 
-const CARD_COLORS = [
-  "from-purple-100 to-pink-100",
-  "from-blue-100 to-cyan-100",
-  "from-orange-100 to-yellow-100",
-  "from-green-100 to-teal-100",
-  "from-pink-100 to-rose-100",
+// Soft fallback gradients for stories without a generated cover. No
+// emoji inside — the gradient alone reads as "image not yet rendered."
+const FALLBACK_GRADIENTS = [
+  "from-purple-100 via-purple-50 to-pink-100",
+  "from-sky-100 via-blue-50 to-indigo-100",
+  "from-amber-100 via-orange-50 to-rose-100",
+  "from-emerald-100 via-teal-50 to-cyan-100",
+  "from-pink-100 via-rose-50 to-fuchsia-100",
 ];
 
 export default function BookCard({
@@ -39,9 +41,8 @@ export default function BookCard({
   });
 
   const colorIdx =
-    Math.abs(
-      title.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0)
-    ) % CARD_COLORS.length;
+    Math.abs(title.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0)) %
+    FALLBACK_GRADIENTS.length;
 
   async function handleDelete() {
     if (deleting) return;
@@ -74,38 +75,32 @@ export default function BookCard({
     >
       <Link
         href={`/read/${id}`}
-        className="flex flex-col overflow-hidden rounded-3xl border-3 border-purple-200 bg-white shadow-md transition-all hover:-translate-y-2 hover:shadow-xl hover:shadow-purple-200/50"
+        className="flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-stone-300 hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)]"
       >
-        <div className="relative aspect-square overflow-hidden">
+        <div className="relative aspect-square overflow-hidden bg-stone-100">
           {coverImage ? (
             <Image
               src={coverImage}
               alt={title}
               fill
-              className="object-cover transition-transform duration-500 group-hover:scale-110"
+              className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
               unoptimized
             />
           ) : (
             <div
-              className={`flex h-full items-center justify-center bg-gradient-to-br ${CARD_COLORS[colorIdx]}`}
-            >
-              <span className="text-7xl">&#128214;</span>
-            </div>
+              className={`h-full w-full bg-gradient-to-br ${FALLBACK_GRADIENTS[colorIdx]}`}
+            />
           )}
-          <div className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1 text-xs font-black text-purple-600 shadow-sm">
+          <div className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm">
             {pageCount} pages
           </div>
         </div>
-        <div className="flex flex-1 flex-col gap-1 p-5">
-          <h3 className="font-[family-name:var(--font-display)] text-xl font-bold text-purple-700 line-clamp-1">
+        <div className="flex flex-1 flex-col gap-1 p-4">
+          <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900 line-clamp-1">
             {title}
           </h3>
-          <p className="text-sm font-medium text-purple-300 line-clamp-2">
-            {prompt}
-          </p>
-          <span className="mt-auto pt-2 text-xs font-bold text-purple-200">
-            {date}
-          </span>
+          <p className="text-sm text-slate-500 line-clamp-2">{prompt}</p>
+          <span className="mt-auto pt-2 text-xs text-slate-400">{date}</span>
         </div>
       </Link>
 
@@ -114,17 +109,17 @@ export default function BookCard({
         onClick={handleDelete}
         disabled={deleting}
         aria-label={`Delete ${title}`}
-        className="absolute left-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-rose-500 opacity-0 shadow-md transition-all hover:scale-110 hover:bg-rose-500 hover:text-white focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 group-hover:opacity-100"
+        className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-slate-500 opacity-0 shadow-sm transition-all hover:bg-rose-500 hover:text-white focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 group-hover:opacity-100"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2.5"
+          strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="h-5 w-5"
+          className="h-4 w-4"
           aria-hidden="true"
         >
           <path d="M3 6h18" />

@@ -6,8 +6,14 @@
 }
 
 :root {
-  --background: #fffbf5;
-  --foreground: #2d1b69;
+  --background: #faf8f3;
+  --foreground: #1a1530;
+  --surface: #ffffff;
+  --border-soft: #ece8df;
+  --border-default: #ddd6c8;
+  --muted: #6b6478;
+  --accent: #7c3aed;
+  --accent-soft: #f3effd;
 }
 
 body {
@@ -15,80 +21,80 @@ body {
   color: var(--foreground);
 }
 
+/* Quieter scrollbar — desaturated to fit the warm surface palette
+   instead of the old saturated purple. */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #f0e6ff;
-  border-radius: 4px;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c9a0ff;
-  border-radius: 4px;
+  background: #ddd6c8;
+  border-radius: 8px;
+  border: 2px solid var(--background);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #a66ff0;
+  background: #c4bcaf;
 }
 
-@keyframes float {
-  0%, 100% { transform: translateY(0px) rotate(0deg); }
-  50% { transform: translateY(-15px) rotate(2deg); }
+/* ---------------------------------------------------------------------------
+ * Motion system
+ *
+ * The previous version had wiggle, sparkle, float, and bounce-in firing
+ * continuously across the page. Modern, restrained: short single-shot
+ * fade and rise on entrance, and bounce-dot kept for the loading overlay.
+ * Hover transforms are handled inline with Tailwind transitions.
+ *
+ * `prefers-reduced-motion` collapses every entrance animation to an
+ * instant opacity transition.
+ * ------------------------------------------------------------------------- */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-@keyframes float-reverse {
-  0%, 100% { transform: translateY(0px) rotate(0deg); }
-  50% { transform: translateY(-12px) rotate(-3deg); }
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-@keyframes wiggle {
-  0%, 100% { transform: rotate(-3deg); }
-  50% { transform: rotate(3deg); }
+.animate-fade-in {
+  animation: fade-in 250ms ease-out both;
 }
 
-@keyframes bounce-in {
-  0% { transform: scale(0.9); opacity: 0; }
-  50% { transform: scale(1.05); }
-  100% { transform: scale(1); opacity: 1; }
+.animate-rise-in {
+  animation: rise-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-@keyframes sparkle {
-  0%, 100% { opacity: 0; transform: scale(0) rotate(0deg); }
-  50% { opacity: 1; transform: scale(1) rotate(180deg); }
-}
-
-.animate-float {
-  animation: float 5s ease-in-out infinite;
-}
-
-.animate-float-reverse {
-  animation: float-reverse 6s ease-in-out 1s infinite;
-}
-
-.animate-float-slow {
-  animation: float 7s ease-in-out 2s infinite;
-}
-
-.animate-wiggle {
-  animation: wiggle 2s ease-in-out infinite;
-}
-
-.animate-bounce-in {
-  animation: bounce-in 0.6s ease-out;
-}
-
-.animate-sparkle {
-  animation: sparkle 2s ease-in-out infinite;
-}
-
-.animate-sparkle-delayed {
-  animation: sparkle 2s ease-in-out 0.7s infinite;
-}
-
-.animate-sparkle-slow {
-  animation: sparkle 2.5s ease-in-out 1.3s infinite;
-}
+/* Stagger helper: parents put animate-rise-in on children with
+   inline `style={{ animationDelay: `${i * 40}ms` }}` to get a soft
+   cascade on a list. Keep the max stagger short (<240ms total). */
 
 @keyframes bounce-dot {
   0%, 80%, 100% { transform: scale(0.6); }
   40% { transform: scale(1.2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-rise-in {
+    animation: fade-in 1ms linear both;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
