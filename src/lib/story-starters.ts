@@ -56,6 +56,18 @@ const LIVING_STARTERS: StoryStarter[] = [
   },
 ];
 
+// Memorial starters split across two narrative paths:
+//  - Recollection: past-tense celebration of who they were and what
+//    they did with us. The original memorial mode.
+//  - Rainbow Bridge: present-tense imagined adventure on the other
+//    side, written as a letter or postcard from the pet. Provides
+//    closure and comfort by giving the loss a beautiful elsewhere
+//    to live. Encouraged for grief support; the prompt explicitly
+//    keeps it gentle, no peril, no goodbye-as-tragedy.
+//
+// The system prompt for memorial mode (see lib/pet-prompt.ts) is
+// permissive enough to handle either flavor — the user picks via
+// the starter card.
 const MEMORIAL_STARTERS: StoryStarter[] = [
   {
     id: "memorial-favorite-things",
@@ -84,6 +96,27 @@ const MEMORIAL_STARTERS: StoryStarter[] = [
     label: "A letter to them",
     build: (pet) =>
       `A storybook in the form of a letter to ${pet.name}, my ${pet.species}, telling them what we want them to know. Tender, present-feeling, no goodbye-as-tragedy — more like a quiet thank-you.`,
+  },
+  {
+    id: "rainbow-great-adventure",
+    emoji: "\u{1F308}",
+    label: "The great adventure",
+    build: (pet) =>
+      `A Rainbow Bridge story: ${pet.name} the ${pet.species} is on their great adventure now, in a sunny meadow at the end of a rainbow bridge where every pet eventually meets. Present tense. Show what their day looks like there — the friends they've made, the favorite spots they've found, who they're playing with, what they're chasing. Joyful, sun-warm, no peril, no scary. End on a soft note that they're happy and they remember us.`,
+  },
+  {
+    id: "rainbow-postcard",
+    emoji: "\u{1F4EC}",
+    label: "A postcard home",
+    build: (pet) =>
+      `A storybook in the form of a postcard from ${pet.name} on the other side. Each page is a snapshot they want to send back: "Today I…", "I made a friend who…", "I found a spot that reminds me of…". Warm, present-tense, comforting. End with them telling us they're okay and that the love still travels both ways.`,
+  },
+  {
+    id: "rainbow-meadow",
+    emoji: "\u{1F33C}",
+    label: "Meadow at the bridge",
+    build: (pet) =>
+      `A storybook describing the meadow where ${pet.name} is now — the smells, the sounds, the soft grass, the others who run with them. A gentle, present-tense tour of a peaceful place. Provide closure: ${pet.name} is whole, healthy, and happy here. No fear, no chase scenes, no dramatic peril.`,
   },
 ];
 

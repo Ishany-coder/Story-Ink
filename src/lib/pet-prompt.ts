@@ -36,7 +36,19 @@ export function buildPetStorySystemPrompt(pet: Pet): string {
     lines.push(
       `IMPORTANT: ${pet.name} has passed away${
         pet.passed_at ? ` on ${pet.passed_at}` : ""
-      }. This book is a celebration of their life — gentle, grateful, no jeopardy. Stay grounded in real moments worth remembering rather than putting ${pet.name} into a fantasy adventure. No peril, no scary villains, no plot tension that could feel painful. Past tense or present-feeling reflection both work; tender and full of light.`
+      }. This book is for someone grieving. Goal: provide closure and comfort — never reopen the wound.`
+    );
+    lines.push(
+      `Two narrative paths are valid for memorial books, and the user's prompt below tells you which one to write. Match it. Do not blend them.`
+    );
+    lines.push(
+      `Path A — Recollection: past-tense celebration of who ${pet.name} was and what they did with us. Stay grounded in real moments. No new adventures, no fantasy.`
+    );
+    lines.push(
+      `Path B — Rainbow Bridge: present-tense story of ${pet.name} on the other side, in a peaceful meadow at the end of a rainbow bridge. They are whole, healthy, and happy. Show their adventure there — friends they've met, places they've found, things they love. This is comforting fiction designed to give the reader somewhere lovely to picture their pet now. ${pet.name} is the only ${pet.species} from our world in this place; everyone else is other passed pets they've met.`
+    );
+    lines.push(
+      `Across BOTH paths: gentle, full of light, no peril, no scary villains, no fear, no goodbye-as-tragedy, no plot tension that could feel painful. The death itself never happens on the page — only love, only beauty, only thanks. End on warmth.`
     );
   } else {
     lines.push(
