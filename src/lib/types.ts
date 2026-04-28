@@ -162,6 +162,17 @@ export const PET_SPECIES: PetSpecies[] = [
 // fan-fiction (per the user's spec).
 export type PetMode = "living" | "memorial";
 
+// One answered quirk from the curated bank. The bank lives in
+// src/lib/quirk-bank.ts so it can grow without touching schema.
+export interface PetQuirk {
+  // Short id from the bank (e.g. "head-tilt"). Stable across deploys
+  // so we can refresh the prompt copy without invalidating user data.
+  id: string;
+  // The user's answer. Free-form so it can be a single word
+  // ("yes"), a phrase ("only when she's confused"), or a sentence.
+  answer: string;
+}
+
 export interface Pet {
   id: string;
   user_id: string;
@@ -176,6 +187,10 @@ export interface Pet {
   passed_at: string | null; // ISO date string when mode === "memorial"
   // Reference photo URLs (Supabase Storage). Capped at 10 in the API.
   photos: string[];
+  // Structured personality DNA. See src/lib/quirk-bank.ts for the
+  // curated prompt list. Empty array means the user skipped this
+  // section.
+  quirks?: PetQuirk[];
   // Optional override text for the memorial dedication page on print.
   // Null falls back to the templated "In loving memory of {name},
   // {dates}" when generating PDFs.
@@ -196,6 +211,7 @@ export interface CreatePetInput {
   mode: PetMode;
   passed_at?: string | null;
   photos?: string[];
+  quirks?: PetQuirk[];
   dedication_text?: string | null;
   is_public?: boolean;
 }

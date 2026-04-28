@@ -5,12 +5,31 @@ import {
   PET_SPECIES,
   type Pet,
   type PetMode,
+  type PetQuirk,
   type PetSpecies,
 } from "@/lib/types";
 
 export const maxDuration = 10;
 
 const MAX_PHOTOS = 10;
+const MAX_QUIRKS = 30;
+
+function sanitizeQuirks(v: unknown): PetQuirk[] | null {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return null;
+  const out: PetQuirk[] = [];
+  for (const q of v) {
+    if (!q || typeof q !== "object") return null;
+    const r = q as Record<string, unknown>;
+    if (typeof r.id !== "string" || typeof r.answer !== "string") return null;
+    const id = r.id.trim().slice(0, 64);
+    const answer = r.answer.trim().slice(0, 400);
+    if (!id || !answer) continue;
+    out.push({ id, answer });
+    if (out.length > MAX_QUIRKS) return null;
+  }
+  return out;
+}
 
 function sanitizeStr(v: unknown, max = 200): string | null {
   if (v === null) return null;
@@ -74,6 +93,7 @@ interface UpdateBody {
   mode?: unknown;
   passed_at?: unknown;
   photos?: unknown;
+  quirks?: unknown;
   dedication_text?: unknown;
   is_public?: unknown;
 }
@@ -191,6 +211,17 @@ export async function PATCH(request: Request, ctx: Ctx) {
       body.dedication_text === null
         ? null
         : sanitizeStr(body.dedication_text, 600);
+  }
+
+  if (body.quirks !== undefined) {
+    const quirks = sanitizeQuirks(body.quirks);
+    if (quirks === null) {
+      return NextResponse.json(
+        { error: `Invalid quirks payload (max ${MAX_QUIRKS} entries).` },
+        { status: 400 }
+      );
+    }
+    patch.quirks = quirks;
   }
 
   if (body.is_public !== undefined) {

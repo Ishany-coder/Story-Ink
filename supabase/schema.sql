@@ -46,6 +46,14 @@ create table if not exists public.pets (
 -- Idempotent for existing deployments that pre-date this column.
 alter table public.pets add column if not exists dedication_text text;
 
+-- Structured "personality DNA" — a list of {prompt, answer} entries
+-- the user fills out from a curated bank of specific quirk
+-- questions ("Does she tilt her head?", "Where does he sleep?").
+-- Stored as JSONB so the bank can grow without a schema change;
+-- the Pet type narrows the shape on the application side.
+alter table public.pets
+  add column if not exists quirks jsonb not null default '[]'::jsonb;
+
 create index if not exists pets_user_id_idx on public.pets (user_id);
 create index if not exists pets_created_at_idx on public.pets (created_at desc);
 

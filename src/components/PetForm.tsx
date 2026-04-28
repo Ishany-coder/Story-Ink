@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PET_SPECIES, type Pet, type PetMode, type PetSpecies } from "@/lib/types";
+import {
+  PET_SPECIES,
+  type Pet,
+  type PetMode,
+  type PetQuirk,
+  type PetSpecies,
+} from "@/lib/types";
+import { QUIRK_BANK, QUIRK_CATEGORIES } from "@/lib/quirk-bank";
 
 const MAX_PHOTOS = 10;
 
@@ -30,10 +37,33 @@ export default function PetForm({ initial = null }: Props) {
   const [dedication, setDedication] = useState(initial?.dedication_text ?? "");
   const [isPublic, setIsPublic] = useState(initial?.is_public ?? false);
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
+  // Quirk answers stored as a Map<id, answer> for O(1) updates. We
+  // serialize back to an array of {id, answer} on submit, dropping
+  // empty answers so we don't persist filler.
+  const [quirkAnswers, setQuirkAnswers] = useState<Record<string, string>>(
+    () => {
+      const seed: Record<string, string> = {};
+      for (const q of initial?.quirks ?? []) seed[q.id] = q.answer;
+      return seed;
+    }
+  );
 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  // Group quirks by category for the form UI.
+  const groupedQuirks = useMemo(() => {
+    const out: Record<string, typeof QUIRK_BANK> = {};
+    for (const q of QUIRK_BANK) {
+      (out[q.category] ??= []).push(q);
+    }
+    return out;
+  }, []);
+
+  const filledQuirkCount = Object.values(quirkAnswers).filter((a) =>
+    a.trim()
+  ).length;
 
   async function uploadPhoto(file: File): Promise<string> {
     const fd = new FormData();
@@ -85,6 +115,10 @@ export default function PetForm({ initial = null }: Props) {
     setPending(true);
     setError(null);
 
+    const quirks: PetQuirk[] = Object.entries(quirkAnswers)
+      .map(([id, answer]) => ({ id, answer: answer.trim() }))
+      .filter((q) => q.answer.length > 0);
+
     const body = {
       name: name.trim(),
       species,
@@ -96,6 +130,7 @@ export default function PetForm({ initial = null }: Props) {
       dedication_text:
         mode === "memorial" && dedication.trim() ? dedication.trim() : null,
       photos,
+      quirks,
       is_public: isPublic,
     };
 
@@ -200,17 +235,70 @@ export default function PetForm({ initial = null }: Props) {
       </div>
 
       <Field
-        label="Personality + favorite things (optional)"
-        hint="The AI uses this verbatim — write naturally. 'Loves the mailman, scared of the vacuum, sleeps on my pillow.'"
+        label="Personality (free-form, optional)"
+        hint="Write naturally. 'Loves the mailman, scared of the vacuum, sleeps on my pillow.'"
       >
         <textarea
           value={notes ?? ""}
           onChange={(e) => setNotes(e.target.value)}
           maxLength={2000}
-          rows={4}
+          rows={3}
           className={`${inputCls} resize-none`}
         />
       </Field>
+
+      <section className="rounded-2xl border border-stone-200 bg-white p-5">
+        <div className="mb-3 flex items-baseline justify-between">
+          <div>
+            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-slate-900">
+              Personality DNA
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Specific quirks make stories feel like your pet, not a generic
+              one. Skip whatever doesn&rsquo;t apply.
+            </p>
+          </div>
+          <span className="text-xs text-slate-400">
+            {filledQuirkCount} answered
+          </span>
+        </div>
+
+        <div className="space-y-5">
+          {QUIRK_CATEGORIES.map((cat) => {
+            const prompts = groupedQuirks[cat.id] ?? [];
+            if (prompts.length === 0) return null;
+            return (
+              <div key={cat.id}>
+                <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">
+                  {cat.label}
+                </div>
+                <div className="space-y-2">
+                  {prompts.map((p) => (
+                    <div key={p.id}>
+                      <label className="mb-1 block text-xs font-medium text-slate-700">
+                        {p.prompt}
+                      </label>
+                      <input
+                        type="text"
+                        value={quirkAnswers[p.id] ?? ""}
+                        onChange={(e) =>
+                          setQuirkAnswers((prev) => ({
+                            ...prev,
+                            [p.id]: e.target.value,
+                          }))
+                        }
+                        maxLength={400}
+                        placeholder={p.placeholder}
+                        className="w-full rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-slate-900 placeholder-slate-400 transition focus:border-purple-400 focus:outline-none focus:ring-4 focus:ring-purple-100"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       <Field label="Mode">
         <div className="flex rounded-full border border-stone-300 bg-white p-1">

@@ -6,6 +6,7 @@ import {
   type CreatePetInput,
   type Pet,
   type PetMode,
+  type PetQuirk,
   type PetSpecies,
 } from "@/lib/types";
 
@@ -41,6 +42,28 @@ function sanitizePhotos(v: unknown): string[] | null {
     if (!t) continue;
     out.push(t);
     if (out.length > MAX_PHOTOS) return null;
+  }
+  return out;
+}
+
+// Cap to keep the system prompt + token cost reasonable. Bank
+// currently has ~20 prompts, so this gives headroom without letting
+// a misbehaving client write arbitrarily many entries.
+const MAX_QUIRKS = 30;
+
+function sanitizeQuirks(v: unknown): PetQuirk[] | null {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return null;
+  const out: PetQuirk[] = [];
+  for (const q of v) {
+    if (!q || typeof q !== "object") return null;
+    const r = q as Record<string, unknown>;
+    if (typeof r.id !== "string" || typeof r.answer !== "string") return null;
+    const id = r.id.trim().slice(0, 64);
+    const answer = r.answer.trim().slice(0, 400);
+    if (!id || !answer) continue; // drop empty answers silently
+    out.push({ id, answer });
+    if (out.length > MAX_QUIRKS) return null;
   }
   return out;
 }
@@ -122,6 +145,14 @@ export async function POST(request: Request) {
     );
   }
 
+  const quirks = sanitizeQuirks(body.quirks);
+  if (quirks === null) {
+    return NextResponse.json(
+      { error: `Invalid quirks payload (max ${MAX_QUIRKS} entries).` },
+      { status: 400 }
+    );
+  }
+
   const insert = {
     user_id: user.id,
     name,
@@ -132,6 +163,7 @@ export async function POST(request: Request) {
     mode: body.mode,
     passed_at: passedAt,
     photos,
+    quirks,
     dedication_text: sanitizeStr(body.dedication_text, 600),
     is_public: body.is_public === true,
   };
