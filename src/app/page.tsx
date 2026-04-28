@@ -18,9 +18,14 @@ interface StoryRow {
 
 // Threshold for when the home page collapses to a pure dashboard.
 // Below this, the inline prompt + starters render on the home page so
-// onboarding is one click. At or above this, the home page becomes
-// "library + pets" and creation moves entirely behind /create.
-const DASHBOARD_THRESHOLD = 2;
+// brand-new users have a one-click onboarding path. At or above
+// this, the home page becomes "library + pets" only — creation
+// moves entirely behind the navbar's "+ New story" CTA → /create.
+//
+// Set to 1 so the moment a user has any book, the home page is
+// purely their library. Hero + inline prompt only show on a true
+// empty state.
+const DASHBOARD_THRESHOLD = 1;
 
 export default async function Home() {
   const user = await getCurrentUser();
