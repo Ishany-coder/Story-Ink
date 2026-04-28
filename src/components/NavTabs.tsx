@@ -17,11 +17,6 @@ const TABS: { label: string; href: string; matches: (p: string) => boolean }[] =
       href: "/canvas",
       matches: (p) => p.startsWith("/canvas"),
     },
-    {
-      label: "Listen",
-      href: "/listen",
-      matches: (p) => p.startsWith("/listen"),
-    },
     { label: "Ship", href: "/ship", matches: (p) => p.startsWith("/ship") },
   ];
 

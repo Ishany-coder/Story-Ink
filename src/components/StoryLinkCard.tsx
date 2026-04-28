@@ -3,9 +3,9 @@
 import Link from "next/link";
 import Image from "next/image";
 
-// Read-only card used by /ship and /listen. Unlike BookCard, this one has no
-// delete action and takes the destination href so the same component can
-// drive different contexts (ship / narrate) without duplicating layout.
+// Read-only card used by /ship. Unlike BookCard, this one has no
+// delete action and takes the destination href so the same component
+// can drive different read-only contexts without duplicating layout.
 
 interface Props {
   id: string;

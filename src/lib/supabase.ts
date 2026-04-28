@@ -36,9 +36,8 @@ export function supabaseAdmin(): SupabaseClient {
 // read-modify-write race on the whole array.
 //
 // Only shallow top-level StoryPage fields are supported — pass a partial
-// object such as { text, overlays, layoutId, imageUrl, narrationUrl,
-// narrationCacheKey }. The function throws if the page number doesn't
-// exist on the story.
+// object such as { text, overlays, layoutId, imageUrl }. The function
+// throws if the page number doesn't exist on the story.
 //
 // Runs with the service-role client so it bypasses RLS; callers must be
 // server-side. The RPC is revoked from anon in schema.sql.
@@ -47,8 +46,6 @@ export interface StoryPagePatch {
   imageUrl?: string;
   overlays?: Layer[];
   layoutId?: string;
-  narrationUrl?: string;
-  narrationCacheKey?: string;
 }
 
 export async function updateStoryPageFields(
@@ -117,16 +114,17 @@ export async function uploadGeneratedImage(dataUri: string): Promise<string> {
   throw lastErr;
 }
 
-// Upload raw audio bytes (e.g., ElevenLabs mp3) to the "uploads" bucket and
-// return the public URL. Same retry shape as uploadGeneratedImage — storage
-// occasionally ECONNRESETs on a cold connection.
+// Upload an arbitrary blob (currently used for print-ready PDFs from
+// pdf-lib) to the "uploads" bucket and return the public URL. Same
+// retry shape as uploadGeneratedImage — storage occasionally
+// ECONNRESETs on a cold connection.
 export async function uploadGeneratedAudio(
   buf: Buffer,
   opts: { mime: string; ext: string; pathPrefix?: string }
 ): Promise<string> {
   const admin = supabaseAdmin();
   const delays = [500, 1500];
-  const prefix = opts.pathPrefix ?? "narration";
+  const prefix = opts.pathPrefix ?? "blob";
 
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
