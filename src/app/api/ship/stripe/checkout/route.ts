@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { createCheckoutSession } from "@/lib/stripe";
-import { quotePrintAndShipping, LuluError } from "@/lib/lulu";
+import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lulu";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import type { Story, StoryPage } from "@/lib/types";
 import type { ShippingAddress } from "@/lib/lulu";
@@ -90,7 +90,8 @@ export async function POST(request: Request) {
   } catch (err) {
     if (err instanceof LuluError) {
       console.error("[stripe/checkout] lulu quote error:", err);
-      return NextResponse.json({ error: err.message }, { status: 502 });
+      const status = err.status === 400 ? 400 : 502;
+      return NextResponse.json({ error: friendlyLuluMessage(err) }, { status });
     }
     console.error("[stripe/checkout] quote failed:", err);
     return NextResponse.json(

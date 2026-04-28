@@ -14,11 +14,94 @@ const LULU_TIMEOUT_MS = 20_000;
 
 export class LuluError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  // Parsed JSON body from the Lulu response, when one was returned. Lets
+  // callers pick out field-level validation errors via friendlyLuluMessage()
+  // instead of leaking the raw "lulu quote failed (400): {...}" string.
+  body?: unknown;
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.name = "LuluError";
     this.status = status;
+    this.body = body;
   }
+}
+
+// Parse a Lulu error response body. Their non-2xx replies are sometimes JSON
+// and sometimes a plain string; we want JSON when we can get it so callers
+// can introspect, but fall back to undefined silently.
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+// Walk a Lulu error body looking for the first `{ errors: [...] }` array.
+// Lulu nests the validation errors a few levels deep — e.g.
+//   { shipping_address: { detail: { errors: [{ path, message, code }] } } }
+// — and the exact shape varies by endpoint, so we BFS rather than reach
+// for a fixed path.
+interface LuluValidationError {
+  path?: string;
+  message?: string;
+  code?: string;
+}
+
+function firstValidationError(body: unknown): LuluValidationError | null {
+  if (!body || typeof body !== "object") return null;
+  const queue: unknown[] = [body];
+  while (queue.length) {
+    const node = queue.shift();
+    if (!node || typeof node !== "object") continue;
+    const o = node as Record<string, unknown>;
+    if (Array.isArray(o.errors) && o.errors.length) {
+      const first = o.errors[0];
+      if (first && typeof first === "object") {
+        return first as LuluValidationError;
+      }
+    }
+    for (const v of Object.values(o)) {
+      if (v && typeof v === "object") queue.push(v);
+    }
+  }
+  return null;
+}
+
+// User-facing labels for shipping fields. Anything not in the map falls
+// back to the snake_case path with underscores replaced — uglier but still
+// recognizable ("foo_bar" → "foo bar").
+const FIELD_LABELS: Record<string, string> = {
+  phone_number: "phone number",
+  postcode: "ZIP / postcode",
+  state_code: "state",
+  country_code: "country",
+  street1: "street address",
+  street2: "apt / unit",
+  city: "city",
+  name: "name",
+  email: "email",
+};
+
+// Translate a LuluError into something we can show a customer at checkout.
+// 400s come from address validation, so we surface the offending field.
+// 5xx and auth errors are vendor-side and get a generic "try again" line.
+export function friendlyLuluMessage(err: LuluError): string {
+  if (err.status === 400) {
+    const ve = firstValidationError(err.body);
+    if (ve?.path) {
+      const label = FIELD_LABELS[ve.path] ?? ve.path.replace(/_/g, " ");
+      return `That ${label} doesn't look valid — please double-check it and try again.`;
+    }
+    return "Some of your shipping details didn't validate. Please double-check the address.";
+  }
+  if (err.status === 401 || err.status === 403) {
+    return "Couldn't reach the print provider. Please try again in a moment.";
+  }
+  if (err.status >= 500) {
+    return "The print provider had a hiccup. Please try again in a moment.";
+  }
+  return "Couldn't get a shipping quote. Please try again.";
 }
 
 // 0850X0850FCSTDCW060UW444GXX =
@@ -85,7 +168,8 @@ async function getAccessToken(): Promise<string> {
     const text = await res.text().catch(() => "");
     throw new LuluError(
       res.status,
-      `lulu auth failed (${res.status}): ${text.slice(0, 300)}`
+      `lulu auth failed (${res.status}): ${text.slice(0, 300)}`,
+      tryParseJson(text)
     );
   }
   const json = (await res.json()) as {
@@ -186,7 +270,8 @@ export async function quotePrintAndShipping(
     const text = await res.text().catch(() => "");
     throw new LuluError(
       res.status,
-      `lulu quote failed (${res.status}): ${text.slice(0, 400)}`
+      `lulu quote failed (${res.status}): ${text.slice(0, 400)}`,
+      tryParseJson(text)
     );
   }
   const json = (await res.json()) as {
@@ -278,7 +363,8 @@ export async function createPrintJob(
     const text = await res.text().catch(() => "");
     throw new LuluError(
       res.status,
-      `lulu print job failed (${res.status}): ${text.slice(0, 400)}`
+      `lulu print job failed (${res.status}): ${text.slice(0, 400)}`,
+      tryParseJson(text)
     );
   }
   const json = (await res.json()) as { id?: number; status?: { name?: string } };

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { quotePrintAndShipping, LuluError } from "@/lib/lulu";
+import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lulu";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import type { Story, StoryPage } from "@/lib/types";
 
@@ -79,7 +79,9 @@ export async function POST(request: Request) {
   } catch (err) {
     if (err instanceof LuluError) {
       console.error("[ship/quote] lulu error:", err);
-      return NextResponse.json({ error: err.message }, { status: 502 });
+      // 400 = bad customer input (bad address); anything else is upstream.
+      const status = err.status === 400 ? 400 : 502;
+      return NextResponse.json({ error: friendlyLuluMessage(err) }, { status });
     }
     console.error("[ship/quote] unexpected:", err);
     return NextResponse.json(
