@@ -1165,8 +1165,8 @@ export default function CanvasEditor({
                 onClick={() => setTab(t)}
                 className={`rounded-xl px-2 py-2 text-[11px] font-black uppercase transition-all ${
                   tab === t
-                    ? "bg-cream-2000 text-cream-50"
-                    : "bg-cream-200 text-ink-300 hover:bg-moss-100"
+                    ? "bg-ink-900 text-cream-50 shadow-sm"
+                    : "bg-cream-200 text-ink-500 hover:bg-cream-300 hover:text-ink-900"
                 }`}
               >
                 {t === "assistant" ? "AI" : t}
@@ -1912,7 +1912,7 @@ function ImageLayerContent({
         }}
       />
       {dropActive && (
-        <div className="pointer-events-none absolute inset-0 rounded-xl border-4 border-dashed border-moss-700 bg-cream-2000/10" />
+        <div className="pointer-events-none absolute inset-0 rounded-xl border-4 border-dashed border-moss-700 bg-moss-700/10" />
       )}
     </>
   );
@@ -2247,7 +2247,7 @@ function ShapesPanel({
                     <div className="h-7 w-7 rounded-full bg-pink-300" />
                   )}
                   {p.kind === "line" && (
-                    <div className="h-1 w-9 rounded-full bg-cream-2000" />
+                    <div className="h-1 w-9 rounded-full bg-ink-700" />
                   )}
                 </button>
               ))}
@@ -2735,7 +2735,7 @@ function DefineRect({
   const baseLabel = isImage ? "Image" : "Text";
   // Only number boxes when there's more than one of the kind.
   const label = total > 1 ? `${baseLabel} ${index + 1}` : baseLabel;
-  const handleColor = isImage ? "bg-cream-2000" : "bg-cream-2000";
+  const handleColor = isImage ? "bg-cream-50" : "bg-cream-50";
 
   return (
     <div
