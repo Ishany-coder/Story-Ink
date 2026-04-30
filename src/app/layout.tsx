@@ -1,27 +1,25 @@
 import type { Metadata } from "next";
-import { Nunito, Fraunces } from "next/font/google";
+import { Nunito, Playfair_Display } from "next/font/google";
 import Navbar from "@/components/Navbar";
 import { GOOGLE_FONTS_HREF } from "@/lib/fonts";
 import "./globals.css";
 
 // Nunito stays for body — friendly enough for the kid-facing reading
-// surfaces (Read mode), readable enough for grieving copy. Fraunces
-// is the new display face: a variable optical-size editorial serif
-// that gives the brand an "art book / fine-print" feel rather than
-// "kids' app."
-//
-// next/font/google requires either weight (for static cuts) OR axes
-// (for variable cuts), but not both, and only Google-Fonts-exposed
-// axes are accepted. Fraunces' wght is the default variable axis;
-// listing it explicitly via `axes` is enough to get the full range.
+// surfaces (Read mode), readable enough for grieving copy. Display
+// face is Playfair Display, the standard premium-editorial serif —
+// classic letterforms (clean f and j with no quirky stylistic-set
+// alternates), used by Vogue / NYT-style mastheads, instantly reads
+// "fine print" without surprising the reader.
 const nunito = Nunito({
   variable: "--font-nunito",
   subsets: ["latin"],
 });
 
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
+const playfair = Playfair_Display({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -38,7 +36,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${nunito.variable} ${fraunces.variable} h-full`}
+      className={`${nunito.variable} ${playfair.variable} h-full`}
     >
       <head>
         {/* Google Fonts CDN. Single CSS import covering all 50

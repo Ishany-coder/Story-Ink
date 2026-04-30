@@ -33,8 +33,8 @@ export interface FontOption {
 // roughly by Google Fonts popularity within each category.
 export const FONT_OPTIONS: FontOption[] = [
   {
-    label: "Display (Fraunces)",
-    family: "var(--font-fraunces), Georgia, serif",
+    label: "Display (Playfair)",
+    family: "var(--font-display), Georgia, serif",
     category: "serif",
   },
   {

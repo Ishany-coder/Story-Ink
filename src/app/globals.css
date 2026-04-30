@@ -21,7 +21,9 @@
 
 @theme inline {
   --font-sans: var(--font-nunito);
-  --font-display: var(--font-fraunces);
+  /* --font-display is wired to Playfair Display in app/layout.tsx
+     via next/font's CSS variable. We just alias it here so Tailwind
+     v4 picks it up as a theme token. */
 
   --color-cream-50: #faf7ee;
   --color-cream-100: #f5f1e8;
@@ -125,10 +127,9 @@ body {
   }
 }
 
-/* Optical-sized display headings. Fraunces' opsz axis dramatically
-   improves how a serif reads at large sizes — apply automatically
-   to anything tagged with .font-display. */
+/* Display headings. Playfair Display has elegant default letterforms
+   so we don't need any feature-settings or stylistic alternates —
+   just a tighter tracking that reads well at large sizes. */
 .font-display {
-  font-feature-settings: "ss01", "ss02";
   letter-spacing: -0.01em;
 }
