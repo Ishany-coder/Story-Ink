@@ -1146,7 +1146,11 @@ export default function CanvasEditor({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr_260px]">
+      {/* Symmetric side panels (240px each) so the canvas sits in the
+          actual center of the viewport. Earlier shape (220px / 260px)
+          pushed the canvas ~20px off-center because the right panel
+          ate more horizontal space than the left. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)_240px]">
         {/* Left: tools sidebar */}
         <aside className="rounded-3xl border-2 border-cream-300 bg-cream-50 p-4 shadow-sm">
           <div className="mb-4 grid grid-cols-3 gap-1">
