@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CANVAS_SIZE,
   type ImageLayer,
@@ -321,16 +321,67 @@ function BothDiffBody({ pending }: { pending: PendingBoth }) {
   const textOk = typeof newText === "string";
   const imageOk = typeof newImageUrl === "string";
 
+  // Refs so the table-of-contents at the top can scroll the user to
+  // either section. The modal's content area is the scroll container,
+  // so scrollIntoView naturally walks up to it.
+  const textRef = useRef<HTMLElement>(null);
+  const imageRef = useRef<HTMLElement>(null);
+
+  function jumpTo(target: HTMLElement | null) {
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <div className="space-y-8">
+      {/* "Two parts" table of contents. Stickied to the top of the
+          scroll area so the user always knows there's more below. */}
+      {textOk && imageOk && (
+        <div className="sticky top-0 z-10 -mx-6 -mt-5 border-b border-cream-300 bg-cream-50/95 px-6 py-3 backdrop-blur-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-ink-300">
+              Two changes proposed
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => jumpTo(textRef.current)}
+                className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1 text-xs font-semibold text-ink-700 transition-colors hover:border-moss-500 hover:bg-cream-200"
+              >
+                Text change
+              </button>
+              <button
+                type="button"
+                onClick={() => jumpTo(imageRef.current)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-3 py-1 text-xs font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+              >
+                Illustration change
+                <ArrowDownIcon />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {textOk && (
-        <section className="space-y-3">
-          <h3 className="text-[11px] font-black uppercase tracking-wider text-ink-300">
+        <section ref={textRef} className="space-y-3 scroll-mt-20">
+          <h3 className="font-[family-name:var(--font-display)] text-base font-semibold text-ink-900">
             Text change
           </h3>
           <TextDiffBody
             pending={{ kind: "text", page, newText: newText as string }}
           />
+          {/* Visual rail pointing down to the illustration section so
+              users skimming the text don't miss the second half. */}
+          {imageOk && (
+            <button
+              type="button"
+              onClick={() => jumpTo(imageRef.current)}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-cream-400 bg-cream-100/60 px-4 py-3 text-xs font-semibold text-ink-500 transition-colors hover:border-moss-500 hover:text-ink-900"
+            >
+              <ArrowDownIcon />
+              The illustration also changed — see below
+            </button>
+          )}
         </section>
       )}
       {!textOk && (
@@ -339,8 +390,8 @@ function BothDiffBody({ pending }: { pending: PendingBoth }) {
         </section>
       )}
       {imageOk && (
-        <section className="space-y-3">
-          <h3 className="text-[11px] font-black uppercase tracking-wider text-ink-300">
+        <section ref={imageRef} className="space-y-3 scroll-mt-20">
+          <h3 className="font-[family-name:var(--font-display)] text-base font-semibold text-ink-900">
             Illustration change
           </h3>
           <ImageDiffBody
@@ -358,6 +409,24 @@ function BothDiffBody({ pending }: { pending: PendingBoth }) {
         </section>
       )}
     </div>
+  );
+}
+
+function ArrowDownIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M7 1.5v11M2.5 8L7 12.5 11.5 8" />
+    </svg>
   );
 }
 
