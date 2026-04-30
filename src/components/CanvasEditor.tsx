@@ -25,6 +25,7 @@ import { useAutoFitFontSize } from "./useAutoFitFontSize";
 import { useUndoableHistory } from "./useUndoableHistory";
 import ShapeRenderer from "./ShapeRenderer";
 import { ICONS, ICON_CATEGORIES, getIcon } from "@/lib/shapeIcons";
+import { Undo2, Redo2 } from "lucide-react";
 import AIAssistantPanel from "./AIAssistantPanel";
 import {
   FONT_CATEGORY_LABELS,
@@ -1165,7 +1166,7 @@ export default function CanvasEditor({
               aria-label="Undo"
               className="flex h-8 w-8 items-center justify-center rounded-full text-ink-700 transition-colors hover:bg-cream-200 disabled:cursor-not-allowed disabled:text-ink-300 disabled:hover:bg-transparent"
             >
-              <UndoIcon />
+              <Undo2 size={16} strokeWidth={2} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -1175,7 +1176,7 @@ export default function CanvasEditor({
               aria-label="Redo"
               className="flex h-8 w-8 items-center justify-center rounded-full text-ink-700 transition-colors hover:bg-cream-200 disabled:cursor-not-allowed disabled:text-ink-300 disabled:hover:bg-transparent"
             >
-              <RedoIcon />
+              <Redo2 size={16} strokeWidth={2} aria-hidden="true" />
             </button>
           </div>
           <button
@@ -1586,45 +1587,6 @@ export default function CanvasEditor({
 }
 
 // ---------------------------------------------------------------------------
-// Inline icons used by the studio header for undo / redo.
-function UndoIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 7v6h6" />
-      <path d="M21 17a8 8 0 0 0-15-3l-3 3" />
-    </svg>
-  );
-}
-
-function RedoIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M21 7v6h-6" />
-      <path d="M3 17a8 8 0 0 1 15-3l3 3" />
-    </svg>
-  );
-}
-
 // Inline icons used by the image upload + drop zones. Stroke-only,
 // matches the rest of the redesigned site visual language.
 function ImageDropIcon({ size = 20 }: { size?: number }) {

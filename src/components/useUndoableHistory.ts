@@ -17,11 +17,6 @@ import { useCallback, useRef, useState } from "react";
 // session (drag, text typing). The result is one undo step per
 // logical user action, regardless of how many state updates happen
 // inside it.
-//
-// The hook only stores the `pages` slice — that's all that
-// undo/redo affects in the Studio. Story-level fields like
-// library_images and ai_system_prompt change via separate flows
-// that aren't part of canvas editing.
 
 import type { StoryPage } from "@/lib/types";
 
@@ -79,37 +74,36 @@ export function useUndoableHistory({
     [maxSize]
   );
 
+  // IMPORTANT: read past/future from closure, not from inside a
+  // setState callback. React's setState updaters run lazily during
+  // reconciliation, so any value you pull out of `(p) => {...}` is
+  // unavailable in the synchronous code that follows the setState
+  // call. The first version of this hook had that bug — undo always
+  // returned null because the popped value was assigned during the
+  // next render, after the function had already returned.
   const undo = useCallback(
     (currentPages: StoryPage[]): StoryPage[] | null => {
-      let popped: StoryPage[] | null = null;
-      setPast((p) => {
-        if (p.length === 0) return p;
-        popped = p[p.length - 1];
-        return p.slice(0, -1);
-      });
-      if (!popped) return null;
+      if (past.length === 0) return null;
+      const popped = past[past.length - 1];
+      setPast(past.slice(0, -1));
       setFuture((f) => {
         const next = [...f, currentPages];
         if (next.length > maxSize) next.splice(0, next.length - maxSize);
         return next;
       });
-      // Reset dedupe ref so the next snapshot doesn't get treated
+      // Reset dedupe ref so the next snapshot() doesn't get treated
       // as a no-op against the popped pointer.
       lastSnappedRef.current = popped;
       return popped;
     },
-    [maxSize]
+    [past, maxSize]
   );
 
   const redo = useCallback(
     (currentPages: StoryPage[]): StoryPage[] | null => {
-      let popped: StoryPage[] | null = null;
-      setFuture((f) => {
-        if (f.length === 0) return f;
-        popped = f[f.length - 1];
-        return f.slice(0, -1);
-      });
-      if (!popped) return null;
+      if (future.length === 0) return null;
+      const popped = future[future.length - 1];
+      setFuture(future.slice(0, -1));
       setPast((p) => {
         const next = [...p, currentPages];
         if (next.length > maxSize) next.splice(0, next.length - maxSize);
@@ -118,7 +112,7 @@ export function useUndoableHistory({
       lastSnappedRef.current = popped;
       return popped;
     },
-    [maxSize]
+    [future, maxSize]
   );
 
   const reset = useCallback(() => {
