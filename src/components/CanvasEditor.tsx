@@ -1554,7 +1554,7 @@ function LayoutThumbnail({ layout }: { layout: Layout }) {
         }}
       />
       <div
-        className="absolute rounded-sm bg-pink-400"
+        className="absolute rounded-sm bg-ink-700"
         style={{
           left: toPct(layout.textRegion.x),
           top: toPct(layout.textRegion.y),
@@ -2898,10 +2898,10 @@ function DefineLayoutForm({
         <button
           type="button"
           onClick={onAddText}
-          className="flex w-full items-center justify-between rounded-xl border-2 border-pink-200 bg-cream-50 px-3 py-2 text-[11px] font-black uppercase text-pink-600 transition-all hover:border-pink-400 hover:bg-cream-200"
+          className="flex w-full items-center justify-between rounded-xl border-2 border-cream-300 bg-cream-50 px-3 py-2 text-[11px] font-black uppercase text-ink-900 transition-all hover:border-ink-700 hover:bg-cream-200"
         >
           <span>+ Text box</span>
-          <span className="rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] text-moss-700">
+          <span className="rounded-full bg-cream-300 px-1.5 py-0.5 text-[10px] text-ink-500">
             {textCount}
           </span>
         </button>
