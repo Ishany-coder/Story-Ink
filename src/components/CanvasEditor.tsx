@@ -25,6 +25,14 @@ import { useAutoFitFontSize } from "./useAutoFitFontSize";
 import ShapeRenderer from "./ShapeRenderer";
 import { ICONS, ICON_CATEGORIES, getIcon } from "@/lib/shapeIcons";
 import AIAssistantPanel from "./AIAssistantPanel";
+import {
+  FONT_CATEGORY_LABELS,
+  FONT_CATEGORY_ORDER,
+  FONT_OPTIONS,
+  findFontByFamily,
+  type FontCategory,
+  type FontOption,
+} from "@/lib/fonts";
 
 interface CanvasEditorProps {
   story: Story;
@@ -239,12 +247,9 @@ function makeImageBox(): ImageLayer {
 // from outside the app don't accidentally fill a box.
 const IMAGE_DRAG_MIME = "application/x-storyink-image";
 
-const FONT_FAMILIES = [
-  { label: "Display (Fredoka)", value: "var(--font-display), serif" },
-  { label: "Sans (Nunito)", value: "var(--font-sans), system-ui, sans-serif" },
-  { label: "Serif", value: "Georgia, 'Times New Roman', serif" },
-  { label: "Mono", value: "ui-monospace, SFMono-Regular, monospace" },
-];
+// Font registry now lives in src/lib/fonts.ts (top 50 Google Fonts +
+// the two site-theme faces). The picker below renders each option in
+// its own face so users see what they're selecting.
 
 const SWATCHES = [
   "#1f1147",
@@ -2000,21 +2005,14 @@ function PropertiesPanel({
             />
           </Field>
           <Field label="Font">
-            <select
+            <FontPicker
               value={layer.fontFamily}
-              onChange={(e) =>
+              onChange={(family) =>
                 (onChange as (p: Partial<TextLayer>) => void)({
-                  fontFamily: e.target.value,
+                  fontFamily: family,
                 })
               }
-              className="w-full rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1 text-xs font-bold text-ink-900"
-            >
-              {FONT_FAMILIES.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
+            />
           </Field>
           <NumberField
             label="Size"
@@ -2975,6 +2973,166 @@ function DefineLayoutForm({
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FontPicker — replaces the native <select> in the text-layer panel so we
+// can render each option in its own font face. 50+ Google fonts is too
+// many for a flat dropdown; we group by category (sans / serif / display
+// / handwriting / mono) and let the user scroll.
+//
+// The popover is anchored below the trigger and closes on outside click,
+// Escape, or selection. Trigger label renders the currently-selected
+// font's name in that font.
+// ---------------------------------------------------------------------------
+
+function FontPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (family: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // The current value may be a stored font-family string from a legacy
+  // layer that doesn't match anything in our registry. Render it as
+  // "Custom font" so the picker still shows something sensible — the
+  // user can pick a registered font to replace it.
+  const current = findFontByFamily(value);
+  const displayLabel = current?.label ?? "Custom font";
+  const displayFamily = current?.family ?? value;
+
+  // Close on outside click + Escape.
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Group registry options by category once.
+  const grouped = useMemo(() => {
+    const out: Record<FontCategory, FontOption[]> = {
+      sans: [],
+      serif: [],
+      display: [],
+      handwriting: [],
+      mono: [],
+    };
+    for (const f of FONT_OPTIONS) out[f.category].push(f);
+    return out;
+  }, []);
+
+  function handleSelect(family: string) {
+    onChange(family);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1.5 text-left text-xs text-ink-900 transition-colors hover:border-cream-400"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span
+          className="truncate text-sm"
+          style={{ fontFamily: displayFamily, fontWeight: 500 }}
+        >
+          {displayLabel}
+        </span>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          aria-hidden="true"
+          className="ml-2 shrink-0 text-ink-500"
+        >
+          <path
+            d="M2 4l3 3 3-3"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          className="animate-fade-in absolute left-0 right-0 top-full z-30 mt-1 max-h-[360px] overflow-y-auto rounded-xl border border-cream-300 bg-cream-50 shadow-[0_18px_40px_rgba(14,26,43,0.16)]"
+          role="listbox"
+        >
+          {FONT_CATEGORY_ORDER.map((cat) => {
+            const opts = grouped[cat];
+            if (opts.length === 0) return null;
+            return (
+              <div key={cat} className="py-2">
+                <div className="px-3 pb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-ink-300">
+                  {FONT_CATEGORY_LABELS[cat]}
+                </div>
+                <div>
+                  {opts.map((f) => {
+                    const active = f.family === value;
+                    return (
+                      <button
+                        key={f.family}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        onClick={() => handleSelect(f.family)}
+                        className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-base transition-colors ${
+                          active
+                            ? "bg-moss-100 text-ink-900"
+                            : "text-ink-700 hover:bg-cream-200"
+                        }`}
+                        style={{ fontFamily: f.family }}
+                      >
+                        <span className="truncate">{f.label}</span>
+                        {active && (
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 12 12"
+                            aria-hidden="true"
+                            className="ml-2 shrink-0 text-moss-700"
+                          >
+                            <path
+                              d="M2 6l3 3 5-6"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              fill="none"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
