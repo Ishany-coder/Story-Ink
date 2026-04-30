@@ -248,11 +248,11 @@ export default function AIAssistantPanel({
   return (
     <div className="space-y-3">
       {/* Settings */}
-      <div className="rounded-2xl border-2 border-purple-100 bg-purple-50/40">
+      <div className="rounded-2xl border-2 border-cream-300 bg-cream-200/40">
         <button
           type="button"
           onClick={() => setSettingsOpen((v) => !v)}
-          className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-black uppercase tracking-wider text-purple-500"
+          className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-black uppercase tracking-wider text-ink-500"
         >
           <span>System prompts</span>
           <span className="text-xs">{settingsOpen ? "−" : "+"}</span>
@@ -260,7 +260,7 @@ export default function AIAssistantPanel({
         {settingsOpen && (
           <div className="space-y-3 px-3 pb-3">
             <div>
-              <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-purple-400">
+              <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-ink-300">
                 Global (this device)
               </label>
               <textarea
@@ -268,19 +268,19 @@ export default function AIAssistantPanel({
                 onChange={(e) => setGlobalPrompt(e.target.value)}
                 rows={3}
                 placeholder="Applies to every story. E.g., &quot;Always use warm watercolor palettes.&quot;"
-                className="w-full resize-none rounded-xl border border-purple-200 bg-white px-2 py-1.5 text-xs text-purple-900 outline-none focus:border-purple-400"
+                className="w-full resize-none rounded-xl border border-cream-300 bg-cream-50 px-2 py-1.5 text-xs text-ink-900 outline-none focus:border-moss-500"
               />
               <button
                 type="button"
                 onClick={saveGlobalPrompt}
                 disabled={savingGlobal}
-                className="mt-1 w-full rounded-xl bg-purple-100 px-2 py-1 text-[10px] font-black uppercase text-purple-600 hover:bg-purple-200 disabled:opacity-50"
+                className="mt-1 w-full rounded-xl bg-moss-100 px-2 py-1 text-[10px] font-black uppercase text-moss-700 hover:bg-cream-300 disabled:opacity-50"
               >
                 {savingGlobal ? "Saving…" : "Save global"}
               </button>
             </div>
             <div>
-              <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-purple-400">
+              <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-ink-300">
                 This story only
               </label>
               <textarea
@@ -288,19 +288,19 @@ export default function AIAssistantPanel({
                 onChange={(e) => setStoryPrompt(e.target.value)}
                 rows={3}
                 placeholder="Applies only to this story. E.g., &quot;The main character is Timmy, who has red hair.&quot;"
-                className="w-full resize-none rounded-xl border border-purple-200 bg-white px-2 py-1.5 text-xs text-purple-900 outline-none focus:border-purple-400"
+                className="w-full resize-none rounded-xl border border-cream-300 bg-cream-50 px-2 py-1.5 text-xs text-ink-900 outline-none focus:border-moss-500"
               />
               <button
                 type="button"
                 onClick={saveStoryPrompt}
                 disabled={savingStory}
-                className="mt-1 w-full rounded-xl bg-purple-100 px-2 py-1 text-[10px] font-black uppercase text-purple-600 hover:bg-purple-200 disabled:opacity-50"
+                className="mt-1 w-full rounded-xl bg-moss-100 px-2 py-1 text-[10px] font-black uppercase text-moss-700 hover:bg-cream-300 disabled:opacity-50"
               >
                 {savingStory ? "Saving…" : "Save story prompt"}
               </button>
             </div>
             {settingsMsg && (
-              <p className="text-[10px] font-bold text-purple-500">
+              <p className="text-[10px] font-bold text-ink-500">
                 {settingsMsg}
               </p>
             )}
@@ -310,7 +310,7 @@ export default function AIAssistantPanel({
 
       {/* Prompt input */}
       <div>
-        <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-purple-400">
+        <label className="mb-1 block text-[10px] font-black uppercase tracking-wider text-ink-300">
           Assistant prompt · page {currentPage.pageNumber}
         </label>
         <textarea
@@ -318,7 +318,7 @@ export default function AIAssistantPanel({
           onChange={(e) => setUserPrompt(e.target.value)}
           rows={4}
           placeholder="Describe what to change… e.g. &quot;make it sound more adventurous&quot; or &quot;the forest should be at night&quot;"
-          className="w-full resize-none rounded-2xl border-2 border-purple-200 bg-white px-3 py-2 text-xs text-purple-900 outline-none focus:border-purple-400"
+          className="w-full resize-none rounded-2xl border-2 border-cream-300 bg-cream-50 px-3 py-2 text-xs text-ink-900 outline-none focus:border-moss-500"
           disabled={busy !== null}
         />
       </div>
@@ -327,18 +327,18 @@ export default function AIAssistantPanel({
         type="button"
         onClick={() => runGeneration("auto")}
         disabled={busy !== null}
-        className="w-full rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-3 py-2.5 text-xs font-black uppercase text-white shadow-md shadow-purple-200 transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+        className="w-full rounded-2xl bg-gradient-to-r from-moss-700 to-moss-700 px-3 py-2.5 text-xs font-black uppercase text-cream-50 shadow-md shadow-cream-300 transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
       >
         {busy === "auto" ? "Thinking…" : "Generate"}
       </button>
 
-      <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-purple-400">
-        <span className="text-purple-300">Force:</span>
+      <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-ink-300">
+        <span className="text-ink-300">Force:</span>
         <button
           type="button"
           onClick={() => runGeneration("text")}
           disabled={busy !== null}
-          className="rounded-full bg-purple-50 px-2 py-0.5 font-black uppercase text-purple-500 transition-all hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full bg-cream-200 px-2 py-0.5 font-black uppercase text-ink-500 transition-all hover:bg-moss-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy === "text" ? "Writing…" : "Text only"}
         </button>
@@ -346,14 +346,14 @@ export default function AIAssistantPanel({
           type="button"
           onClick={() => runGeneration("image")}
           disabled={busy !== null}
-          className="rounded-full bg-pink-50 px-2 py-0.5 font-black uppercase text-pink-500 transition-all hover:bg-pink-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full bg-cream-200 px-2 py-0.5 font-black uppercase text-moss-700 transition-all hover:bg-pink-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy === "image" ? "Drawing…" : "Image only"}
         </button>
       </div>
 
       {inferredTargets && inferredTargets.length > 0 && !pending && !error && (
-        <p className="text-center text-[10px] font-bold text-purple-400">
+        <p className="text-center text-[10px] font-bold text-ink-300">
           Inferred: {inferredTargets.join(" + ")}
         </p>
       )}

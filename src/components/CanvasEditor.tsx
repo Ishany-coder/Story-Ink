@@ -1072,11 +1072,11 @@ export default function CanvasEditor({
         <div>
           <Link
             href="/canvas"
-            className="text-sm font-bold text-purple-400 hover:text-purple-600"
+            className="text-sm font-bold text-ink-300 hover:text-moss-700"
           >
             &larr; All stories
           </Link>
-          <h1 className="mt-1 font-[family-name:var(--font-display)] text-2xl font-bold text-purple-700">
+          <h1 className="mt-1 font-[family-name:var(--font-display)] text-2xl font-bold text-ink-900">
             Studio: {story.title}
           </h1>
         </div>
@@ -1095,7 +1095,7 @@ export default function CanvasEditor({
             type="button"
             onClick={savePage}
             disabled={saving || !isDirty}
-            className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-5 py-2 text-sm font-black text-white shadow-md shadow-purple-200 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+            className="rounded-2xl bg-gradient-to-r from-moss-700 to-moss-700 px-5 py-2 text-sm font-black text-cream-50 shadow-md shadow-cream-300 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
           >
             {saving ? "Saving..." : "Save page"}
           </button>
@@ -1108,7 +1108,7 @@ export default function CanvasEditor({
                 ? "No other pages have unsaved changes"
                 : `Save ${dirtyPageCount} pages`
             }
-            className="rounded-2xl border-2 border-purple-300 bg-white px-4 py-2 text-sm font-black text-purple-600 shadow-sm transition-all hover:border-purple-400 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-2xl border-2 border-cream-400 bg-cream-50 px-4 py-2 text-sm font-black text-moss-700 shadow-sm transition-all hover:border-moss-500 hover:bg-cream-200 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving
               ? "Saving..."
@@ -1132,8 +1132,8 @@ export default function CanvasEditor({
             }}
             className={`rounded-full px-4 py-1.5 text-xs font-black transition-all ${
               i === pageIdx
-                ? "bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-md"
-                : "bg-purple-50 text-purple-400 hover:bg-purple-100"
+                ? "bg-gradient-to-r from-moss-500 to-moss-500 text-cream-50 shadow-md"
+                : "bg-cream-200 text-ink-300 hover:bg-moss-100"
             } ${dirty[p.pageNumber] ? "ring-2 ring-amber-300" : ""}`}
           >
             Page {p.pageNumber}
@@ -1143,7 +1143,7 @@ export default function CanvasEditor({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr_260px]">
         {/* Left: tools sidebar */}
-        <aside className="rounded-3xl border-2 border-purple-200 bg-white p-4 shadow-sm">
+        <aside className="rounded-3xl border-2 border-cream-300 bg-cream-50 p-4 shadow-sm">
           <div className="mb-4 grid grid-cols-3 gap-1">
             {(
               [
@@ -1160,8 +1160,8 @@ export default function CanvasEditor({
                 onClick={() => setTab(t)}
                 className={`rounded-xl px-2 py-2 text-[11px] font-black uppercase transition-all ${
                   tab === t
-                    ? "bg-purple-500 text-white"
-                    : "bg-purple-50 text-purple-400 hover:bg-purple-100"
+                    ? "bg-cream-2000 text-cream-50"
+                    : "bg-cream-200 text-ink-300 hover:bg-moss-100"
                 }`}
               >
                 {t === "assistant" ? "AI" : t}
@@ -1172,13 +1172,13 @@ export default function CanvasEditor({
           {tab === "layouts" && !defineMode && (
             <div className="space-y-2">
               <div>
-                <div className="mb-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+                <div className="mb-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
                   Apply to
                 </div>
                 <div
                   role="radiogroup"
                   aria-label="Layout apply scope"
-                  className="flex rounded-2xl border-2 border-purple-100 bg-purple-50/60 p-1"
+                  className="flex rounded-2xl border-2 border-cream-300 bg-cream-100/60 p-1"
                 >
                   <button
                     type="button"
@@ -1187,8 +1187,8 @@ export default function CanvasEditor({
                     onClick={() => setLayoutScope("all")}
                     className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
                       layoutScope === "all"
-                        ? "bg-white text-purple-600 shadow-sm"
-                        : "text-purple-400 hover:text-purple-500"
+                        ? "bg-cream-50 text-moss-700 shadow-sm"
+                        : "text-ink-300 hover:text-ink-500"
                     }`}
                   >
                     All pages
@@ -1200,8 +1200,8 @@ export default function CanvasEditor({
                     onClick={() => setLayoutScope("page")}
                     className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
                       layoutScope === "page"
-                        ? "bg-white text-purple-600 shadow-sm"
-                        : "text-purple-400 hover:text-purple-500"
+                        ? "bg-cream-50 text-moss-700 shadow-sm"
+                        : "text-ink-300 hover:text-ink-500"
                     }`}
                   >
                     This page
@@ -1211,7 +1211,7 @@ export default function CanvasEditor({
               <button
                 type="button"
                 onClick={startDefineLayout}
-                className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/60 px-3 py-3 text-[11px] font-black uppercase text-purple-500 transition-all hover:border-purple-400 hover:bg-purple-100"
+                className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-3 py-3 text-[11px] font-black uppercase text-ink-500 transition-all hover:border-moss-500 hover:bg-moss-100"
               >
                 <span className="text-base leading-none">+</span>
                 Custom layout
@@ -1223,13 +1223,13 @@ export default function CanvasEditor({
                   onClick={() => applyLayout(l.id)}
                   className={`w-full overflow-hidden rounded-2xl border-2 text-left transition-all ${
                     currentLayoutId === l.id
-                      ? "border-purple-400 bg-purple-50 shadow-md"
-                      : "border-purple-100 bg-white hover:border-purple-300 hover:bg-purple-50"
+                      ? "border-moss-500 bg-cream-200 shadow-md"
+                      : "border-cream-300 bg-cream-50 hover:border-cream-400 hover:bg-cream-200"
                   }`}
                 >
                   <div className="flex items-center gap-2 px-2 py-2">
                     <LayoutThumbnail layout={l} />
-                    <span className="text-[11px] font-black uppercase text-purple-500">
+                    <span className="text-[11px] font-black uppercase text-ink-500">
                       {l.name}
                     </span>
                   </div>
@@ -1237,7 +1237,7 @@ export default function CanvasEditor({
               ))}
               {customLayouts.length > 0 && (
                 <>
-                  <div className="pt-3 pb-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+                  <div className="pt-3 pb-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
                     Your layouts
                   </div>
                   {customLayouts.map((l) => (
@@ -1245,8 +1245,8 @@ export default function CanvasEditor({
                       key={l.id}
                       className={`group relative w-full overflow-hidden rounded-2xl border-2 text-left transition-all ${
                         currentLayoutId === l.id
-                          ? "border-purple-400 bg-purple-50 shadow-md"
-                          : "border-purple-100 bg-white hover:border-purple-300 hover:bg-purple-50"
+                          ? "border-moss-500 bg-cream-200 shadow-md"
+                          : "border-cream-300 bg-cream-50 hover:border-cream-400 hover:bg-cream-200"
                       }`}
                     >
                       <button
@@ -1256,10 +1256,10 @@ export default function CanvasEditor({
                       >
                         <LayoutThumbnail layout={l} />
                         <div className="flex min-w-0 flex-1 flex-col">
-                          <span className="truncate text-[11px] font-black uppercase text-purple-500">
+                          <span className="truncate text-[11px] font-black uppercase text-ink-500">
                             {l.name}
                           </span>
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-purple-300">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-ink-300">
                             {l.scope === "global" ? "All books" : "This book"}
                           </span>
                         </div>
@@ -1292,7 +1292,7 @@ export default function CanvasEditor({
             <button
               type="button"
               onClick={() => addLayer(makeText())}
-              className="w-full rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-3 py-6 text-center font-[family-name:var(--font-display)] text-2xl font-bold text-purple-600 hover:bg-purple-100"
+              className="w-full rounded-2xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-3 py-6 text-center font-[family-name:var(--font-display)] text-2xl font-bold text-moss-700 hover:bg-moss-100"
             >
               + Add text box
             </button>
@@ -1332,13 +1332,13 @@ export default function CanvasEditor({
         {/* Center: canvas */}
         <div className="flex flex-col items-center justify-center gap-3">
           {defineMode && (
-            <div className="w-full max-w-[720px] rounded-2xl border-2 border-purple-300 bg-purple-50 px-4 py-2 text-center text-[11px] font-black uppercase tracking-wide text-purple-600">
+            <div className="w-full max-w-[720px] rounded-2xl border-2 border-cream-400 bg-cream-200 px-4 py-2 text-center text-[11px] font-black uppercase tracking-wide text-moss-700">
               Drag and resize the boxes to design your layout
             </div>
           )}
           <div
             ref={canvasRef}
-            className="relative aspect-square w-full max-w-[720px] overflow-hidden rounded-3xl border-4 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50 shadow-xl"
+            className="relative aspect-square w-full max-w-[720px] overflow-hidden rounded-3xl border-4 border-cream-300 bg-gradient-to-br from-cream-100 to-cream-200 shadow-xl"
             onPointerDown={() => {
               if (defineMode) {
                 setDefineMode((m) => (m ? { ...m, active: null } : m));
@@ -1455,7 +1455,7 @@ export default function CanvasEditor({
         </div>
 
         {/* Right: properties */}
-        <aside className="rounded-3xl border-2 border-purple-200 bg-white p-4 shadow-sm">
+        <aside className="rounded-3xl border-2 border-cream-300 bg-cream-50 p-4 shadow-sm">
           {selectedLayer ? (
             <PropertiesPanel
               layer={selectedLayer}
@@ -1466,7 +1466,7 @@ export default function CanvasEditor({
               onDelete={() => deleteLayer(selectedLayer.id)}
             />
           ) : (
-            <div className="py-10 text-center text-xs font-bold text-purple-300">
+            <div className="py-10 text-center text-xs font-bold text-ink-300">
               Select a layer to edit its properties.
             </div>
           )}
@@ -1534,9 +1534,9 @@ function UploadIcon({ size = 20 }: { size?: number }) {
 function LayoutThumbnail({ layout }: { layout: Layout }) {
   const toPct = (v: number) => `${(v / CANVAS_SIZE) * 100}%`;
   return (
-    <div className="relative h-10 w-10 flex-none overflow-hidden rounded border border-purple-200 bg-purple-50">
+    <div className="relative h-10 w-10 flex-none overflow-hidden rounded border border-cream-300 bg-cream-200">
       <div
-        className="absolute rounded-sm bg-purple-300"
+        className="absolute rounded-sm bg-cream-400"
         style={{
           left: toPct(layout.imageRegion.x),
           top: toPct(layout.imageRegion.y),
@@ -1649,7 +1649,7 @@ function LayerView({
         <>
           {/* Dashed selection outline (non-interactive). */}
           <div
-            className="pointer-events-none absolute inset-0 border-2 border-dashed border-purple-500"
+            className="pointer-events-none absolute inset-0 border-2 border-dashed border-moss-700"
             style={{ zIndex: 1 }}
           />
 
@@ -1708,26 +1708,26 @@ function LayerView({
 
           {/* Midpoint markers (visual only — clicks go to the hit zones). */}
           <div
-            className="pointer-events-none absolute top-1/2 h-6 w-2 -translate-y-1/2 rounded-full border-2 border-purple-500 bg-white"
+            className="pointer-events-none absolute top-1/2 h-6 w-2 -translate-y-1/2 rounded-full border-2 border-moss-700 bg-cream-50"
             style={{ right: -5, zIndex: 11 }}
           />
           <div
-            className="pointer-events-none absolute top-1/2 h-6 w-2 -translate-y-1/2 rounded-full border-2 border-purple-500 bg-white"
+            className="pointer-events-none absolute top-1/2 h-6 w-2 -translate-y-1/2 rounded-full border-2 border-moss-700 bg-cream-50"
             style={{ left: -5, zIndex: 11 }}
           />
           <div
-            className="pointer-events-none absolute left-1/2 h-2 w-6 -translate-x-1/2 rounded-full border-2 border-purple-500 bg-white"
+            className="pointer-events-none absolute left-1/2 h-2 w-6 -translate-x-1/2 rounded-full border-2 border-moss-700 bg-cream-50"
             style={{ bottom: -5, zIndex: 11 }}
           />
           <div
-            className="pointer-events-none absolute left-1/2 h-2 w-6 -translate-x-1/2 rounded-full border-2 border-purple-500 bg-white"
+            className="pointer-events-none absolute left-1/2 h-2 w-6 -translate-x-1/2 rounded-full border-2 border-moss-700 bg-cream-50"
             style={{ top: -5, zIndex: 11 }}
           />
 
           {/* Southeast corner — both axes. Sits above the edge hit zones. */}
           <div
             onPointerDown={(e) => onStartResize(e, "se")}
-            className="cursor-nwse-resize rounded-full border-2 border-purple-500 bg-white"
+            className="cursor-nwse-resize rounded-full border-2 border-moss-700 bg-cream-50"
             style={{
               position: "absolute",
               bottom: -9,
@@ -1741,7 +1741,7 @@ function LayerView({
           {/* Rotate */}
           <div
             onPointerDown={onStartRotate}
-            className="cursor-grab rounded-full border-2 border-purple-500 bg-white"
+            className="cursor-grab rounded-full border-2 border-moss-700 bg-cream-50"
             style={{
               position: "absolute",
               top: -32,
@@ -1864,8 +1864,8 @@ function ImageLayerContent({
       <div
         className={`pointer-events-none flex h-full w-full flex-col items-center justify-center rounded-xl border-2 border-dashed text-center ${
           dropActive
-            ? "border-pink-500 bg-pink-50 text-pink-500"
-            : "border-purple-300 bg-purple-50/60 text-purple-400"
+            ? "border-moss-700 bg-cream-200 text-moss-700"
+            : "border-cream-400 bg-cream-100/60 text-ink-300"
         }`}
       >
         <ImageDropIcon />
@@ -1879,7 +1879,7 @@ function ImageLayerContent({
             e.stopPropagation();
             onChooseImage();
           }}
-          className="pointer-events-auto mt-2 rounded-full bg-white px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-purple-600 shadow ring-1 ring-purple-200 hover:bg-purple-50"
+          className="pointer-events-auto mt-2 rounded-full bg-cream-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-moss-700 shadow ring-1 ring-moss-200 hover:bg-cream-200"
         >
           Choose image
         </button>
@@ -1903,7 +1903,7 @@ function ImageLayerContent({
         }}
       />
       {dropActive && (
-        <div className="pointer-events-none absolute inset-0 rounded-xl border-4 border-dashed border-pink-500 bg-pink-500/10" />
+        <div className="pointer-events-none absolute inset-0 rounded-xl border-4 border-dashed border-moss-700 bg-cream-2000/10" />
       )}
     </>
   );
@@ -1931,16 +1931,16 @@ function PropertiesPanel({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-black uppercase tracking-wider text-purple-400">
+        <h3 className="text-xs font-black uppercase tracking-wider text-ink-300">
           {layer.type}
           {layer.source === "layout" && (
-            <span className="ml-1 text-purple-300">· layout</span>
+            <span className="ml-1 text-ink-300">· layout</span>
           )}
         </h3>
         <button
           type="button"
           onClick={onDelete}
-          className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-500 hover:bg-rose-500 hover:text-white"
+          className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-500 hover:bg-rose-500 hover:text-cream-50"
         >
           Delete
         </button>
@@ -1982,7 +1982,7 @@ function PropertiesPanel({
               type="button"
               onClick={onRegenerate}
               disabled={regenPending}
-              className="w-full rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 px-3 py-2 text-xs font-black uppercase text-white shadow-md disabled:cursor-wait disabled:opacity-60"
+              className="w-full rounded-xl bg-gradient-to-r from-moss-700 to-moss-700 px-3 py-2 text-xs font-black uppercase text-cream-50 shadow-md disabled:cursor-wait disabled:opacity-60"
             >
               {regenPending ? "Thinking..." : "Regenerate with AI"}
             </button>
@@ -1996,7 +1996,7 @@ function PropertiesPanel({
                 })
               }
               rows={3}
-              className="w-full rounded-lg border-2 border-purple-200 bg-purple-50/40 px-2 py-1 text-xs font-medium text-purple-700"
+              className="w-full rounded-lg border-2 border-cream-300 bg-cream-200/40 px-2 py-1 text-xs font-medium text-ink-900"
             />
           </Field>
           <Field label="Font">
@@ -2007,7 +2007,7 @@ function PropertiesPanel({
                   fontFamily: e.target.value,
                 })
               }
-              className="w-full rounded-lg border-2 border-purple-200 bg-white px-2 py-1 text-xs font-bold text-purple-700"
+              className="w-full rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1 text-xs font-bold text-ink-900"
             >
               {FONT_FAMILIES.map((f) => (
                 <option key={f.value} value={f.value}>
@@ -2031,7 +2031,7 @@ function PropertiesPanel({
                   fontWeight: e.target.value as TextLayer["fontWeight"],
                 })
               }
-              className="w-full rounded-lg border-2 border-purple-200 bg-white px-2 py-1 text-xs font-bold text-purple-700"
+              className="w-full rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1 text-xs font-bold text-ink-900"
             >
               <option value="normal">Normal</option>
               <option value="bold">Bold</option>
@@ -2086,8 +2086,8 @@ function NumberField({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex items-center gap-1 rounded-lg border-2 border-purple-100 bg-white px-2 py-1">
-      <span className="text-[10px] font-black uppercase text-purple-300">
+    <label className="flex items-center gap-1 rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1">
+      <span className="text-[10px] font-black uppercase text-ink-300">
         {label}
       </span>
       <input
@@ -2097,7 +2097,7 @@ function NumberField({
           const n = Number(e.target.value);
           if (Number.isFinite(n)) onChange(n);
         }}
-        className="w-full bg-transparent text-xs font-bold text-purple-700 outline-none"
+        className="w-full bg-transparent text-xs font-bold text-ink-900 outline-none"
       />
     </label>
   );
@@ -2112,7 +2112,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-purple-300">
+      <span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-ink-300">
         {label}
       </span>
       {children}
@@ -2136,12 +2136,12 @@ function ColorField({
           type="color"
           value={value === "transparent" ? "#ffffff" : value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-7 w-10 cursor-pointer rounded border border-purple-200"
+          className="h-7 w-10 cursor-pointer rounded border border-cream-300"
         />
         <button
           type="button"
           onClick={() => onChange("transparent")}
-          className="rounded-md border border-purple-200 px-2 py-0.5 text-[10px] font-black uppercase text-purple-400 hover:bg-purple-50"
+          className="rounded-md border border-cream-300 px-2 py-0.5 text-[10px] font-black uppercase text-ink-300 hover:bg-cream-200"
         >
           None
         </button>
@@ -2152,7 +2152,7 @@ function ColorField({
             key={c}
             type="button"
             onClick={() => onChange(c)}
-            className="h-5 w-5 rounded border border-purple-200"
+            className="h-5 w-5 rounded border border-cream-300"
             style={{ background: c }}
             aria-label={c}
           />
@@ -2203,12 +2203,12 @@ function ShapesPanel({
         placeholder="Search shapes..."
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
-        className="w-full rounded-xl border-2 border-purple-200 bg-purple-50/40 px-3 py-2 text-xs font-bold text-purple-700 placeholder-purple-300 focus:border-purple-400 focus:outline-none"
+        className="w-full rounded-xl border-2 border-cream-300 bg-cream-200/40 px-3 py-2 text-xs font-bold text-ink-900 placeholder-ink-300 focus:border-moss-500 focus:outline-none"
       />
 
-      <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-2 py-3 text-center text-[11px] font-black uppercase text-purple-500 hover:bg-purple-100">
+      <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-2 py-3 text-center text-[11px] font-black uppercase text-ink-500 hover:bg-moss-100">
         Upload custom SVG
-        <span className="mt-0.5 text-[9px] font-medium normal-case text-purple-300">
+        <span className="mt-0.5 text-[9px] font-medium normal-case text-ink-300">
           .svg file
         </span>
         <input
@@ -2226,7 +2226,7 @@ function ShapesPanel({
       <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
         {matchingPrimitives.length > 0 && (
           <div>
-            <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+            <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
               Primitives
             </p>
             <div className="grid grid-cols-3 gap-1.5">
@@ -2236,16 +2236,16 @@ function ShapesPanel({
                   type="button"
                   onClick={() => onAddPrimitive(p.kind)}
                   title={p.name}
-                  className="flex aspect-square items-center justify-center rounded-xl border-2 border-purple-200 bg-white text-xs font-black uppercase text-purple-500 hover:border-purple-400 hover:bg-purple-50"
+                  className="flex aspect-square items-center justify-center rounded-xl border-2 border-cream-300 bg-cream-50 text-xs font-black uppercase text-ink-500 hover:border-moss-500 hover:bg-cream-200"
                 >
                   {p.kind === "rect" && (
-                    <div className="h-7 w-7 rounded-md bg-purple-300" />
+                    <div className="h-7 w-7 rounded-md bg-cream-400" />
                   )}
                   {p.kind === "circle" && (
                     <div className="h-7 w-7 rounded-full bg-pink-300" />
                   )}
                   {p.kind === "line" && (
-                    <div className="h-1 w-9 rounded-full bg-purple-500" />
+                    <div className="h-1 w-9 rounded-full bg-cream-2000" />
                   )}
                 </button>
               ))}
@@ -2259,7 +2259,7 @@ function ShapesPanel({
         {q ? (
           matchingIcons.length > 0 && (
             <div>
-              <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+              <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
                 Results ({matchingIcons.length})
               </p>
               <div className="grid grid-cols-4 gap-1">
@@ -2279,7 +2279,7 @@ function ShapesPanel({
             if (catIcons.length === 0) return null;
             return (
               <div key={cat}>
-                <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-purple-300">
+                <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
                   {cat} ({catIcons.length})
                 </p>
                 <div className="grid grid-cols-4 gap-1">
@@ -2298,7 +2298,7 @@ function ShapesPanel({
       </div>
 
       {matchingIcons.length === 0 && matchingPrimitives.length === 0 && (
-        <p className="py-4 text-center text-[11px] font-medium text-purple-300">
+        <p className="py-4 text-center text-[11px] font-medium text-ink-300">
           No shapes match &quot;{search}&quot;.
         </p>
       )}
@@ -2319,7 +2319,7 @@ function IconButton({
       type="button"
       onClick={onClick}
       title={name}
-      className="flex aspect-square items-center justify-center rounded-lg border border-purple-100 bg-white p-1.5 text-purple-500 transition-all hover:scale-105 hover:border-purple-400 hover:bg-purple-50"
+      className="flex aspect-square items-center justify-center rounded-lg border border-cream-300 bg-cream-50 p-1.5 text-ink-500 transition-all hover:scale-105 hover:border-moss-500 hover:bg-cream-200"
     >
       {Icon && (
         <Icon
@@ -2386,10 +2386,10 @@ function ImagesPanel({
 
   return (
     <div className="space-y-3">
-      <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-3 py-5 text-center text-xs font-bold text-purple-500 hover:bg-purple-100">
+      <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-3 py-5 text-center text-xs font-bold text-ink-500 hover:bg-moss-100">
         <UploadIcon />
         <span className="mt-1">Upload image</span>
-        <span className="mt-0.5 text-[10px] font-medium text-purple-300">
+        <span className="mt-0.5 text-[10px] font-medium text-ink-300">
           PNG / JPG, max 5 MB
         </span>
         <input
@@ -2407,18 +2407,18 @@ function ImagesPanel({
       <button
         type="button"
         onClick={onAddImageBox}
-        className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/60 px-3 py-3 text-[11px] font-black uppercase text-purple-500 transition-all hover:border-purple-400 hover:bg-purple-100"
+        className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-3 py-3 text-[11px] font-black uppercase text-ink-500 transition-all hover:border-moss-500 hover:bg-moss-100"
       >
         <span className="text-base leading-none">+</span>
         Add image box
       </button>
 
       <div>
-        <div className="pb-1.5 text-[10px] font-black uppercase tracking-wider text-purple-300">
+        <div className="pb-1.5 text-[10px] font-black uppercase tracking-wider text-ink-300">
           In this comic ({entries.length})
         </div>
         {entries.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-purple-200 bg-white px-2 py-4 text-center text-[10px] font-bold text-purple-300">
+          <div className="rounded-xl border border-dashed border-cream-300 bg-cream-50 px-2 py-4 text-center text-[10px] font-bold text-ink-300">
             No images yet
           </div>
         ) : (
@@ -2433,7 +2433,7 @@ function ImagesPanel({
             ))}
           </div>
         )}
-        <p className="mt-2 text-[10px] leading-snug text-purple-300">
+        <p className="mt-2 text-[10px] leading-snug text-ink-300">
           Drag a thumbnail onto an image box, or click to add it as a new
           layer.
         </p>
@@ -2462,7 +2462,7 @@ function LibraryThumb({
         e.dataTransfer.setData("text/uri-list", url);
         e.dataTransfer.setData("text/plain", url);
       }}
-      className="group relative aspect-square overflow-hidden rounded-xl border-2 border-purple-100 bg-purple-50 transition-all hover:border-purple-400 hover:shadow"
+      className="group relative aspect-square overflow-hidden rounded-xl border-2 border-cream-300 bg-cream-200 transition-all hover:border-moss-500 hover:shadow"
       title={label}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2472,7 +2472,7 @@ function LibraryThumb({
         draggable={false}
         className="h-full w-full object-cover"
       />
-      <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[9px] font-black uppercase tracking-wider text-white">
+      <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[9px] font-black uppercase tracking-wider text-cream-50">
         {label}
       </span>
     </button>
@@ -2522,21 +2522,21 @@ function ImagePickerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-purple-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="relative flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border-4 border-purple-200 bg-white shadow-2xl"
+        className="relative flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border-4 border-cream-300 bg-cream-50 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b-2 border-purple-100 px-5 py-3">
-          <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-purple-700">
+        <div className="flex items-center justify-between border-b-2 border-cream-300 px-5 py-3">
+          <h2 className="font-[family-name:var(--font-display)] text-lg font-bold text-ink-900">
             Choose an image
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-purple-400 hover:bg-purple-50 hover:text-purple-600"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-ink-300 hover:bg-cream-200 hover:text-moss-700"
             title="Close"
           >
             &times;
@@ -2544,12 +2544,12 @@ function ImagePickerModal({
         </div>
 
         <div className="space-y-4 overflow-y-auto px-5 py-4">
-          <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/50 px-4 py-6 text-center text-sm font-bold text-purple-500 hover:bg-purple-100">
+          <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-4 py-6 text-center text-sm font-bold text-ink-500 hover:bg-moss-100">
             <UploadIcon size={24} />
             <span className="mt-1">
               {uploading ? "Uploading…" : "Upload from your computer"}
             </span>
-            <span className="mt-0.5 text-[11px] font-medium text-purple-300">
+            <span className="mt-0.5 text-[11px] font-medium text-ink-300">
               PNG / JPG, max 5 MB
             </span>
             <input
@@ -2566,11 +2566,11 @@ function ImagePickerModal({
           </label>
 
           <div>
-            <div className="pb-2 text-[11px] font-black uppercase tracking-wider text-purple-400">
+            <div className="pb-2 text-[11px] font-black uppercase tracking-wider text-ink-300">
               From this comic ({entries.length})
             </div>
             {entries.length === 0 ? (
-              <div className="rounded-xl border-2 border-dashed border-purple-200 bg-purple-50/40 px-3 py-6 text-center text-xs font-bold text-purple-300">
+              <div className="rounded-xl border-2 border-dashed border-cream-300 bg-cream-200/40 px-3 py-6 text-center text-xs font-bold text-ink-300">
                 No images in this comic yet.
               </div>
             ) : (
@@ -2580,7 +2580,7 @@ function ImagePickerModal({
                     key={entry.url}
                     type="button"
                     onClick={() => onPick(entry.url)}
-                    className="group relative aspect-square overflow-hidden rounded-xl border-2 border-purple-100 bg-purple-50 transition-all hover:border-purple-400 hover:shadow-md"
+                    className="group relative aspect-square overflow-hidden rounded-xl border-2 border-cream-300 bg-cream-200 transition-all hover:border-moss-500 hover:shadow-md"
                     title={entry.label}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2590,7 +2590,7 @@ function ImagePickerModal({
                       draggable={false}
                       className="h-full w-full object-cover transition-transform group-hover:scale-105"
                     />
-                    <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[10px] font-black uppercase tracking-wider text-white">
+                    <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[10px] font-black uppercase tracking-wider text-cream-50">
                       {entry.label}
                     </span>
                   </button>
@@ -2728,12 +2728,12 @@ function DefineRect({
   }, [drag]);
 
   const isImage = kind === "image";
-  const bodyBg = isImage ? "bg-purple-400/25" : "bg-pink-400/25";
-  const borderColor = isImage ? "border-purple-500" : "border-pink-500";
+  const bodyBg = isImage ? "bg-moss-200/40" : "bg-gold-300/35";
+  const borderColor = isImage ? "border-moss-700" : "border-moss-700";
   const baseLabel = isImage ? "Image" : "Text";
   // Only number boxes when there's more than one of the kind.
   const label = total > 1 ? `${baseLabel} ${index + 1}` : baseLabel;
-  const handleColor = isImage ? "bg-purple-500" : "bg-pink-500";
+  const handleColor = isImage ? "bg-cream-2000" : "bg-cream-2000";
 
   return (
     <div
@@ -2747,10 +2747,10 @@ function DefineRect({
       }}
       className={`cursor-move select-none border-2 border-dashed ${borderColor} ${bodyBg} ${
         active ? "ring-2 ring-offset-2 ring-offset-white" : ""
-      } ${active ? (isImage ? "ring-purple-400" : "ring-pink-400") : ""}`}
+      } ${active ? (isImage ? "ring-moss-500" : "ring-pink-400") : ""}`}
     >
       <div
-        className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white ${handleColor}`}
+        className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-cream-50 ${handleColor}`}
       >
         {label}
       </div>
@@ -2766,7 +2766,7 @@ function DefineRect({
             e.stopPropagation();
             onRemove();
           }}
-          className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-white text-[13px] font-black leading-none text-rose-500 shadow ring-1 ring-rose-200 hover:bg-rose-50"
+          className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-cream-50 text-[13px] font-black leading-none text-rose-500 shadow ring-1 ring-rose-200 hover:bg-rose-50"
           title="Remove box"
         >
           &times;
@@ -2872,11 +2872,11 @@ function DefineLayoutForm({
 }: DefineLayoutFormProps) {
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl border-2 border-purple-200 bg-purple-50/60 px-3 py-3">
-        <div className="text-[11px] font-black uppercase tracking-wider text-purple-500">
+      <div className="rounded-2xl border-2 border-cream-300 bg-cream-100/60 px-3 py-3">
+        <div className="text-[11px] font-black uppercase tracking-wider text-ink-500">
           Design mode
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-purple-400">
+        <p className="mt-1 text-[11px] leading-snug text-ink-300">
           Drag the purple (image) and pink (text) boxes on the canvas. Click
           a box and press &times; to remove. Add more below.
         </p>
@@ -2886,27 +2886,27 @@ function DefineLayoutForm({
         <button
           type="button"
           onClick={onAddImage}
-          className="flex w-full items-center justify-between rounded-xl border-2 border-purple-200 bg-white px-3 py-2 text-[11px] font-black uppercase text-purple-600 transition-all hover:border-purple-400 hover:bg-purple-50"
+          className="flex w-full items-center justify-between rounded-xl border-2 border-cream-300 bg-cream-50 px-3 py-2 text-[11px] font-black uppercase text-moss-700 transition-all hover:border-moss-500 hover:bg-cream-200"
         >
           <span>+ Image box</span>
-          <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] text-purple-500">
+          <span className="rounded-full bg-moss-100 px-1.5 py-0.5 text-[10px] text-ink-500">
             {imageCount}
           </span>
         </button>
         <button
           type="button"
           onClick={onAddText}
-          className="flex w-full items-center justify-between rounded-xl border-2 border-pink-200 bg-white px-3 py-2 text-[11px] font-black uppercase text-pink-600 transition-all hover:border-pink-400 hover:bg-pink-50"
+          className="flex w-full items-center justify-between rounded-xl border-2 border-pink-200 bg-cream-50 px-3 py-2 text-[11px] font-black uppercase text-pink-600 transition-all hover:border-pink-400 hover:bg-cream-200"
         >
           <span>+ Text box</span>
-          <span className="rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] text-pink-500">
+          <span className="rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] text-moss-700">
             {textCount}
           </span>
         </button>
       </div>
 
       <label className="block">
-        <span className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+        <span className="text-[10px] font-black uppercase tracking-wider text-ink-300">
           Name
         </span>
         <input
@@ -2915,37 +2915,37 @@ function DefineLayoutForm({
           onChange={(e) => onNameChange(e.target.value)}
           placeholder="My layout"
           maxLength={60}
-          className="mt-1 w-full rounded-xl border-2 border-purple-200 bg-white px-2.5 py-1.5 text-sm font-bold text-purple-700 outline-none focus:border-purple-400"
+          className="mt-1 w-full rounded-xl border-2 border-cream-300 bg-cream-50 px-2.5 py-1.5 text-sm font-bold text-ink-900 outline-none focus:border-moss-500"
         />
       </label>
 
       <fieldset className="space-y-1.5">
-        <legend className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+        <legend className="text-[10px] font-black uppercase tracking-wider text-ink-300">
           Save for
         </legend>
-        <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-purple-100 bg-white px-2.5 py-2 hover:border-purple-300">
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-cream-300 bg-cream-50 px-2.5 py-2 hover:border-cream-400">
           <input
             type="radio"
             name="layout-scope"
             value="story"
             checked={scope === "story"}
             onChange={() => onScopeChange("story")}
-            className="accent-purple-500"
+            className="accent-moss-700"
           />
-          <span className="text-xs font-bold text-purple-600">
+          <span className="text-xs font-bold text-moss-700">
             Just this book
           </span>
         </label>
-        <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-purple-100 bg-white px-2.5 py-2 hover:border-purple-300">
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border-2 border-cream-300 bg-cream-50 px-2.5 py-2 hover:border-cream-400">
           <input
             type="radio"
             name="layout-scope"
             value="global"
             checked={scope === "global"}
             onChange={() => onScopeChange("global")}
-            className="accent-purple-500"
+            className="accent-moss-700"
           />
-          <span className="text-xs font-bold text-purple-600">
+          <span className="text-xs font-bold text-moss-700">
             All my books
           </span>
         </label>
@@ -2962,7 +2962,7 @@ function DefineLayoutForm({
           type="button"
           onClick={onSave}
           disabled={pending}
-          className="rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 px-3 py-2 text-xs font-black text-white shadow-md shadow-purple-200 transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+          className="rounded-2xl bg-gradient-to-r from-moss-700 to-moss-700 px-3 py-2 text-xs font-black text-cream-50 shadow-md shadow-cream-300 transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
         >
           {pending ? "Saving..." : "Save layout"}
         </button>
@@ -2970,7 +2970,7 @@ function DefineLayoutForm({
           type="button"
           onClick={onCancel}
           disabled={pending}
-          className="rounded-2xl border-2 border-purple-200 bg-white px-3 py-2 text-xs font-black text-purple-500 transition-all hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-2xl border-2 border-cream-300 bg-cream-50 px-3 py-2 text-xs font-black text-ink-500 transition-all hover:bg-cream-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Cancel
         </button>

@@ -64,15 +64,15 @@ export default function AIAssistantPreview({
       onClick={onDiscard}
     >
       <div
-        className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+        className="flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-cream-50 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center justify-between border-b border-purple-100 px-6 py-4">
+        <header className="flex items-center justify-between border-b border-cream-300 px-6 py-4">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-wider text-purple-400">
+            <p className="text-[10px] font-black uppercase tracking-wider text-ink-300">
               AI preview · page {pending.page.pageNumber}
             </p>
-            <h2 className="font-[family-name:var(--font-display)] text-xl font-bold text-purple-700">
+            <h2 className="font-[family-name:var(--font-display)] text-xl font-bold text-ink-900">
               {pending.kind === "text" && "Proposed text change"}
               {pending.kind === "image" && "Proposed illustration change"}
               {pending.kind === "both" && "Proposed text + illustration change"}
@@ -82,7 +82,7 @@ export default function AIAssistantPreview({
             type="button"
             onClick={onDiscard}
             aria-label="Close preview"
-            className="rounded-full bg-purple-50 px-3 py-1 text-sm font-black text-purple-400 hover:bg-purple-100"
+            className="rounded-full bg-cream-200 px-3 py-1 text-sm font-black text-ink-300 hover:bg-moss-100"
           >
             ✕
           </button>
@@ -94,8 +94,8 @@ export default function AIAssistantPreview({
           {pending.kind === "both" && <BothDiffBody pending={pending} />}
         </div>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-purple-100 bg-purple-50/40 px-6 py-4">
-          <p className="text-[11px] font-bold text-purple-400">
+        <footer className="flex items-center justify-between gap-3 border-t border-cream-300 bg-cream-200/40 px-6 py-4">
+          <p className="text-[11px] font-bold text-ink-300">
             Apply updates this page locally. Hit &quot;Save page&quot; in the
             studio to persist.
           </p>
@@ -103,14 +103,14 @@ export default function AIAssistantPreview({
             <button
               type="button"
               onClick={onDiscard}
-              className="rounded-2xl bg-purple-100 px-5 py-2 text-sm font-black uppercase text-purple-500 transition-all hover:bg-purple-200"
+              className="rounded-2xl bg-moss-100 px-5 py-2 text-sm font-black uppercase text-ink-500 transition-all hover:bg-cream-300"
             >
               Discard
             </button>
             <button
               type="button"
               onClick={onApply}
-              className="rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 py-2 text-sm font-black uppercase text-white shadow-md transition-all hover:scale-105"
+              className="rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 py-2 text-sm font-black uppercase text-cream-50 shadow-md transition-all hover:scale-105"
             >
               Apply
             </button>
@@ -159,14 +159,14 @@ function TextDiffBody({ pending }: { pending: PendingText }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-[11px] font-bold text-purple-400">
+      <div className="flex items-center gap-3 text-[11px] font-bold text-ink-300">
         <span className="rounded bg-rose-100 px-2 py-0.5 text-rose-600">
           −{removed} removed
         </span>
         <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-600">
           +{added} added
         </span>
-        <span className="text-purple-300">{unchanged} unchanged</span>
+        <span className="text-ink-300">{unchanged} unchanged</span>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
@@ -232,7 +232,7 @@ function ImageDiffBody({ pending }: { pending: PendingImage }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 text-[11px] font-bold text-purple-400">
+      <div className="flex items-center gap-3 text-[11px] font-bold text-ink-300">
         <span className="rounded bg-rose-100 px-2 py-0.5 text-rose-600">
           Red = leaving
         </span>
@@ -240,7 +240,7 @@ function ImageDiffBody({ pending }: { pending: PendingImage }) {
           Green = new
         </span>
         {status === "ok" && changedPct != null && (
-          <span className="text-purple-300">
+          <span className="text-ink-300">
             ~{changedPct}% of image pixels changed
           </span>
         )}
@@ -296,7 +296,7 @@ function BothDiffBody({ pending }: { pending: PendingBoth }) {
     <div className="space-y-8">
       {textOk && (
         <section className="space-y-3">
-          <h3 className="text-[11px] font-black uppercase tracking-wider text-purple-400">
+          <h3 className="text-[11px] font-black uppercase tracking-wider text-ink-300">
             Text change
           </h3>
           <TextDiffBody
@@ -311,7 +311,7 @@ function BothDiffBody({ pending }: { pending: PendingBoth }) {
       )}
       {imageOk && (
         <section className="space-y-3">
-          <h3 className="text-[11px] font-black uppercase tracking-wider text-purple-400">
+          <h3 className="text-[11px] font-black uppercase tracking-wider text-ink-300">
             Illustration change
           </h3>
           <ImageDiffBody
@@ -374,7 +374,7 @@ function PagePanel({
         </span>
       </div>
       <div
-        className={`relative aspect-square w-full overflow-hidden rounded-2xl border-4 bg-gradient-to-br from-purple-50 to-pink-50 shadow-lg ${borderCls}`}
+        className={`relative aspect-square w-full overflow-hidden rounded-2xl border-4 bg-gradient-to-br from-cream-100 to-cream-200 shadow-lg ${borderCls}`}
       >
         {layers.map((layer) => {
           if (
