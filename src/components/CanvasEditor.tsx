@@ -22,6 +22,7 @@ import {
   resolveDisplayLayers,
 } from "@/lib/layouts";
 import { useAutoFitFontSize } from "./useAutoFitFontSize";
+import { useUndoableHistory } from "./useUndoableHistory";
 import ShapeRenderer from "./ShapeRenderer";
 import { ICONS, ICON_CATEGORIES, getIcon } from "@/lib/shapeIcons";
 import AIAssistantPanel from "./AIAssistantPanel";
@@ -268,6 +269,40 @@ export default function CanvasEditor({
   pet = null,
 }: CanvasEditorProps) {
   const [story, setStory] = useState<Story>(initialStory);
+
+  // Undo / redo history of the story.pages slice. The hook only stores
+  // snapshots — the live story state is still useState above. Snapshots
+  // are captured on user-action boundaries (drag-start, atomic
+  // mutations, edit-start) so a single undo step rolls back one
+  // logical action regardless of how many state updates it triggered.
+  const history = useUndoableHistory();
+  const snapshotPages = useCallback(() => {
+    history.snapshot(story.pages);
+  }, [history, story.pages]);
+  const handleUndo = useCallback(() => {
+    const restored = history.undo(story.pages);
+    if (!restored) return;
+    setStory((s) => ({ ...s, pages: restored }));
+    setSelectedId(null);
+    setEditingTextId(null);
+    setDirty((d) => {
+      const next = { ...d };
+      for (const p of restored) next[p.pageNumber] = true;
+      return next;
+    });
+  }, [history, story.pages]);
+  const handleRedo = useCallback(() => {
+    const restored = history.redo(story.pages);
+    if (!restored) return;
+    setStory((s) => ({ ...s, pages: restored }));
+    setSelectedId(null);
+    setEditingTextId(null);
+    setDirty((d) => {
+      const next = { ...d };
+      for (const p of restored) next[p.pageNumber] = true;
+      return next;
+    });
+  }, [history, story.pages]);
   // Built-in layouts are filtered by mode: memorial-only layouts only
   // show when the story's pet is in memorial mode. Custom layouts are
   // never filtered (user can always reuse their own presets).
@@ -398,10 +433,11 @@ export default function CanvasEditor({
   const addLayer = useCallback(
     (layer: Layer) => {
       if (!currentPage) return;
+      snapshotPages();
       updatePageLayers(currentPage.pageNumber, (ls) => [...ls, layer]);
       setSelectedId(layer.id);
     },
-    [currentPage, updatePageLayers]
+    [currentPage, updatePageLayers, snapshotPages]
   );
 
   const updateLayer = useCallback(
@@ -417,12 +453,13 @@ export default function CanvasEditor({
   const deleteLayer = useCallback(
     (id: string) => {
       if (!currentPage) return;
+      snapshotPages();
       updatePageLayers(currentPage.pageNumber, (ls) =>
         ls.filter((l) => l.id !== id)
       );
       if (selectedId === id) setSelectedId(null);
     },
-    [currentPage, selectedId, updatePageLayers]
+    [currentPage, selectedId, updatePageLayers, snapshotPages]
   );
 
   // Apply an AI-regenerated text to the current page: update both page.text
@@ -432,6 +469,7 @@ export default function CanvasEditor({
   const applyAssistantText = useCallback(
     (newText: string) => {
       if (!currentPage) return;
+      snapshotPages();
       updatePage(currentPage.pageNumber, (p) => ({
         ...p,
         text: newText,
@@ -440,7 +478,7 @@ export default function CanvasEditor({
         ),
       }));
     },
-    [currentPage, updatePage]
+    [currentPage, updatePage, snapshotPages]
   );
 
   // Apply an AI-regenerated image URL: update page.imageUrl (for the reader)
@@ -448,6 +486,7 @@ export default function CanvasEditor({
   const applyAssistantImage = useCallback(
     (newImageUrl: string) => {
       if (!currentPage) return;
+      snapshotPages();
       updatePage(currentPage.pageNumber, (p) => ({
         ...p,
         imageUrl: newImageUrl,
@@ -458,7 +497,7 @@ export default function CanvasEditor({
         ),
       }));
     },
-    [currentPage, updatePage]
+    [currentPage, updatePage, snapshotPages]
   );
 
   const onStoryPromptSaved = useCallback((newPrompt: string | null) => {
@@ -468,6 +507,7 @@ export default function CanvasEditor({
   const applyLayout = useCallback(
     (layoutId: string, scope: "all" | "page" = layoutScope) => {
       if (!currentPage) return;
+      snapshotPages();
       const layout = getLayout(layoutId, customLayouts);
       const targetPageNumber = currentPage.pageNumber;
       setStory((prev) => ({
@@ -491,7 +531,7 @@ export default function CanvasEditor({
         return next;
       });
     },
-    [currentPage, customLayouts, story.pages, layoutScope]
+    [currentPage, customLayouts, story.pages, layoutScope, snapshotPages]
   );
 
   // ---- Custom layout definition -------------------------------------------
@@ -654,26 +694,42 @@ export default function CanvasEditor({
   ]);
 
   // Delete key removes selected (when not editing text inline).
+  // Cmd/Ctrl+Z = undo, Cmd/Ctrl+Shift+Z (or Cmd+Y) = redo.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Undo / redo. Skip when the focus is in an input/textarea so
+      // browser-native undo (e.g. typing rollback) keeps working.
+      const target = e.target as HTMLElement | null;
+      const inField =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && (e.key === "z" || e.key === "Z")) {
+        if (inField) return;
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+        return;
+      }
+      if (meta && (e.key === "y" || e.key === "Y")) {
+        if (inField) return;
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
       if (editingTextId) return;
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
-        const target = e.target as HTMLElement | null;
-        if (
-          target &&
-          (target.tagName === "INPUT" ||
-            target.tagName === "TEXTAREA" ||
-            target.isContentEditable)
-        ) {
-          return;
-        }
+        if (inField) return;
         e.preventDefault();
         deleteLayer(selectedId);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, deleteLayer, editingTextId]);
+  }, [selectedId, deleteLayer, editingTextId, handleUndo, handleRedo]);
 
   // ---- Drag / resize / rotate ---------------------------------------------
 
@@ -686,6 +742,8 @@ export default function CanvasEditor({
   function startMove(e: React.PointerEvent, layer: Layer) {
     e.stopPropagation();
     setSelectedId(layer.id);
+    // Snapshot pre-drag state so the entire drag is one undo step.
+    snapshotPages();
     setDrag({
       kind: "move",
       layerId: layer.id,
@@ -703,6 +761,7 @@ export default function CanvasEditor({
     edge: ResizeEdge
   ) {
     e.stopPropagation();
+    snapshotPages();
     setDrag({
       kind: "resize",
       edge,
@@ -719,6 +778,7 @@ export default function CanvasEditor({
 
   function startRotate(e: React.PointerEvent, layer: Layer) {
     e.stopPropagation();
+    snapshotPages();
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const scale = CANVAS_SIZE / rect.width;
@@ -1096,6 +1156,28 @@ export default function CanvasEditor({
                 : `${dirtyPageCount} pages unsaved`}
             </span>
           )}
+          <div className="flex items-center gap-1 rounded-full border border-cream-300 bg-cream-50 p-1">
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={!history.canUndo}
+              title="Undo (⌘Z)"
+              aria-label="Undo"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-700 transition-colors hover:bg-cream-200 disabled:cursor-not-allowed disabled:text-ink-300 disabled:hover:bg-transparent"
+            >
+              <UndoIcon />
+            </button>
+            <button
+              type="button"
+              onClick={handleRedo}
+              disabled={!history.canRedo}
+              title="Redo (⌘⇧Z)"
+              aria-label="Redo"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-700 transition-colors hover:bg-cream-200 disabled:cursor-not-allowed disabled:text-ink-300 disabled:hover:bg-transparent"
+            >
+              <RedoIcon />
+            </button>
+          </div>
           <button
             type="button"
             onClick={savePage}
@@ -1380,7 +1462,12 @@ export default function CanvasEditor({
                   onStartResize={(e, edge) => startResize(e, layer, edge)}
                   onStartRotate={(e) => startRotate(e, layer)}
                   onChangeText={(text) => updateLayer(layer.id, { text })}
-                  onDoubleClickText={() => setEditingTextId(layer.id)}
+                  onDoubleClickText={() => {
+                    // Snapshot once at edit start so the whole typing
+                    // session is a single undo step.
+                    snapshotPages();
+                    setEditingTextId(layer.id);
+                  }}
                   onBlurText={() => setEditingTextId(null)}
                   onImageDrop={(src) => updateLayer(layer.id, { src })}
                   onChooseImage={() => setPickingLayerId(layer.id)}
@@ -1499,6 +1586,45 @@ export default function CanvasEditor({
 }
 
 // ---------------------------------------------------------------------------
+// Inline icons used by the studio header for undo / redo.
+function UndoIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 7v6h6" />
+      <path d="M21 17a8 8 0 0 0-15-3l-3 3" />
+    </svg>
+  );
+}
+
+function RedoIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 7v6h-6" />
+      <path d="M3 17a8 8 0 0 1 15-3l3 3" />
+    </svg>
+  );
+}
+
 // Inline icons used by the image upload + drop zones. Stroke-only,
 // matches the rest of the redesigned site visual language.
 function ImageDropIcon({ size = 20 }: { size?: number }) {
