@@ -658,15 +658,23 @@ export async function classifyAssistIntent(
   const textPart = {
     text: `${buildAssistantPreamble(args.systemPrompt)}You are classifying a user's edit instruction for one page of a children's storybook. Each page has TEXT (narration) and an IMAGE (illustration).
 
-DEFAULT OUTPUT: ["text","image"] (both).
+STRONG DEFAULT: ["text","image"] (both). Pick this unless there's an obvious, narrowly-scoped reason not to. The user is editing a keepsake — predictability and visual continuity matter more than saving a few API calls.
 
-Only downgrade to a single target when the instruction is UNAMBIGUOUSLY scoped:
+You may downgrade to ["text"] ONLY when the instruction is a tiny, mechanical rewording with literally zero implications for the picture. Examples that qualify:
+  - "rewrite this rhyming"
+  - "make this shorter / longer"
+  - "use simpler words"
+  - "change the tense to past"
+If the new wording could plausibly imply ANY visual change (different mood, different color hint, different action, new character detail), keep ["text","image"].
 
-- ["text"] — the request is clearly a wording / tone / length / rhythm / vocabulary / voice rewrite with zero visual implication. Examples: "make it rhyme", "shorter", "more suspenseful", "use simpler words". If the request could ALSO affect the illustration in any way, do NOT downgrade.
+You may downgrade to ["image"] ONLY when the instruction is a pure visual styling tweak that doesn't describe anything the narration mentions. Examples that qualify:
+  - "warmer color palette"
+  - "add more texture"
+  - "softer lighting"
+  - "less blur"
+If the request mentions a character, an action, an object, the setting, the time of day, the weather, or a mood, keep ["text","image"].
 
-- ["image"] — the request is clearly a pure visual tweak that could not plausibly require rewording. Examples: "change the color palette to warmer tones", "add more texture", "make the lighting softer", "less blur". If the request introduces, removes, or changes anything the narration describes (characters, actions, setting, mood, time, weather), do NOT downgrade.
-
-Anything involving a character (name, species, role, appearance change like "Timmy is a cow"), a setting change, a new action, or a plot beat ALWAYS stays as ["text","image"]. Err on the side of ["text","image"] whenever unsure.
+Anything else — character changes (name, species, appearance), setting changes, action changes, plot beats, new objects, new characters, mood shifts, time/weather, "make it more X" where X is anything other than a pure typography concept — STAYS ["text","image"]. When in genuine doubt, ["text","image"] always wins.
 
 Use the full book context — a character may appear in other pages even if this specific page's text is generic.
 

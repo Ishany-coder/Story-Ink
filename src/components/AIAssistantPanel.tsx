@@ -227,6 +227,77 @@ export default function AIAssistantPanel({
     }
   }
 
+  // Triggered from the diff modal's "Also regenerate the [other]"
+  // banner when the classifier picked just one side. Runs an explicit
+  // single-side generation with the same userPrompt and merges the
+  // result into the existing pending so the modal upgrades to a
+  // "both" diff in place — no second modal, no lost work.
+  async function alsoRegenerate(missing: "text" | "image") {
+    if (!pending) return;
+    const trimmed = userPrompt.trim();
+    if (!trimmed) return;
+    setBusy(missing);
+    setError(null);
+
+    // Save the side the user already approved so we can merge after.
+    const existing =
+      pending.kind === "text"
+        ? { newText: pending.newText, newImageUrl: undefined as string | undefined }
+        : pending.kind === "image"
+        ? { newText: undefined as string | undefined, newImageUrl: pending.newImageUrl }
+        : { newText: pending.newText, newImageUrl: pending.newImageUrl };
+
+    try {
+      const res = await fetch(
+        `/api/stories/${storyId}/pages/${currentPage.pageNumber}/ai/infer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: trimmed,
+            globalSystemPrompt: globalPrompt || null,
+            targets: [missing],
+          }),
+        }
+      );
+      if (!res.ok && res.status !== 202) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error || "Couldn't enqueue generation");
+      }
+      const { jobId } = (await res.json()) as { jobId: string };
+      const payload = await waitForJob<{
+        targets: ("text" | "image")[];
+        text: string | null;
+        imageUrl: string | null;
+      }>(jobId);
+
+      setPending({
+        kind: "both",
+        page: currentPage,
+        newText:
+          missing === "text"
+            ? payload.text ?? undefined
+            : existing.newText,
+        newImageUrl:
+          missing === "image"
+            ? payload.imageUrl ?? undefined
+            : existing.newImageUrl,
+      });
+      setInferredTargets((prev) => {
+        if (!prev) return ["text", "image"];
+        return prev.includes(missing) ? prev : [...prev, missing];
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Couldn't reach the assistant."
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   function applyPending() {
     if (!pending) return;
     if (pending.kind === "text") onApplyText(pending.newText);
@@ -374,6 +445,8 @@ export default function AIAssistantPanel({
         pending={pending}
         onApply={applyPending}
         onDiscard={discardPending}
+        onAlsoRegenerate={alsoRegenerate}
+        isExtending={busy === "text" || busy === "image"}
       />
     </div>
   );

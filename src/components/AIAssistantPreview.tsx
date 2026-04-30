@@ -40,12 +40,23 @@ interface Props {
   pending: Pending | null;
   onApply: () => void;
   onDiscard: () => void;
+  // Triggered when the user clicks "Also regenerate the [other side]"
+  // from inside the modal. The panel runs an explicit text-only or
+  // image-only generation with the same user prompt and merges the
+  // result into the existing pending so the modal upgrades to a
+  // "both" diff in place.
+  onAlsoRegenerate?: (mode: "text" | "image") => void;
+  // True while the panel is fetching the other side. Disables the
+  // button and shows a spinner so the user can't queue duplicates.
+  isExtending?: boolean;
 }
 
 export default function AIAssistantPreview({
   pending,
   onApply,
   onDiscard,
+  onAlsoRegenerate,
+  isExtending = false,
 }: Props) {
   useEffect(() => {
     if (!pending) return;
@@ -92,6 +103,24 @@ export default function AIAssistantPreview({
           {pending.kind === "text" && <TextDiffBody pending={pending} />}
           {pending.kind === "image" && <ImageDiffBody pending={pending} />}
           {pending.kind === "both" && <BothDiffBody pending={pending} />}
+
+          {/* Single-side regen → offer to also regenerate the other side
+              with the same user prompt. The panel handles the merge so
+              the modal upgrades in place to a "both" diff. */}
+          {onAlsoRegenerate && pending.kind === "text" && (
+            <ExtendBanner
+              kind="image"
+              onRun={() => onAlsoRegenerate("image")}
+              loading={isExtending}
+            />
+          )}
+          {onAlsoRegenerate && pending.kind === "image" && (
+            <ExtendBanner
+              kind="text"
+              onRun={() => onAlsoRegenerate("text")}
+              loading={isExtending}
+            />
+          )}
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-cream-300 bg-cream-200/40 px-6 py-4">
@@ -590,6 +619,50 @@ function MaskedImageLayer({
         )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ExtendBanner — shown inside the diff modal when only one side was
+// regenerated. The classifier sometimes downgrades to "text" (or
+// "image") only; this affordance lets the user one-click also
+// regenerate the missing side with the SAME user prompt. The panel
+// merges the result into a single "both" pending so the user reviews
+// and applies in one shot rather than running two separate flows.
+// ---------------------------------------------------------------------------
+
+function ExtendBanner({
+  kind,
+  onRun,
+  loading,
+}: {
+  kind: "text" | "image";
+  onRun: () => void;
+  loading: boolean;
+}) {
+  const label =
+    kind === "image" ? "Also regenerate the illustration" : "Also rewrite the text";
+  const explainer =
+    kind === "image"
+      ? "The illustration above is unchanged. Want the AI to update it with the same instruction?"
+      : "The narration above is unchanged. Want the AI to rewrite it with the same instruction?";
+  return (
+    <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cream-300 bg-cream-100/60 px-5 py-4">
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-wider text-ink-300">
+          One side only
+        </p>
+        <p className="mt-0.5 text-sm text-ink-700">{explainer}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={loading}
+        className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {loading ? "Working…" : label}
+      </button>
+    </section>
   );
 }
 
