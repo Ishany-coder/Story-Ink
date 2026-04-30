@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   PET_SPECIES,
@@ -9,7 +9,7 @@ import {
   type PetQuirk,
   type PetSpecies,
 } from "@/lib/types";
-import { QUIRK_BANK, QUIRK_CATEGORIES } from "@/lib/quirk-bank";
+import { QUIRK_BANK } from "@/lib/quirk-bank";
 
 const MAX_PHOTOS = 10;
 
@@ -37,33 +37,62 @@ export default function PetForm({ initial = null }: Props) {
   const [dedication, setDedication] = useState(initial?.dedication_text ?? "");
   const [isPublic, setIsPublic] = useState(initial?.is_public ?? false);
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
-  // Quirk answers stored as a Map<id, answer> for O(1) updates. We
-  // serialize back to an array of {id, answer} on submit, dropping
-  // empty answers so we don't persist filler.
-  const [quirkAnswers, setQuirkAnswers] = useState<Record<string, string>>(
-    () => {
-      const seed: Record<string, string> = {};
-      for (const q of initial?.quirks ?? []) seed[q.id] = q.answer;
-      return seed;
-    }
-  );
+  // Quirk rows. Default 5 from QUIRK_BANK pre-populated with empty
+  // answers; the user fills any subset. Editing a pet seeds with their
+  // saved quirks first, then appends any unfilled bank rows so the
+  // user can keep adding to existing pets without losing context.
+  //
+  // Custom rows have an editable prompt field. Bank rows have their
+  // prompt locked but still saved verbatim — that way changing the
+  // bank's wording later doesn't invalidate persisted answers.
+  interface QuirkRow {
+    prompt: string;
+    answer: string;
+    // True when the prompt was supplied by the bank (locked); false
+    // when the user added it themselves via "+ Add custom quirk."
+    fromBank: boolean;
+  }
+
+  const [quirkRows, setQuirkRows] = useState<QuirkRow[]>(() => {
+    const saved: QuirkRow[] = (initial?.quirks ?? []).map((q) => ({
+      prompt: q.prompt,
+      answer: q.answer,
+      // Treat any saved row whose prompt matches the current bank as
+      // a "bank" row (prompt locked); user-edited prompts become
+      // custom rows.
+      fromBank: QUIRK_BANK.some((b) => b.prompt === q.prompt),
+    }));
+    const usedPrompts = new Set(saved.map((r) => r.prompt));
+    const banked: QuirkRow[] = QUIRK_BANK.filter(
+      (b) => !usedPrompts.has(b.prompt)
+    ).map((b) => ({
+      prompt: b.prompt,
+      answer: "",
+      fromBank: true,
+    }));
+    return [...saved, ...banked];
+  });
 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Group quirks by category for the form UI.
-  const groupedQuirks = useMemo(() => {
-    const out: Record<string, typeof QUIRK_BANK> = {};
-    for (const q of QUIRK_BANK) {
-      (out[q.category] ??= []).push(q);
-    }
-    return out;
-  }, []);
+  const filledQuirkCount = quirkRows.filter((r) => r.answer.trim()).length;
 
-  const filledQuirkCount = Object.values(quirkAnswers).filter((a) =>
-    a.trim()
-  ).length;
+  function updateQuirk(idx: number, patch: Partial<QuirkRow>) {
+    setQuirkRows((prev) =>
+      prev.map((r, i) => (i === idx ? { ...r, ...patch } : r))
+    );
+  }
+  function addCustomQuirk() {
+    setQuirkRows((prev) => [
+      ...prev,
+      { prompt: "", answer: "", fromBank: false },
+    ]);
+  }
+  function removeCustomQuirk(idx: number) {
+    setQuirkRows((prev) => prev.filter((_, i) => i !== idx));
+  }
 
   async function uploadPhoto(file: File): Promise<string> {
     const fd = new FormData();
@@ -115,9 +144,9 @@ export default function PetForm({ initial = null }: Props) {
     setPending(true);
     setError(null);
 
-    const quirks: PetQuirk[] = Object.entries(quirkAnswers)
-      .map(([id, answer]) => ({ id, answer: answer.trim() }))
-      .filter((q) => q.answer.length > 0);
+    const quirks: PetQuirk[] = quirkRows
+      .map((r) => ({ prompt: r.prompt.trim(), answer: r.answer.trim() }))
+      .filter((q) => q.prompt.length > 0 && q.answer.length > 0);
 
     const body = {
       name: name.trim(),
@@ -248,14 +277,15 @@ export default function PetForm({ initial = null }: Props) {
       </Field>
 
       <section className="rounded-2xl border border-cream-300 bg-cream-50 p-5">
-        <div className="mb-3 flex items-baseline justify-between">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
           <div>
             <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
               Personality DNA
             </h2>
             <p className="mt-0.5 text-xs text-ink-500">
-              Specific quirks make stories feel like your pet, not a generic
-              one. Skip whatever doesn&rsquo;t apply.
+              Specific traits make stories feel like your pet. Five
+              questions to start; add your own for the things only your
+              pet does.
             </p>
           </div>
           <span className="text-xs text-ink-300">
@@ -263,40 +293,61 @@ export default function PetForm({ initial = null }: Props) {
           </span>
         </div>
 
-        <div className="space-y-5">
-          {QUIRK_CATEGORIES.map((cat) => {
-            const prompts = groupedQuirks[cat.id] ?? [];
-            if (prompts.length === 0) return null;
-            return (
-              <div key={cat.id}>
-                <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-500">
-                  {cat.label}
+        <div className="space-y-3">
+          {quirkRows.map((row, idx) => (
+            <div key={idx} className="space-y-1">
+              {row.fromBank ? (
+                <label className="block text-xs font-medium text-ink-700">
+                  {row.prompt}
+                </label>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={row.prompt}
+                    onChange={(e) =>
+                      updateQuirk(idx, { prompt: e.target.value })
+                    }
+                    maxLength={200}
+                    placeholder="Your own question (e.g. How does she greet you?)"
+                    className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeCustomQuirk(idx)}
+                    aria-label="Remove this question"
+                    className="shrink-0 rounded-lg border border-cream-300 bg-cream-50 px-2 py-1 text-[10px] font-medium text-ink-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    Remove
+                  </button>
                 </div>
-                <div className="space-y-2">
-                  {prompts.map((p) => (
-                    <div key={p.id}>
-                      <label className="mb-1 block text-xs font-medium text-ink-700">
-                        {p.prompt}
-                      </label>
-                      <input
-                        type="text"
-                        value={quirkAnswers[p.id] ?? ""}
-                        onChange={(e) =>
-                          setQuirkAnswers((prev) => ({
-                            ...prev,
-                            [p.id]: e.target.value,
-                          }))
-                        }
-                        maxLength={400}
-                        placeholder={p.placeholder}
-                        className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-sm text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+              )}
+              <input
+                type="text"
+                value={row.answer}
+                onChange={(e) => updateQuirk(idx, { answer: e.target.value })}
+                maxLength={400}
+                placeholder={
+                  row.fromBank
+                    ? QUIRK_BANK.find((b) => b.prompt === row.prompt)
+                        ?.placeholder ?? "Your answer"
+                    : "Your answer"
+                }
+                className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-sm text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
+              />
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addCustomQuirk}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream-400 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-500 transition-colors hover:border-moss-500 hover:text-ink-900"
+          >
+            <span aria-hidden="true" className="text-base leading-none">
+              +
+            </span>
+            Add a custom question
+          </button>
         </div>
       </section>
 

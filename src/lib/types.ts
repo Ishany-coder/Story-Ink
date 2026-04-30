@@ -162,14 +162,13 @@ export const PET_SPECIES: PetSpecies[] = [
 // fan-fiction (per the user's spec).
 export type PetMode = "living" | "memorial";
 
-// One answered quirk from the curated bank. The bank lives in
-// src/lib/quirk-bank.ts so it can grow without touching schema.
+// One answered personality-DNA quirk. Stored as a question + answer
+// pair so users can pick from the curated bank in src/lib/quirk-bank.ts
+// OR write their own prompt (the "+ Add custom" path in the form).
+// The AI doesn't care which source produced the prompt — both render
+// the same way in the pet system prompt.
 export interface PetQuirk {
-  // Short id from the bank (e.g. "head-tilt"). Stable across deploys
-  // so we can refresh the prompt copy without invalidating user data.
-  id: string;
-  // The user's answer. Free-form so it can be a single word
-  // ("yes"), a phrase ("only when she's confused"), or a sentence.
+  prompt: string;
   answer: string;
 }
 

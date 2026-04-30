@@ -3,7 +3,6 @@
 // only need to touch the system prompt builder, not the call sites.
 
 import type { Pet } from "@/lib/types";
-import { getQuirkPrompt } from "@/lib/quirk-bank";
 
 // Compact human-readable description of the pet. Used both in the
 // image prompt (so the model knows what to draw when references fail
@@ -33,16 +32,16 @@ export function buildPetStorySystemPrompt(pet: Pet): string {
     lines.push(`Things the user wrote about ${pet.name}: ${pet.personality_notes}`);
   }
 
-  // Structured "DNA" — the user answered specific quirk prompts. We
-  // render them as Q&A so the AI can pull on a single trait per
+  // Structured "DNA" — the user filled in answers to specific
+  // personality questions (some from our curated bank, some custom).
+  // We render them as Q&A so the AI can pull on a single trait per
   // page (head tilt → a moment of confusion, hides socks → the
   // entire plot, scared of the vacuum → the antagonist). Treat
   // these as authoritative character truths, not flavor.
   const quirkLines: string[] = [];
   for (const q of pet.quirks ?? []) {
-    const prompt = getQuirkPrompt(q.id);
-    if (!prompt) continue;
-    quirkLines.push(`  • ${prompt.prompt} — ${q.answer}`);
+    if (!q.prompt?.trim() || !q.answer?.trim()) continue;
+    quirkLines.push(`  • ${q.prompt.trim()} — ${q.answer.trim()}`);
   }
   if (quirkLines.length > 0) {
     lines.push(

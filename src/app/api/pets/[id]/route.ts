@@ -21,11 +21,13 @@ function sanitizeQuirks(v: unknown): PetQuirk[] | null {
   for (const q of v) {
     if (!q || typeof q !== "object") return null;
     const r = q as Record<string, unknown>;
-    if (typeof r.id !== "string" || typeof r.answer !== "string") return null;
-    const id = r.id.trim().slice(0, 64);
+    if (typeof r.prompt !== "string" || typeof r.answer !== "string") {
+      return null;
+    }
+    const prompt = r.prompt.trim().slice(0, 200);
     const answer = r.answer.trim().slice(0, 400);
-    if (!id || !answer) continue;
-    out.push({ id, answer });
+    if (!prompt || !answer) continue;
+    out.push({ prompt, answer });
     if (out.length > MAX_QUIRKS) return null;
   }
   return out;
