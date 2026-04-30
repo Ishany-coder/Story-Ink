@@ -280,30 +280,44 @@ export default function CanvasEditor({
   const snapshotPages = useCallback(() => {
     history.snapshot(story.pages);
   }, [history, story.pages]);
+  // Mark only the pages that actually differ between `current` and
+  // `restored` as dirty. Most actions touch a single page — the
+  // snapshot captures the whole pages array but pages outside the
+  // action keep their previous reference, so a reference compare
+  // tells us exactly which pages need re-saving.
+  const markChangedPagesDirty = useCallback(
+    (current: typeof story.pages, restored: typeof story.pages) => {
+      setDirty((d) => {
+        const next = { ...d };
+        for (let i = 0; i < restored.length; i++) {
+          if (current[i] !== restored[i]) {
+            next[restored[i].pageNumber] = true;
+          }
+        }
+        return next;
+      });
+    },
+    []
+  );
+
   const handleUndo = useCallback(() => {
-    const restored = history.undo(story.pages);
+    const current = story.pages;
+    const restored = history.undo(current);
     if (!restored) return;
     setStory((s) => ({ ...s, pages: restored }));
     setSelectedId(null);
     setEditingTextId(null);
-    setDirty((d) => {
-      const next = { ...d };
-      for (const p of restored) next[p.pageNumber] = true;
-      return next;
-    });
-  }, [history, story.pages]);
+    markChangedPagesDirty(current, restored);
+  }, [history, story.pages, markChangedPagesDirty]);
   const handleRedo = useCallback(() => {
-    const restored = history.redo(story.pages);
+    const current = story.pages;
+    const restored = history.redo(current);
     if (!restored) return;
     setStory((s) => ({ ...s, pages: restored }));
     setSelectedId(null);
     setEditingTextId(null);
-    setDirty((d) => {
-      const next = { ...d };
-      for (const p of restored) next[p.pageNumber] = true;
-      return next;
-    });
-  }, [history, story.pages]);
+    markChangedPagesDirty(current, restored);
+  }, [history, story.pages, markChangedPagesDirty]);
   // Built-in layouts are filtered by mode: memorial-only layouts only
   // show when the story's pet is in memorial mode. Custom layouts are
   // never filtered (user can always reuse their own presets).
