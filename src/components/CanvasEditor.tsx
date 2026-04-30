@@ -293,11 +293,11 @@ export default function CanvasEditor({
   // prepend to the list so they appear immediately in the Layouts tab.
   const [customLayouts, setCustomLayouts] = useState<CustomLayout[]>([]);
 
-  // Does clicking a layout tile apply to the whole book or just the page the
-  // user is looking at? Default "all" preserves the original behavior (books
-  // usually read better with a consistent layout). "page" is a per-session
-  // toggle for one-off exceptions like a title spread or a full-bleed hero.
-  const [layoutScope, setLayoutScope] = useState<"all" | "page">("all");
+  // Does clicking a layout tile apply to the whole book or just the page
+  // the user is looking at? Default is "page" so a layout click can't
+  // accidentally rewrite the entire book — switching to "all" is the
+  // intentional, extra-click action for batch-applying.
+  const [layoutScope, setLayoutScope] = useState<"all" | "page">("page");
 
   // "Define your layout" mode. Non-null while the user is arranging the
   // IMAGE and TEXT rectangles on the canvas. A layout has >=1 image region
@@ -1185,19 +1185,10 @@ export default function CanvasEditor({
                   aria-label="Layout apply scope"
                   className="flex rounded-2xl border-2 border-cream-300 bg-cream-100/60 p-1"
                 >
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={layoutScope === "all"}
-                    onClick={() => setLayoutScope("all")}
-                    className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
-                      layoutScope === "all"
-                        ? "bg-cream-50 text-moss-700 shadow-sm"
-                        : "text-ink-300 hover:text-ink-500"
-                    }`}
-                  >
-                    All pages
-                  </button>
+                  {/* Order matches default: "This page" is the safe
+                      action and ships first; "All pages" is the
+                      deliberate batch operation that requires an
+                      extra click. */}
                   <button
                     type="button"
                     role="radio"
@@ -1210,6 +1201,19 @@ export default function CanvasEditor({
                     }`}
                   >
                     This page
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={layoutScope === "all"}
+                    onClick={() => setLayoutScope("all")}
+                    className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
+                      layoutScope === "all"
+                        ? "bg-cream-50 text-moss-700 shadow-sm"
+                        : "text-ink-300 hover:text-ink-500"
+                    }`}
+                  >
+                    All pages
                   </button>
                 </div>
               </div>
