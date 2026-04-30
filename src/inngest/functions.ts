@@ -22,7 +22,6 @@ import {
   type AssistTarget,
 } from "@/lib/gemini";
 import {
-  supabase,
   supabaseAdmin,
   updateStoryPageFields,
   uploadGeneratedImage,
@@ -63,7 +62,12 @@ function composeSystemPrompt(
 }
 
 async function fetchStoryAndPage(storyId: string, pageNumber: number) {
-  const { data, error } = await supabase
+  // Inngest workers run with no auth session, so the anon client
+  // can't see private stories under the new RLS policies. Use the
+  // service-role admin client — RLS bypassed, but ownership has
+  // already been verified by the route handler that fired the
+  // event (assertOwnsStory in /api/stories/[id]/...).
+  const { data, error } = await supabaseAdmin()
     .from("stories")
     .select("id, title, prompt, pages, ai_system_prompt, image_style")
     .eq("id", storyId)
