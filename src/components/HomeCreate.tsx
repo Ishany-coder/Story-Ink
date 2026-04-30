@@ -252,7 +252,7 @@ function PetPicker({
 }) {
   if (pets.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-2xl border border-cream-300 bg-cream-50 px-6 py-8 text-center">
+      <div className="flex flex-col items-center gap-3 rounded-2xl border border-cream-300 bg-cream-50 px-4 sm:px-6 lg:px-8 py-8 text-center">
         <p className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
           Add a pet to get started
         </p>

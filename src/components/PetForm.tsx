@@ -181,7 +181,7 @@ export default function PetForm({ initial = null }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="animate-rise-in mx-auto max-w-2xl space-y-6 px-6 py-10"
+      className="animate-rise-in mx-auto max-w-2xl space-y-6 px-4 sm:px-6 lg:px-8 py-10"
     >
       <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
         {editing ? `Edit ${initial!.name}` : "Add a pet"}
@@ -417,7 +417,7 @@ export default function PetForm({ initial = null }: Props) {
         <button
           type="submit"
           disabled={pending || uploading}
-          className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:opacity-50"
+          className="rounded-full bg-moss-700 px-4 sm:px-6 lg:px-8 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:opacity-50"
         >
           {pending ? "Saving…" : editing ? "Save changes" : "Add pet"}
         </button>

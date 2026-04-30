@@ -106,7 +106,7 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
           <div className="mt-6">
             <Link
               href={`/read/${storyId}`}
-              className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+              className="rounded-full bg-moss-700 px-4 sm:px-6 lg:px-8 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
             >
               Back to story
             </Link>

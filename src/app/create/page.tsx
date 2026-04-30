@@ -25,7 +25,7 @@ export default async function CreatePage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="animate-rise-in mx-auto flex w-full max-w-3xl flex-col items-center gap-10 px-6 py-12">
+    <div className="animate-rise-in mx-auto flex w-full max-w-3xl flex-col items-center gap-10 px-4 sm:px-6 lg:px-8 py-12">
       <HeroSection />
       <HomeCreate pets={(pets ?? []) as Pet[]} />
     </div>

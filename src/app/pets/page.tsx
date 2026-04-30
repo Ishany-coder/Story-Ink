@@ -25,14 +25,14 @@ export default async function PetsPage() {
 
   if (error) {
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6">
+      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 sm:px-6 lg:px-8">
         <p className="text-sm text-ink-500">Couldn&apos;t load your pets.</p>
       </div>
     );
   }
 
   return (
-    <div className="animate-rise-in mx-auto max-w-5xl px-6 py-12">
+    <div className="animate-rise-in mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-12">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-cream-300 pb-4">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
@@ -52,7 +52,7 @@ export default async function PetsPage() {
       </div>
 
       {(!pets || pets.length === 0) && (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-6 py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 sm:px-6 lg:px-8 py-16 text-center">
           <p className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
             No pets yet.
           </p>
@@ -129,13 +129,13 @@ function PetCard({ pet }: { pet: Pet }) {
 
 function SignedOutEmpty({ title, href }: { title: string; href: string }) {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-6 text-center">
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-5 px-4 sm:px-6 lg:px-8 text-center">
       <p className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
         {title}
       </p>
       <Link
         href={href}
-        className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+        className="rounded-full bg-moss-700 px-4 sm:px-6 lg:px-8 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
       >
         Sign in
       </Link>

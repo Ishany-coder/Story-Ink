@@ -52,7 +52,7 @@ export default async function Home() {
   const dashboardMode = stories.length >= DASHBOARD_THRESHOLD;
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 pb-16 pt-12">
+    <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 pb-16 pt-12">
       {dashboardMode ? (
         <DashboardHeader />
       ) : (
@@ -139,7 +139,7 @@ export default async function Home() {
 // what the product is and wants the library to lead visually.
 function DashboardHeader() {
   return (
-    <div className="animate-rise-in mb-12 flex flex-wrap items-end justify-between gap-4">
+    <div className="animate-rise-in mb-12 flex flex-col items-center gap-4 text-center sm:mb-14 sm:flex-row sm:items-end sm:justify-between sm:text-left">
       <div>
         <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
           The fine art of pet storytelling
@@ -238,7 +238,7 @@ function SectionHeading({
 
 function SignedOutHero() {
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-2xl flex-col items-center justify-center gap-8 px-6 py-16 text-center">
+    <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-2xl flex-col items-center justify-center gap-8 px-4 sm:px-6 lg:px-8 py-16 text-center">
       <HeroSection />
       <Link
         href="/login"

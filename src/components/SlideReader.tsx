@@ -39,7 +39,7 @@ export default function SlideReader({ story }: { story: Story }) {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-gradient-to-b from-cream-200 to-cream-100">
       {/* Header */}
-      <div className="flex items-center justify-between border-b-2 border-dashed border-cream-300 px-6 py-3">
+      <div className="flex items-center justify-between border-b-2 border-dashed border-cream-300 px-4 sm:px-6 lg:px-8 py-3">
         <Link
           href="/read"
           className="flex items-center gap-1.5 text-sm font-bold text-ink-300 transition-colors hover:text-moss-700"
