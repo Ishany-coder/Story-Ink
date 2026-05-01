@@ -44,9 +44,14 @@ export default async function MyOrdersPage() {
 
   const supa = await getSupabaseServer();
 
+  // Hide cancelled orders from the customer view. The row stays in the
+  // database (admin still sees it under the Cancelled filter, audit
+  // trail is preserved) but the customer's tracker only shows live
+  // orders.
   const { data: orders, error } = await supa
     .from("print_orders")
     .select("id, status, amount_usd, created_at, story_id, quantity")
+    .neq("status", "cancelled")
     .order("created_at", { ascending: false })
     .returns<OrderRow[]>();
 

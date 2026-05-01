@@ -8,10 +8,12 @@ import { getCurrentUser } from "@/lib/supabase-server";
 // print_order_events with the actor (admin user id).
 //
 // Allowed transitions (server-enforced):
-//   received    → in_progress | failed
-//   in_progress → shipped     | failed
-//   shipped     → delivered   | failed
-//   failed      → received                (admin can retry)
+//   received    → in_progress | failed | cancelled
+//   in_progress → shipped     | failed | cancelled
+//   shipped     → delivered   | failed | cancelled
+//   failed      → received    | cancelled       (admin can retry or kill)
+//
+// Terminal states: delivered, cancelled. No outbound transitions.
 //
 // Non-admins get a 404 — never 403, so the route's existence isn't
 // leaked to a curious client.
@@ -21,10 +23,10 @@ interface Ctx {
 }
 
 const TRANSITIONS: Record<string, ReadonlyArray<string>> = {
-  received: ["in_progress", "failed"],
-  in_progress: ["shipped", "failed"],
-  shipped: ["delivered", "failed"],
-  failed: ["received"],
+  received: ["in_progress", "failed", "cancelled"],
+  in_progress: ["shipped", "failed", "cancelled"],
+  shipped: ["delivered", "failed", "cancelled"],
+  failed: ["received", "cancelled"],
 };
 
 interface Body {
