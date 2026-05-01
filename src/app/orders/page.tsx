@@ -2,6 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 import { isAdmin } from "@/lib/admin";
+import AdminQuickCancelButton from "@/components/AdminQuickCancelButton";
+
+const CANCELLABLE_STATUSES = new Set([
+  "received",
+  "in_progress",
+  "shipped",
+  "failed",
+]);
 
 export const revalidate = 0;
 
@@ -166,12 +174,17 @@ export default async function OrdersPage({
                       : "—"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
-                    <Link
-                      href={`/orders/${o.id}`}
-                      className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1 text-xs font-medium text-ink-700 hover:border-moss-500 hover:bg-cream-100"
-                    >
-                      View
-                    </Link>
+                    <div className="inline-flex items-center gap-2">
+                      <Link
+                        href={`/orders/${o.id}`}
+                        className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1 text-xs font-medium text-ink-700 hover:border-moss-500 hover:bg-cream-100"
+                      >
+                        View
+                      </Link>
+                      {CANCELLABLE_STATUSES.has(o.status) && (
+                        <AdminQuickCancelButton orderId={o.id} />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
