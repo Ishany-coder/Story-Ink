@@ -27,5 +27,11 @@ export default async function ShipStory({
     notFound();
   }
 
-  return <ShipStoryPage story={story} isAdmin={isAdminUser(user)} />;
+  return (
+    <ShipStoryPage
+      story={story}
+      isAdmin={isAdminUser(user)}
+      bypassStripe={process.env.BYPASS_STRIPE === "1"}
+    />
+  );
 }

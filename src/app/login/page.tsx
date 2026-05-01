@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 // Email + password auth. Single page with a sign-in / sign-up toggle.
@@ -19,7 +19,6 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
 type Mode = "signin" | "signup";
 
 export default function LoginPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/";
 
@@ -68,10 +67,11 @@ export default function LoginPage() {
       }
     }
 
-    // The browser client has written the auth cookie; refresh() makes
-    // server components re-fetch with the new session before push lands.
-    router.refresh();
-    router.push(next);
+    // The browser client has written the auth cookie. Use a hard
+    // navigation (not router.push) so the server reads the new cookie
+    // when rendering the next page — otherwise the navbar etc. flash
+    // signed-out until the next refresh.
+    window.location.assign(next);
   }
 
   function flipMode(to: Mode) {

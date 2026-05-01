@@ -1,15 +1,18 @@
 import Link from "next/link";
 import ShipSuccessConfirm from "@/components/ShipSuccessConfirm";
+import { getCurrentUser } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
 
 export const revalidate = 0;
 
 // Two paths land here:
 //   - Stripe redirect: ?session_id=cs_...   (customer paid; needs confirm)
-//   - Admin bypass:    ?adminOrder=<orderId> (already built; just show)
+//   - Bypass:          ?adminOrder=<orderId> (already built; just show)
 //
 // Customer path posts the Stripe session id to /api/ship/stripe/confirm
-// to verify payment + finalize the order. Admin path skips that since
-// the order was already created synchronously by /api/ship/stripe/checkout.
+// to verify payment + finalize the order. Bypass path skips that since
+// the order was already created synchronously by /api/ship/stripe/checkout
+// (used by the admin account, and by everyone when BYPASS_STRIPE=1).
 
 export default async function ShipSuccess({
   params,
@@ -30,7 +33,14 @@ export default async function ShipSuccess({
   }
 
   if (adminOrderId) {
-    return <AdminOrderConfirm storyId={id} orderId={adminOrderId} />;
+    const user = await getCurrentUser();
+    return (
+      <AdminOrderConfirm
+        storyId={id}
+        orderId={adminOrderId}
+        isAdmin={isAdminUser(user)}
+      />
+    );
   }
 
   return (
@@ -51,15 +61,17 @@ export default async function ShipSuccess({
   );
 }
 
-// Admin-bypass success — order already exists in /orders, no need
-// for the client-side confirm dance. Just show a clean success state
-// with a link straight into the order detail.
+// Bypass success — order already exists, no client-side confirm dance.
+// Admins see the "/orders" link; non-admin test users (BYPASS_STRIPE=1)
+// don't, since they can't access that page.
 function AdminOrderConfirm({
   storyId,
   orderId,
+  isAdmin,
 }: {
   storyId: string;
   orderId: string;
+  isAdmin: boolean;
 }) {
   return (
     <div className="animate-rise-in mx-auto max-w-xl px-4 py-12">
@@ -79,11 +91,12 @@ function AdminOrderConfirm({
           </svg>
         </div>
         <h1 className="mt-4 font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
-          Admin order created
+          {isAdmin ? "Admin order created" : "Order received"}
         </h1>
         <p className="mt-2 text-sm text-ink-500">
-          PDFs built and uploaded. Place the print order on your vendor of
-          choice from /orders.
+          {isAdmin
+            ? "PDFs built and uploaded. Place the print order on your vendor of choice from /orders."
+            : "Your order has been received. We'll email you when yours ships — typically within 3–5 business days."}
         </p>
         <div className="mt-6 space-y-1 rounded-xl bg-cream-100 px-4 py-3 text-left text-xs text-ink-500">
           <div>
@@ -92,12 +105,14 @@ function AdminOrderConfirm({
           </div>
         </div>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <Link
-            href={`/orders/${orderId}`}
-            className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
-          >
-            Open in /orders
-          </Link>
+          {isAdmin && (
+            <Link
+              href={`/orders/${orderId}`}
+              className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+            >
+              Open in /orders
+            </Link>
+          )}
           <Link
             href={`/read/${storyId}`}
             className="rounded-full border border-cream-300 bg-cream-50 px-5 py-2 text-sm font-medium text-ink-700 hover:bg-cream-100"

@@ -11,6 +11,9 @@ interface Props {
   // the same /api/ship/stripe/checkout endpoint which detects admin
   // server-side and routes to the bypass flow.
   isAdmin?: boolean;
+  // Server-determined from BYPASS_STRIPE=1. When set, every user
+  // skips Stripe — same code path as admin. For dev/testing only.
+  bypassStripe?: boolean;
 }
 
 interface AddressState {
@@ -73,7 +76,12 @@ function toPayload(a: AddressState) {
   };
 }
 
-export default function ShipStoryPage({ story, isAdmin = false }: Props) {
+export default function ShipStoryPage({
+  story,
+  isAdmin = false,
+  bypassStripe = false,
+}: Props) {
+  const skipPayment = isAdmin || bypassStripe;
   const [address, setAddress] = useState<AddressState>(emptyAddress());
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoting, setQuoting] = useState(false);
@@ -128,9 +136,9 @@ export default function ShipStoryPage({ story, isAdmin = false }: Props) {
 
   async function startCheckout() {
     if (!addressComplete) return;
-    // Admin path skips the live quote check (server bypasses Stripe),
-    // customer path still requires the quote so the drift guard works.
-    if (!isAdmin && !quote) return;
+    // Bypass path skips the live quote check (server bypasses Stripe),
+    // paid path still requires the quote so the drift guard works.
+    if (!skipPayment && !quote) return;
     setCheckoutPending(true);
     setCheckoutError(null);
     try {
@@ -274,6 +282,11 @@ export default function ShipStoryPage({ story, isAdmin = false }: Props) {
                 <span className="font-mono">/orders</span> with PDFs already
                 built. Fulfill manually from there.
               </p>
+            ) : bypassStripe ? (
+              <p className="mb-3 text-[10px] font-bold text-ink-300">
+                Test mode — Stripe is bypassed. The order is created with no
+                charge.
+              </p>
             ) : (
               <p className="mb-3 text-[10px] font-bold text-ink-300">
                 Stripe handles card entry on their hosted page. We never save
@@ -283,15 +296,17 @@ export default function ShipStoryPage({ story, isAdmin = false }: Props) {
             <button
               type="button"
               onClick={startCheckout}
-              disabled={(!isAdmin && !quote) || !addressComplete || checkoutPending}
+              disabled={(!skipPayment && !quote) || !addressComplete || checkoutPending}
               className="w-full rounded-full bg-moss-700 px-4 py-3 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {checkoutPending
-                ? isAdmin
-                  ? "Creating admin order…"
+                ? skipPayment
+                  ? "Creating order…"
                   : "Redirecting to Stripe…"
                 : isAdmin
                 ? "Place free admin order"
+                : bypassStripe
+                ? "Place test order (no payment)"
                 : "Pay with Stripe"}
             </button>
             {checkoutError && (

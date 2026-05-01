@@ -78,11 +78,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Story not found" }, { status: 404 });
   }
 
-  // Admin bypass: skip Stripe entirely for the admin's own orders.
-  // Server-side check — client can't tamper. Creates the print_orders
-  // row directly in "received" state, builds the PDFs, and returns
-  // a redirect URL the client can navigate to.
-  if (isAdminUser(user)) {
+  // Skip Stripe entirely when (a) the user is the admin or (b) the
+  // dev/testing flag BYPASS_STRIPE=1 is set in the environment.
+  // Either way: insert the print_orders row directly in "received"
+  // state, build the PDFs, and return a redirect URL the client can
+  // navigate to. The flag is server-side only — clients can't tamper.
+  const bypass = isAdminUser(user) || process.env.BYPASS_STRIPE === "1";
+  if (bypass) {
     const adminOrigin =
       process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
       new URL(request.url).origin;
@@ -91,6 +93,7 @@ export async function POST(request: Request) {
         storyId,
         userId: user.id,
         address: body.address,
+        reason: isAdminUser(user) ? "admin" : "bypass_stripe_env",
       });
       // Redirect target uses the same success page as the Stripe path
       // but with adminOrder=<id> instead of session_id=<id>. The
@@ -193,6 +196,7 @@ async function createAdminOrder(args: {
   storyId: string;
   userId: string;
   address: ShippingAddress;
+  reason: "admin" | "bypass_stripe_env";
 }): Promise<string> {
   const admin = supabaseAdmin();
 
@@ -253,7 +257,10 @@ async function createAdminOrder(args: {
     await admin.from("print_order_events").insert({
       order_id: orderId,
       status: "received",
-      note: "Admin order — no payment; PDFs built; awaiting manual fulfillment.",
+      note:
+        args.reason === "admin"
+          ? "Admin order — no payment; PDFs built; awaiting manual fulfillment."
+          : "Test order via BYPASS_STRIPE — no payment; PDFs built.",
       actor_id: args.userId,
     });
   } catch (err) {
