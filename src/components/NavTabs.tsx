@@ -28,9 +28,14 @@ const TABS: Tab[] = [
   },
   { label: "Ship", href: "/ship", matches: (p) => p.startsWith("/ship") },
   {
+    label: "My orders",
+    href: "/my-orders",
+    matches: (p) => p.startsWith("/my-orders"),
+  },
+  {
     label: "Orders",
     href: "/orders",
-    matches: (p) => p.startsWith("/orders"),
+    matches: (p) => p === "/orders" || p.startsWith("/orders/"),
     adminOnly: true,
   },
 ];
