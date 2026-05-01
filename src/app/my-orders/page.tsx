@@ -5,6 +5,10 @@ import { StatusBadge } from "../orders/page";
 import CancelOrderButton from "@/components/CancelOrderButton";
 
 export const revalidate = 0;
+// Force a dynamic render on every request. revalidate=0 alone has been
+// observed to occasionally serve a stale RSC payload after a status
+// change; force-dynamic makes that impossible.
+export const dynamic = "force-dynamic";
 
 // Customer-facing order tracker. Lists every print_orders row for the
 // signed-in user with a small audit timeline so they can see when the
