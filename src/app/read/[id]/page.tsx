@@ -1,4 +1,6 @@
-import { getSupabaseServer } from "@/lib/supabase-server";
+import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
+import { supabaseAdmin } from "@/lib/supabase";
 import { Story } from "@/lib/types";
 import SlideReader from "@/components/SlideReader";
 import Link from "next/link";
@@ -8,6 +10,9 @@ export const revalidate = 0;
 
 // Reading is allowed for public stories without sign-in — RLS shows
 // is_public=true rows to anon. Owners can also read their private rows.
+//
+// Admins bypass RLS via the service-role client so they can preview
+// any customer's storybook before fulfilling a print order.
 export default async function ReadStoryPage({
   params,
 }: {
@@ -15,7 +20,8 @@ export default async function ReadStoryPage({
 }) {
   const { id } = await params;
 
-  const supa = await getSupabaseServer();
+  const user = await getCurrentUser();
+  const supa = isAdminUser(user) ? supabaseAdmin() : await getSupabaseServer();
   const { data, error } = await supa
     .from("stories")
     .select("*")

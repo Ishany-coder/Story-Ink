@@ -5,10 +5,12 @@
 
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
 import NavTabs from "./NavTabs";
 
 export default async function Navbar() {
   const user = await getCurrentUser();
+  const admin = isAdminUser(user);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-cream-300 bg-cream-100/85 backdrop-blur-md">
@@ -22,7 +24,7 @@ export default async function Navbar() {
         </Link>
 
         <div className="flex items-center gap-4">
-          {user ? <NavTabs /> : null}
+          {user ? <NavTabs isAdmin={admin} /> : null}
 
           {user ? (
             <div className="flex items-center gap-3">

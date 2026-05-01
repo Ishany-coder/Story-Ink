@@ -10,25 +10,38 @@ import { usePathname } from "next/navigation";
 // The "+ New story" CTA lives outside this strip — see Navbar.tsx.
 // These tabs are pure browse/destination links.
 
-const TABS: { label: string; href: string; matches: (p: string) => boolean }[] =
-  [
-    { label: "Home", href: "/", matches: (p) => p === "/" },
-    { label: "Pets", href: "/pets", matches: (p) => p.startsWith("/pets") },
-    { label: "Read", href: "/read", matches: (p) => p.startsWith("/read") },
-    {
-      label: "Studio",
-      href: "/canvas",
-      matches: (p) => p.startsWith("/canvas"),
-    },
-    { label: "Ship", href: "/ship", matches: (p) => p.startsWith("/ship") },
-  ];
+interface Tab {
+  label: string;
+  href: string;
+  matches: (p: string) => boolean;
+  adminOnly?: boolean;
+}
 
-export default function NavTabs() {
+const TABS: Tab[] = [
+  { label: "Home", href: "/", matches: (p) => p === "/" },
+  { label: "Pets", href: "/pets", matches: (p) => p.startsWith("/pets") },
+  { label: "Read", href: "/read", matches: (p) => p.startsWith("/read") },
+  {
+    label: "Studio",
+    href: "/canvas",
+    matches: (p) => p.startsWith("/canvas"),
+  },
+  { label: "Ship", href: "/ship", matches: (p) => p.startsWith("/ship") },
+  {
+    label: "Orders",
+    href: "/orders",
+    matches: (p) => p.startsWith("/orders"),
+    adminOnly: true,
+  },
+];
+
+export default function NavTabs({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
+  const visible = TABS.filter((t) => !t.adminOnly || isAdmin);
 
   return (
     <div className="hidden items-center gap-1 sm:flex">
-      {TABS.map((tab) => {
+      {visible.map((tab) => {
         const active = tab.matches(pathname);
         return (
           <Link
