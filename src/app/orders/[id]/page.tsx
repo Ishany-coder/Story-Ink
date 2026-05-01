@@ -22,6 +22,7 @@ interface OrderRow {
   shipping_address: string | null;
   interior_pdf_url: string | null;
   cover_pdf_url: string | null;
+  quantity: number | null;
 }
 
 interface EventRow {
@@ -45,7 +46,7 @@ export default async function OrderDetailPage({
   const { data: order, error } = await admin
     .from("print_orders")
     .select(
-      "id, status, amount_usd, stripe_session_id, created_at, story_id, user_id, shipping_address, interior_pdf_url, cover_pdf_url"
+      "id, status, amount_usd, stripe_session_id, created_at, story_id, user_id, shipping_address, interior_pdf_url, cover_pdf_url, quantity"
     )
     .eq("id", id)
     .maybeSingle<OrderRow>();
@@ -136,8 +137,15 @@ export default async function OrderDetailPage({
                 )}
               </div>
               <div className="flex-1 space-y-1 text-sm">
-                <div className="font-[family-name:var(--font-display)] text-base font-semibold text-ink-900">
-                  {story?.title ?? "—"}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-[family-name:var(--font-display)] text-base font-semibold text-ink-900">
+                    {story?.title ?? "—"}
+                  </span>
+                  {order.quantity && order.quantity > 1 && (
+                    <span className="rounded-full bg-moss-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-moss-700">
+                      × {order.quantity} copies
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-ink-500">
                   {story?.page_count ?? "?"} pages
@@ -283,6 +291,12 @@ export default async function OrderDetailPage({
                 <dt>Created</dt>
                 <dd className="text-right text-ink-700">
                   {new Date(order.created_at).toLocaleString()}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Quantity</dt>
+                <dd className="text-right text-ink-700">
+                  × {order.quantity ?? 1}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import { StatusBadge } from "../orders/page";
+import CancelOrderButton from "@/components/CancelOrderButton";
 
 export const revalidate = 0;
 
@@ -20,6 +21,7 @@ interface OrderRow {
   amount_usd: number | null;
   created_at: string;
   story_id: string;
+  quantity: number | null;
 }
 
 interface StoryRow {
@@ -44,7 +46,7 @@ export default async function MyOrdersPage() {
 
   const { data: orders, error } = await supa
     .from("print_orders")
-    .select("id, status, amount_usd, created_at, story_id")
+    .select("id, status, amount_usd, created_at, story_id, quantity")
     .order("created_at", { ascending: false })
     .returns<OrderRow[]>();
 
@@ -149,6 +151,7 @@ const STATUS_HEADLINE: Record<string, string> = {
   delivered: "Delivered",
   failed:
     "Something went wrong. We're looking into it — your card has not been charged twice.",
+  cancelled: "Cancelled",
 };
 
 function OrderCard({
@@ -181,6 +184,11 @@ function OrderCard({
             <h2 className="truncate font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
               {story?.title ?? "Untitled story"}
             </h2>
+            {order.quantity && order.quantity > 1 && (
+              <span className="rounded-full bg-moss-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-moss-700">
+                × {order.quantity} copies
+              </span>
+            )}
             <StatusBadge status={order.status} />
           </div>
           <p className="mt-1 text-sm text-ink-700">{headline}</p>
@@ -196,14 +204,19 @@ function OrderCard({
               : ""}
           </p>
         </div>
-        {story?.id && (
-          <Link
-            href={`/read/${story.id}`}
-            className="shrink-0 rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 hover:border-moss-500 hover:bg-cream-100"
-          >
-            View story
-          </Link>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {order.status === "received" && (
+            <CancelOrderButton orderId={order.id} />
+          )}
+          {story?.id && (
+            <Link
+              href={`/read/${story.id}`}
+              className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 hover:border-moss-500 hover:bg-cream-100"
+            >
+              View story
+            </Link>
+          )}
+        </div>
       </header>
 
       {events.length > 0 && (

@@ -13,6 +13,18 @@ export const maxDuration = 20;
 interface Body {
   storyId?: unknown;
   address?: unknown;
+  quantity?: unknown;
+}
+
+const MIN_QUANTITY = 1;
+const MAX_QUANTITY = 10;
+
+function parseQuantity(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 1;
+  const n = Math.trunc(raw);
+  if (n < MIN_QUANTITY) return MIN_QUANTITY;
+  if (n > MAX_QUANTITY) return MAX_QUANTITY;
+  return n;
 }
 
 function isAddress(v: unknown): v is {
@@ -72,7 +84,7 @@ export async function POST(request: Request) {
   try {
     const quote = await quotePrintAndShipping({
       pageCount: (story.pages as StoryPage[]).length,
-      quantity: 1,
+      quantity: parseQuantity(body.quantity),
       address: body.address,
     });
     return NextResponse.json(quote);

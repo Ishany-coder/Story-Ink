@@ -278,7 +278,11 @@ alter table public.print_orders
   -- Persisted shipping address JSON so the admin /orders queue can see
   -- where to ship without re-fetching from Stripe. Stored as a single
   -- JSON string (matches packAddressMetadata's shape).
-  add column if not exists shipping_address text;
+  add column if not exists shipping_address text,
+  -- Number of copies in this order. Capped client-side to a sane max
+  -- (see MAX_QUANTITY in /api/ship/stripe/checkout). Default 1 keeps
+  -- legacy rows valid.
+  add column if not exists quantity int not null default 1;
 
 create unique index if not exists print_orders_stripe_session_id_idx
   on public.print_orders (stripe_session_id) where stripe_session_id is not null;

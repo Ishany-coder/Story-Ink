@@ -20,9 +20,11 @@ import type { ShippingAddress } from "@/lib/lulu";
 export const maxDuration = 30;
 
 // Safety cap on any single print order to bound the blast radius of a
-// bug or pricing change. Keep well above a realistic max-page, rush-ship
-// book total.
-const MAX_ALLOWED_USD = 150;
+// bug or pricing change. Scaled to allow for the max quantity below.
+const MAX_ALLOWED_USD = 600;
+
+const MIN_QUANTITY = 1;
+const MAX_QUANTITY = 10;
 
 interface Body {
   storyId?: unknown;
@@ -31,6 +33,15 @@ interface Body {
   // drift check so we can tell the user "price changed, please confirm"
   // instead of silently charging a different amount. Optional.
   expectedAmountUsd?: unknown;
+  quantity?: unknown;
+}
+
+function parseQuantity(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 1;
+  const n = Math.trunc(raw);
+  if (n < MIN_QUANTITY) return MIN_QUANTITY;
+  if (n > MAX_QUANTITY) return MAX_QUANTITY;
+  return n;
 }
 
 function isAddress(v: unknown): v is ShippingAddress {
@@ -66,6 +77,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const quantity = parseQuantity(body.quantity);
+
   const denied = await assertOwnsStory(storyId, user.id);
   if (denied) return denied;
 
@@ -93,6 +106,7 @@ export async function POST(request: Request) {
         storyId,
         userId: user.id,
         address: body.address,
+        quantity,
         reason: isAdminUser(user) ? "admin" : "bypass_stripe_env",
       });
       // Redirect target uses the same success page as the Stripe path
@@ -119,7 +133,7 @@ export async function POST(request: Request) {
   try {
     quote = await quotePrintAndShipping({
       pageCount: (story.pages as StoryPage[]).length,
-      quantity: 1,
+      quantity,
       address: body.address,
     });
   } catch (err) {
@@ -176,6 +190,7 @@ export async function POST(request: Request) {
       storyTitle: story.title,
       amountUsd,
       address: body.address,
+      quantity,
       successUrl: `${origin}/ship/${storyId}/success`,
       cancelUrl: `${origin}/ship/${storyId}`,
     });
@@ -196,6 +211,7 @@ async function createAdminOrder(args: {
   storyId: string;
   userId: string;
   address: ShippingAddress;
+  quantity: number;
   reason: "admin" | "bypass_stripe_env";
 }): Promise<string> {
   const admin = supabaseAdmin();
@@ -219,6 +235,7 @@ async function createAdminOrder(args: {
       amount_usd: 0,
       stripe_session_id: null,
       shipping_address: JSON.stringify(args.address),
+      quantity: args.quantity,
       user_id: args.userId,
     })
     .select("id")

@@ -71,6 +71,14 @@ export async function fulfillFromSession(
       error: "Couldn't parse address from session metadata",
     };
   }
+  // Quantity was stashed in metadata at checkout time. Default to 1
+  // for legacy sessions that pre-date the quantity feature.
+  const quantityRaw = session.metadata?.quantity;
+  const parsedQuantity = quantityRaw ? parseInt(quantityRaw, 10) : 1;
+  const quantity =
+    Number.isFinite(parsedQuantity) && parsedQuantity >= 1 && parsedQuantity <= 10
+      ? parsedQuantity
+      : 1;
 
   const admin = supabaseAdmin();
 
@@ -133,6 +141,7 @@ export async function fulfillFromSession(
         amount_usd: amountUsd,
         stripe_session_id: sessionId,
         shipping_address: addressJson,
+        quantity,
         user_id: (story as Story & { user_id?: string | null }).user_id ?? null,
       })
       .select("id")

@@ -76,6 +76,9 @@ function toPayload(a: AddressState) {
   };
 }
 
+const MIN_QUANTITY = 1;
+const MAX_QUANTITY = 10;
+
 export default function ShipStoryPage({
   story,
   isAdmin = false,
@@ -83,6 +86,7 @@ export default function ShipStoryPage({
 }: Props) {
   const skipPayment = isAdmin || bypassStripe;
   const [address, setAddress] = useState<AddressState>(emptyAddress());
+  const [quantity, setQuantity] = useState<number>(1);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -91,7 +95,9 @@ export default function ShipStoryPage({
 
   const addressComplete = isComplete(address);
 
-  // Debounced live quote: fetch 600ms after the last address edit.
+  // Debounced live quote: fetch 600ms after the last address/quantity
+  // edit. Quantity changes refetch immediately too — Lulu prices each
+  // copy, and shipping cost can step up at certain thresholds.
   useEffect(() => {
     if (!addressComplete) return;
     const handle = setTimeout(() => {
@@ -109,6 +115,7 @@ export default function ShipStoryPage({
     address.postcode,
     address.phone_number,
     addressComplete,
+    quantity,
   ]);
 
   async function fetchQuote() {
@@ -118,7 +125,11 @@ export default function ShipStoryPage({
       const res = await fetch("/api/ship/quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storyId: story.id, address: toPayload(address) }),
+        body: JSON.stringify({
+          storyId: story.id,
+          address: toPayload(address),
+          quantity,
+        }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -152,6 +163,7 @@ export default function ShipStoryPage({
           // reject with code=price_changed when the quote has drifted.
           ...(quote ? { expectedAmountUsd: quote.totalUsd } : {}),
           address: toPayload(address),
+          quantity,
         }),
       });
       if (!res.ok) {
@@ -223,10 +235,39 @@ export default function ShipStoryPage({
               <span>Format</span>
               <span>8.5&quot; sq · hardcover · color</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between">
               <span>Quantity</span>
-              <span>1</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setQuantity((q) => Math.max(MIN_QUANTITY, q - 1))
+                  }
+                  disabled={quantity <= MIN_QUANTITY}
+                  aria-label="Decrease quantity"
+                  className="flex h-6 w-6 items-center justify-center rounded-full border border-cream-300 bg-cream-50 text-base text-ink-700 transition-colors hover:border-moss-500 hover:bg-cream-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  −
+                </button>
+                <span className="min-w-[1.5rem] text-center text-sm text-ink-900">
+                  {quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setQuantity((q) => Math.min(MAX_QUANTITY, q + 1))
+                  }
+                  disabled={quantity >= MAX_QUANTITY}
+                  aria-label="Increase quantity"
+                  className="flex h-6 w-6 items-center justify-center rounded-full border border-cream-300 bg-cream-50 text-base text-ink-700 transition-colors hover:border-moss-500 hover:bg-cream-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
             </div>
+            <p className="pt-1 text-[10px] font-medium text-ink-300">
+              Up to {MAX_QUANTITY} copies per order. Same address for all.
+            </p>
           </div>
         </div>
 

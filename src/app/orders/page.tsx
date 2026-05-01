@@ -20,6 +20,7 @@ interface OrderRow {
   story_id: string;
   user_id: string | null;
   interior_pdf_url: string | null;
+  quantity: number | null;
 }
 
 interface StoryRow {
@@ -42,7 +43,7 @@ export default async function OrdersPage({
   let query = admin
     .from("print_orders")
     .select(
-      "id, status, amount_usd, stripe_session_id, created_at, story_id, user_id, interior_pdf_url"
+      "id, status, amount_usd, stripe_session_id, created_at, story_id, user_id, interior_pdf_url, quantity"
     )
     .order("created_at", { ascending: false });
   if (filter === "active") {
@@ -53,6 +54,8 @@ export default async function OrdersPage({
     query = query.eq("status", "delivered");
   } else if (filter === "failed") {
     query = query.eq("status", "failed");
+  } else if (filter === "cancelled") {
+    query = query.eq("status", "cancelled");
   }
   const { data: orders, error } = (await query) as {
     data: OrderRow[] | null;
@@ -148,6 +151,11 @@ export default async function OrdersPage({
                   </td>
                   <td className="px-4 py-3 text-ink-900">
                     {storyTitle.get(o.story_id) ?? "—"}
+                    {o.quantity && o.quantity > 1 ? (
+                      <span className="ml-2 rounded-full bg-cream-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-700">
+                        × {o.quantity}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={o.status} />
@@ -181,6 +189,7 @@ function FilterBar({ current }: { current: string }) {
     { id: "shipped", label: "Shipped" },
     { id: "delivered", label: "Delivered" },
     { id: "failed", label: "Failed" },
+    { id: "cancelled", label: "Cancelled" },
     { id: "all", label: "All" },
   ];
   return (
@@ -234,6 +243,10 @@ export function StatusBadge({ status }: { status: string }) {
     failed: {
       label: "failed",
       cls: "bg-rose-100 text-rose-700",
+    },
+    cancelled: {
+      label: "cancelled",
+      cls: "bg-cream-200 text-ink-500",
     },
   };
   const meta = map[status] ?? { label: status, cls: "bg-cream-200 text-ink-700" };

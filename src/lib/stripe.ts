@@ -45,6 +45,7 @@ export interface CreateCheckoutArgs {
   storyTitle: string;
   amountUsd: number;
   address: ShippingAddress;
+  quantity: number;
   successUrl: string;
   cancelUrl: string;
 }
@@ -52,37 +53,38 @@ export interface CreateCheckoutArgs {
 export async function createCheckoutSession(
   args: CreateCheckoutArgs
 ): Promise<{ sessionId: string; url: string }> {
+  // Stripe's per-unit price + quantity multiplies on their side. We
+  // already have the *total* (print + ship + tax for N copies) from
+  // the Lulu quote, so we charge it as a single line item with
+  // quantity 1 and stash the actual book quantity in metadata for the
+  // fulfillment pipeline. Avoids rounding mismatches between
+  // (unit_amount × quantity) and the live quote.
   const session = await stripe().checkout.sessions.create({
     mode: "payment",
-    // Currency + single line item covers print + ship + tax in one amount
-    // since Lulu already computed the quote server-side with tax.
     line_items: [
       {
         price_data: {
           currency: "usd",
           product_data: {
-            name: `Printed story: ${args.storyTitle.slice(0, 80)}`,
+            name:
+              args.quantity > 1
+                ? `${args.quantity} × printed story: ${args.storyTitle.slice(0, 70)}`
+                : `Printed story: ${args.storyTitle.slice(0, 80)}`,
             description:
               "8.5×8.5 hardcover, full-color interior, shipped by Lulu.",
           },
-          // Stripe wants the amount in the smallest currency unit (cents).
           unit_amount: Math.round(args.amountUsd * 100),
         },
         quantity: 1,
       },
     ],
-    // We already collected the address on our side — but let Stripe
-    // optionally re-confirm it on their checkout page so the user can
-    // correct typos before paying.
     shipping_address_collection: {
       allowed_countries: ["US", "CA", "GB", "AU", "NZ", "IE", "DE", "FR", "NL", "ES", "IT", "SE", "NO", "DK", "FI", "JP", "SG"],
     },
     metadata: {
       story_id: args.storyId,
-      // Our form-collected address is authoritative for the quote. The
-      // Stripe success page carries this back so the Lulu print job uses
-      // the exact address the quote was calculated for.
       address: packAddressMetadata(args.address),
+      quantity: String(args.quantity),
     },
     success_url: `${args.successUrl}?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: args.cancelUrl,
