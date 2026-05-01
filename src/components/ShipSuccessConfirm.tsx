@@ -4,8 +4,13 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 // Posts the Stripe session id to /api/ship/stripe/confirm exactly once on
-// mount. The endpoint is idempotent — if the user refreshes, we'll surface
-// the already-created Lulu job instead of double-shipping.
+// mount. The endpoint is idempotent — if the user refreshes, we'll
+// surface the existing order row instead of creating a duplicate.
+//
+// We deliberately DON'T promise the order is on its way to the printer
+// — at this point Stripe has just confirmed payment and we've built
+// the PDFs. The admin still has to manually place the print order, so
+// the message here is "received, you'll hear from us when it ships."
 
 interface Props {
   storyId: string;
@@ -17,15 +22,12 @@ type State =
   | {
       kind: "success";
       orderId: string;
-      luluJobId: string;
       alreadyProcessed?: boolean;
     }
   | { kind: "error"; message: string };
 
 export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  // Ref guard so Strict Mode's double-mount doesn't fire the confirm twice
-  // in dev (the endpoint is idempotent, but this keeps the UI stable).
   const firedRef = useRef(false);
 
   useEffect(() => {
@@ -41,7 +43,6 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
         });
         const body = (await res.json().catch(() => ({}))) as {
           orderId?: string;
-          luluJobId?: string;
           error?: string;
           alreadyProcessed?: boolean;
         };
@@ -51,7 +52,6 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
         setState({
           kind: "success",
           orderId: body.orderId ?? "",
-          luluJobId: body.luluJobId ?? "",
           alreadyProcessed: body.alreadyProcessed,
         });
       } catch (err) {
@@ -69,11 +69,10 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
         <div className="rounded-2xl border border-cream-300 bg-cream-50 p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <Spinner />
           <h1 className="mt-4 font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            Finalizing your order
+            Confirming your order
           </h1>
           <p className="mt-2 text-sm text-ink-500">
-            Building the print files and handing them to Lulu. Don&apos;t
-            close this page.
+            Building your print files. Don&apos;t close this page.
           </p>
         </div>
       )}
@@ -82,12 +81,11 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
         <div className="rounded-2xl border border-emerald-200 bg-cream-50 p-8 text-center shadow-[0_8px_24px_rgba(16,185,129,0.08)]">
           <CheckmarkCircle />
           <h1 className="mt-4 font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
-            Your book is on its way
+            Your order has been received
           </h1>
           <p className="mt-2 text-sm text-ink-500">
-            {state.alreadyProcessed
-              ? "This order was already submitted. Here are the details:"
-              : "We've handed your order to the print partner."}
+            Each book is hand-prepared. We&rsquo;ll email you when yours
+            ships — typically within 3–5 business days.
           </p>
           <div className="mt-6 space-y-1 rounded-xl bg-cream-100 px-4 py-3 text-left text-xs text-ink-500">
             <div>
@@ -96,17 +94,11 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
                 {state.orderId || "—"}
               </span>
             </div>
-            <div>
-              Print job:{" "}
-              <span className="font-mono text-[11px] text-ink-900">
-                {state.luluJobId || "—"}
-              </span>
-            </div>
           </div>
           <div className="mt-6">
             <Link
               href={`/read/${storyId}`}
-              className="rounded-full bg-moss-700 px-4 sm:px-6 lg:px-8 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+              className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
             >
               Back to story
             </Link>

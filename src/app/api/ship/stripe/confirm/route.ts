@@ -51,7 +51,6 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({
     orderId: outcome.orderId,
-    luluJobId: outcome.luluJobId,
     status: outcome.status,
     alreadyProcessed: outcome.alreadyProcessed,
   });

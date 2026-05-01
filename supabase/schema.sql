@@ -274,7 +274,11 @@ create table if not exists public.print_orders (
 
 alter table public.print_orders
   add column if not exists stripe_session_id text,
-  add column if not exists user_id uuid references auth.users(id) on delete set null;
+  add column if not exists user_id uuid references auth.users(id) on delete set null,
+  -- Persisted shipping address JSON so the admin /orders queue can see
+  -- where to ship without re-fetching from Stripe. Stored as a single
+  -- JSON string (matches packAddressMetadata's shape).
+  add column if not exists shipping_address text;
 
 create unique index if not exists print_orders_stripe_session_id_idx
   on public.print_orders (stripe_session_id) where stripe_session_id is not null;
@@ -293,6 +297,47 @@ drop policy if exists "print orders readable by owner" on public.print_orders;
 create policy "print orders readable by owner"
   on public.print_orders for select
   using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- Print-order audit log
+--
+-- Append-only history of status transitions on a print order. Every time
+-- the admin moves an order through the fulfillment funnel (received →
+-- in_progress → shipped → delivered, or → failed), we write a row here
+-- with who did it and when. Useful for debugging "did I already mark
+-- this shipped?" and any future support questions.
+--
+-- Inserts happen via service-role from the admin status-update route, so
+-- we don't grant insert/update/delete to anyone. Anon and authenticated
+-- users can read events for their own order so the customer success
+-- page can show a basic timeline.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.print_order_events (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.print_orders(id) on delete cascade,
+  status text not null,
+  note text,
+  actor_id uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists print_order_events_order_id_idx
+  on public.print_order_events (order_id, created_at desc);
+
+alter table public.print_order_events enable row level security;
+
+drop policy if exists "events readable for the order's owner"
+  on public.print_order_events;
+create policy "events readable for the order's owner"
+  on public.print_order_events for select
+  using (
+    exists (
+      select 1 from public.print_orders po
+      where po.id = print_order_events.order_id
+        and po.user_id = auth.uid()
+    )
+  );
 
 -- ---------------------------------------------------------------------------
 -- Atomic per-page updater (unchanged from previous schema). Used by

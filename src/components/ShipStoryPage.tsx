@@ -6,6 +6,11 @@ import type { Story } from "@/lib/types";
 
 interface Props {
   story: Story;
+  // Server-determined; admin sees a "Place free admin order" CTA
+  // instead of "Pay with Stripe", and the underlying request hits
+  // the same /api/ship/stripe/checkout endpoint which detects admin
+  // server-side and routes to the bypass flow.
+  isAdmin?: boolean;
 }
 
 interface AddressState {
@@ -68,7 +73,7 @@ function toPayload(a: AddressState) {
   };
 }
 
-export default function ShipStoryPage({ story }: Props) {
+export default function ShipStoryPage({ story, isAdmin = false }: Props) {
   const [address, setAddress] = useState<AddressState>(emptyAddress());
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoting, setQuoting] = useState(false);
@@ -122,7 +127,10 @@ export default function ShipStoryPage({ story }: Props) {
   }
 
   async function startCheckout() {
-    if (!quote || !addressComplete) return;
+    if (!addressComplete) return;
+    // Admin path skips the live quote check (server bypasses Stripe),
+    // customer path still requires the quote so the drift guard works.
+    if (!isAdmin && !quote) return;
     setCheckoutPending(true);
     setCheckoutError(null);
     try {
@@ -134,7 +142,7 @@ export default function ShipStoryPage({ story }: Props) {
           // Display-only drift check. Server ignores for the charge and
           // recomputes a fresh Lulu quote; sending it lets the server
           // reject with code=price_changed when the quote has drifted.
-          expectedAmountUsd: quote.totalUsd,
+          ...(quote ? { expectedAmountUsd: quote.totalUsd } : {}),
           address: toPayload(address),
         }),
       });
@@ -143,7 +151,8 @@ export default function ShipStoryPage({ story }: Props) {
         throw new Error(body.error || "Checkout failed");
       }
       const { url } = (await res.json()) as { url: string };
-      // Full redirect — Stripe Checkout takes over the tab.
+      // Full redirect — either to Stripe's hosted page (customer) or
+      // to /ship/[id]/success?adminOrder=... (admin bypass).
       window.location.href = url;
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : "Checkout failed");
@@ -259,17 +268,31 @@ export default function ShipStoryPage({ story }: Props) {
           </div>
 
           <div className="rounded-2xl border-2 border-dashed border-cream-300 bg-cream-50 p-3">
-            <p className="mb-3 text-[10px] font-bold text-ink-300">
-              Stripe handles card entry on their hosted page. We never save
-              your card or address.
-            </p>
+            {isAdmin ? (
+              <p className="mb-3 text-[10px] font-bold text-ink-300">
+                Admin account — no payment. The order goes straight to{" "}
+                <span className="font-mono">/orders</span> with PDFs already
+                built. Fulfill manually from there.
+              </p>
+            ) : (
+              <p className="mb-3 text-[10px] font-bold text-ink-300">
+                Stripe handles card entry on their hosted page. We never save
+                your card or address.
+              </p>
+            )}
             <button
               type="button"
               onClick={startCheckout}
-              disabled={!quote || checkoutPending}
+              disabled={(!isAdmin && !quote) || !addressComplete || checkoutPending}
               className="w-full rounded-full bg-moss-700 px-4 py-3 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {checkoutPending ? "Redirecting to Stripe…" : "Pay with Stripe"}
+              {checkoutPending
+                ? isAdmin
+                  ? "Creating admin order…"
+                  : "Redirecting to Stripe…"
+                : isAdmin
+                ? "Place free admin order"
+                : "Pay with Stripe"}
             </button>
             {checkoutError && (
               <div className="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-bold text-rose-500">

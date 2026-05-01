@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { createCheckoutSession } from "@/lib/stripe";
 import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lulu";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
 import type { Story, StoryPage } from "@/lib/types";
 import type { ShippingAddress } from "@/lib/lulu";
 
@@ -75,6 +76,37 @@ export async function POST(request: Request) {
     .single<Pick<Story, "id" | "title" | "pages">>();
   if (error || !story) {
     return NextResponse.json({ error: "Story not found" }, { status: 404 });
+  }
+
+  // Admin bypass: skip Stripe entirely for the admin's own orders.
+  // Server-side check — client can't tamper. Creates the print_orders
+  // row directly in "received" state, builds the PDFs, and returns
+  // a redirect URL the client can navigate to.
+  if (isAdminUser(user)) {
+    const adminOrigin =
+      process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
+      new URL(request.url).origin;
+    try {
+      const orderId = await createAdminOrder({
+        storyId,
+        userId: user.id,
+        address: body.address,
+      });
+      // Redirect target uses the same success page as the Stripe path
+      // but with adminOrder=<id> instead of session_id=<id>. The
+      // success component falls through to a "no Stripe to confirm"
+      // path below.
+      return NextResponse.json({
+        url: `${adminOrigin}/ship/${storyId}/success?adminOrder=${orderId}`,
+        amountUsd: 0,
+      });
+    } catch (err) {
+      console.error("[stripe/checkout] admin bypass failed:", err);
+      return NextResponse.json(
+        { error: "Couldn't create admin order. Check the server logs." },
+        { status: 500 }
+      );
+    }
   }
 
   // Recompute the quote from Lulu *right now*, using the address the
@@ -152,4 +184,94 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+// Admin-only path: skip Stripe and write the print_orders row directly,
+// then build + upload the PDFs synchronously so the order lands in
+// /orders ready to fulfill. No payment, no webhook.
+async function createAdminOrder(args: {
+  storyId: string;
+  userId: string;
+  address: ShippingAddress;
+}): Promise<string> {
+  const admin = supabaseAdmin();
+
+  // Pull the full story for PDF generation. We're already past the
+  // assertOwnsStory check, so RLS is moot here — admin uses the
+  // service-role client for build steps.
+  const { data: story, error: storyErr } = await admin
+    .from("stories")
+    .select("*")
+    .eq("id", args.storyId)
+    .single<Story & { pet_id?: string | null }>();
+  if (storyErr || !story) throw new Error("Story not found");
+
+  // Insert the row first so we have an id even if PDF build fails.
+  const { data: inserted, error: insertErr } = await admin
+    .from("print_orders")
+    .insert({
+      story_id: args.storyId,
+      status: "building",
+      amount_usd: 0,
+      stripe_session_id: null,
+      shipping_address: JSON.stringify(args.address),
+      user_id: args.userId,
+    })
+    .select("id")
+    .single<{ id: string }>();
+  if (insertErr || !inserted) {
+    console.error("[admin order] insert failed:", insertErr);
+    throw new Error("Couldn't insert admin order row");
+  }
+  const orderId = inserted.id;
+
+  // Pull the pet (memorial mode adds dedication pages).
+  const petId = story.pet_id ?? null;
+  let pet = null;
+  if (petId) {
+    const { data: petRow } = await admin
+      .from("pets")
+      .select("*")
+      .eq("id", petId)
+      .maybeSingle();
+    pet = petRow ?? null;
+  }
+
+  try {
+    // Lazy import — buildAndUploadPrintPdfs is heavy and only needed
+    // here. Top-level import would bloat the route's cold start.
+    const { buildAndUploadPrintPdfs } = await import("@/lib/print-pdf");
+    const built = await buildAndUploadPrintPdfs(story as Story, pet);
+    await admin
+      .from("print_orders")
+      .update({
+        status: "received",
+        interior_pdf_url: built.interiorUrl,
+        cover_pdf_url: built.coverUrl,
+      })
+      .eq("id", orderId);
+    await admin.from("print_order_events").insert({
+      order_id: orderId,
+      status: "received",
+      note: "Admin order — no payment; PDFs built; awaiting manual fulfillment.",
+      actor_id: args.userId,
+    });
+  } catch (err) {
+    console.error("[admin order] pdf build failed:", err);
+    await admin
+      .from("print_orders")
+      .update({ status: "failed" })
+      .eq("id", orderId);
+    await admin.from("print_order_events").insert({
+      order_id: orderId,
+      status: "failed",
+      note:
+        "Admin order — PDF generation failed: " +
+        (err instanceof Error ? err.message : "unknown"),
+      actor_id: args.userId,
+    });
+    throw err;
+  }
+
+  return orderId;
 }

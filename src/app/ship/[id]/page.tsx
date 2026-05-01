@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
 import ShipStoryPage from "@/components/ShipStoryPage";
 import type { Story } from "@/lib/types";
 
@@ -26,5 +27,5 @@ export default async function ShipStory({
     notFound();
   }
 
-  return <ShipStoryPage story={story} />;
+  return <ShipStoryPage story={story} isAdmin={isAdminUser(user)} />;
 }
