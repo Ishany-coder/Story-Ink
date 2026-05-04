@@ -88,7 +88,7 @@ create table if not exists public.stories (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   prompt text not null,
-  page_count int not null check (page_count between 3 and 12),
+  page_count int not null check (page_count between 24 and 800),
   pages jsonb not null,
   cover_image text,
   created_at timestamptz not null default now()
