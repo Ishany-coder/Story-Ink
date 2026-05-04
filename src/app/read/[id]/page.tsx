@@ -3,6 +3,7 @@ import { isAdminUser } from "@/lib/admin";
 import { supabaseAdmin } from "@/lib/supabase";
 import { Story } from "@/lib/types";
 import SlideReader from "@/components/SlideReader";
+import AdminExportPdfButton from "@/components/AdminExportPdfButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -21,7 +22,8 @@ export default async function ReadStoryPage({
   const { id } = await params;
 
   const user = await getCurrentUser();
-  const supa = isAdminUser(user) ? supabaseAdmin() : await getSupabaseServer();
+  const admin = isAdminUser(user);
+  const supa = admin ? supabaseAdmin() : await getSupabaseServer();
   const { data, error } = await supa
     .from("stories")
     .select("*")
@@ -48,5 +50,10 @@ export default async function ReadStoryPage({
     );
   }
 
-  return <SlideReader story={story} />;
+  return (
+    <>
+      <SlideReader story={story} />
+      {admin && <AdminExportPdfButton storyId={story.id} />}
+    </>
+  );
 }

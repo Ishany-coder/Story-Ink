@@ -26,13 +26,55 @@ const TRIM_IN = 8.5;
 const BLEED_IN = 0.125;
 
 // Text strip (caption zone) lives inside the trim box, not in the bleed.
-// We pull in 0.4" from trim edges for a safe margin.
-const SAFE_MARGIN_IN = 0.4;
+// Lulu's Book Creation Guide requires a minimum 0.5" safety margin on
+// the interior — keep important content inside this distance from the
+// trim edge so trimming variance doesn't clip captions.
+const SAFE_MARGIN_IN = 0.5;
 
-// Rough spine width calc for Lulu standard 60# uncoated interior. Their
-// formula: pages × 0.002252 in. Minimum casewrap spine on Lulu is 0.125".
-function spineWidthIn(pageCount: number): number {
-  return Math.max(0.125, pageCount * 0.002252);
+// Hardcover spine width by page count, per Lulu's Book Creation Guide
+// (page 14). The paperback formula (pages/444 + 0.06) does NOT apply to
+// hardcover — Lulu uses a stepped table because casewrap spines come in
+// fixed thicknesses tied to board widths.
+//
+// Returns null when the page count is below the hardcover minimum (24).
+// Callers that hit that should fall back to the paperback formula or
+// reject the build.
+function hardcoverSpineWidthIn(pageCount: number): number {
+  // Each tuple: [maxPagesInBand, spineWidthInches]
+  // The first matching band wins.
+  const TABLE: ReadonlyArray<readonly [number, number]> = [
+    [84, 0.25],
+    [140, 0.5],
+    [168, 0.625],
+    [194, 0.688],
+    [222, 0.75],
+    [250, 0.813],
+    [278, 0.875],
+    [306, 0.938],
+    [334, 1.0],
+    [360, 1.063],
+    [388, 1.125],
+    [416, 1.188],
+    [444, 1.25],
+    [472, 1.313],
+    [500, 1.375],
+    [528, 1.438],
+    [556, 1.5],
+    [582, 1.563],
+    [610, 1.625],
+    [638, 1.688],
+    [666, 1.75],
+    [694, 1.813],
+    [722, 1.875],
+    [750, 1.938],
+    [778, 2.0],
+    [799, 2.063],
+  ];
+  if (pageCount < 24) return 0.25; // pad up to first band
+  for (const [maxPages, spine] of TABLE) {
+    if (pageCount <= maxPages) return spine;
+  }
+  return 2.125; // 800+ pages
 }
 
 // Fetch the image at `url`, detecting whether it's PNG or JPG by the
@@ -408,7 +450,7 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
 
   const pageCount = Math.max(story.pages.length, MIN_INTERIOR_PAGES);
-  const spineIn = spineWidthIn(pageCount);
+  const spineIn = hardcoverSpineWidthIn(pageCount);
   const widthIn = TRIM_IN * 2 + spineIn + COVER_WRAP_IN * 2;
   const heightIn = TRIM_IN + COVER_WRAP_IN * 2;
   const width = widthIn * PT_PER_IN;
