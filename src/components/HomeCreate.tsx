@@ -14,7 +14,13 @@ import {
 } from "@/lib/image-styles";
 import type { Pet } from "@/lib/types";
 
-const PAGE_OPTIONS = [3, 5, 7, 10, 12];
+// Lulu hardcover requires a minimum of 24 interior pages and tops out
+// at 800. We surface a few common presets and a "Custom" chip so users
+// can pick anything in the supported range without being forced into a
+// chip that doesn't fit.
+const PAGE_OPTIONS = [24, 30, 40, 60];
+const MIN_PAGES = 24;
+const MAX_PAGES = 800;
 
 interface Props {
   pets: Pet[];
@@ -33,7 +39,8 @@ export default function HomeCreate({ pets }: Props) {
   );
   const [petId, setPetId] = useState<string | null>(pets[0]?.id ?? null);
   const [prompt, setPrompt] = useState("");
-  const [pageCount, setPageCount] = useState(5);
+  const [pageCount, setPageCount] = useState(MIN_PAGES);
+  const [customMode, setCustomMode] = useState(false);
   const [imageMode, setImageMode] = useState<"fast" | "quality">("quality");
   const [imageStyle, setImageStyle] =
     useState<ImageStyleId>(DEFAULT_IMAGE_STYLE);
@@ -173,14 +180,17 @@ export default function HomeCreate({ pets }: Props) {
             </span>
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-ink-500">Pages</span>
-              <div className="flex gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 {PAGE_OPTIONS.map((n) => (
                   <button
                     key={n}
                     type="button"
-                    onClick={() => setPageCount(n)}
-                    className={`h-8 w-8 rounded-lg text-sm font-medium transition-colors ${
-                      pageCount === n
+                    onClick={() => {
+                      setPageCount(n);
+                      setCustomMode(false);
+                    }}
+                    className={`h-8 min-w-[2.25rem] rounded-lg px-2 text-sm font-medium transition-colors ${
+                      !customMode && pageCount === n
                         ? "bg-ink-900 text-cream-50"
                         : "bg-cream-50 text-ink-500 hover:bg-cream-200 hover:text-ink-900"
                     }`}
@@ -188,6 +198,41 @@ export default function HomeCreate({ pets }: Props) {
                     {n}
                   </button>
                 ))}
+                {customMode ? (
+                  <input
+                    type="number"
+                    min={MIN_PAGES}
+                    max={MAX_PAGES}
+                    step={1}
+                    value={pageCount}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      if (Number.isNaN(raw)) return;
+                      setPageCount(
+                        Math.max(MIN_PAGES, Math.min(MAX_PAGES, raw))
+                      );
+                    }}
+                    onBlur={() => {
+                      // Snap back to a preset if the user typed one.
+                      if (PAGE_OPTIONS.includes(pageCount)) {
+                        setCustomMode(false);
+                      }
+                    }}
+                    className="h-8 w-20 rounded-lg border border-ink-900 bg-cream-50 px-2 text-sm font-medium text-ink-900 focus:outline-none focus:ring-2 focus:ring-moss-100"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomMode(true);
+                      // Seed with current value so the input shows it.
+                      if (!PAGE_OPTIONS.includes(pageCount)) return;
+                    }}
+                    className="h-8 rounded-lg bg-cream-50 px-3 text-xs font-medium text-ink-500 hover:bg-cream-200 hover:text-ink-900"
+                  >
+                    Custom
+                  </button>
+                )}
               </div>
             </div>
           </div>

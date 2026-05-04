@@ -45,7 +45,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const pageCount = Math.min(Math.max(body.pageCount || 5, 3), 12);
+    // Lulu hardcover floor is 24 pages; cap is 800. Clamp aggressively
+    // so a malformed client request can't kick off a runaway 10000-page
+    // image generation job.
+    const pageCount = Math.min(Math.max(body.pageCount || 24, 24), 800);
     const kind = body.kind === "pet" ? "pet" : "generic";
     const petId = kind === "pet" ? body.petId ?? null : null;
     if (kind === "pet" && !petId) {
