@@ -12,17 +12,32 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // "running" carries any partial result the Inngest function has
 // written so far — story generation uses this to surface "Drawing
 // page 4 of 10..." style progress without a separate channel.
+//
+// "stalled" means we exhausted our poll budget but the job is almost
+// certainly still running on the Inngest worker; the caller should
+// surface this as info (check back later) not as a failure.
 export type JobState<TResult> =
   | { kind: "idle" }
   | { kind: "polling"; jobId: string }
   | { kind: "running"; jobId: string; result: unknown | null }
   | { kind: "done"; jobId: string; result: TResult }
-  | { kind: "failed"; jobId: string; error: string };
+  | { kind: "failed"; jobId: string; error: string }
+  | { kind: "stalled"; jobId: string };
 
-const POLL_INTERVAL_MS = 1000;
-// Give long stories ~5 minutes before we give up. Inngest itself keeps
-// running — the client just stops polling.
-const MAX_POLL_ATTEMPTS = 300;
+// Adaptive poll cadence so a 30-minute story doesn't burn 1800 polls
+// at 1Hz. First minute: every 1s for snappy feedback on short stories.
+// Then 3s. After ten minutes: 10s — at that point the user is hardly
+// watching it tick.
+function pollIntervalMs(attempt: number): number {
+  if (attempt < 60) return 1_000;
+  if (attempt < 260) return 3_000;
+  return 10_000;
+}
+
+// Give long stories an hour before we give up watching. The Inngest
+// worker keeps running regardless — the client just stops polling and
+// the caller can point the user at their dashboard.
+const MAX_WALL_MS = 60 * 60 * 1000;
 
 interface JobRow<TResult> {
   id: string;
@@ -58,7 +73,9 @@ export function useJobPolling<TResult>() {
 
     (async () => {
       let lastProgress: unknown = null;
-      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+      const startedAt = Date.now();
+      let attempt = 0;
+      while (Date.now() - startedAt < MAX_WALL_MS) {
         if (cancelRef.current) return;
         try {
           const res = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
@@ -100,17 +117,17 @@ export function useJobPolling<TResult>() {
           }
         } catch (err) {
           // Network blips: try again next tick. Only bail if we exhaust
-          // attempts.
+          // the wall budget.
           console.warn("[jobs] poll error:", err);
         }
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        await new Promise((r) => setTimeout(r, pollIntervalMs(attempt)));
+        attempt++;
       }
       if (!cancelRef.current) {
-        setState({
-          kind: "failed",
-          jobId,
-          error: "Job didn't finish in time. Check back later.",
-        });
+        // Don't call this a failure — Inngest is almost certainly still
+        // chewing through pages. The caller decides what to render
+        // (we recommend "check your dashboard in a few minutes").
+        setState({ kind: "stalled", jobId });
       }
     })();
   }, []);

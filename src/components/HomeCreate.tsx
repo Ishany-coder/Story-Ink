@@ -70,6 +70,15 @@ export default function HomeCreate({ pets }: Props) {
       setError(state.error);
       setGenerating(false);
       setGeneratingProgress(null);
+    } else if (state.kind === "stalled") {
+      // Wall-clock budget exhausted but Inngest keeps running. Surface
+      // an info message instead of treating it as a failure — the
+      // story will land in the dashboard when it finishes.
+      setError(
+        "Your story is taking longer than expected. It'll appear on your home page when it's ready — feel free to leave this tab."
+      );
+      setGenerating(false);
+      setGeneratingProgress(null);
     } else if (state.kind === "running" && state.result) {
       const r = state.result as Partial<{ current: number; total: number }>;
       if (typeof r.current === "number" && typeof r.total === "number") {
