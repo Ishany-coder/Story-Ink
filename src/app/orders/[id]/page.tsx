@@ -200,44 +200,33 @@ export default async function OrderDetailPage({
             )}
           </section>
 
-          {/* PDF downloads */}
+          {/* PDF downloads — built fresh on every click via the admin
+              export endpoint, so any tweak to print-pdf.ts (font embed,
+              image upscale, layout) shows up immediately. The static
+              URLs on the order row were built once at order time and
+              are now ignored to avoid serving stale PDFs. */}
           <section className="rounded-2xl border border-cream-300 bg-cream-50 p-5">
             <h2 className="mb-3 text-[11px] font-medium uppercase tracking-wider text-ink-500">
               Print files
             </h2>
             <p className="mb-3 text-xs text-ink-500">
               Download these and upload them to your print vendor (Lulu,
-              Blurb, etc.) to fulfill the order.
+              Blurb, etc.) to fulfill the order. Each download rebuilds
+              the PDF — always Lulu-spec, always the latest pages.
             </p>
             <div className="flex flex-wrap gap-2">
-              {order.interior_pdf_url ? (
-                <a
-                  href={order.interior_pdf_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-full border border-cream-300 bg-cream-50 px-4 py-2 text-xs font-semibold text-ink-700 hover:border-moss-500 hover:bg-cream-100"
-                >
-                  Interior PDF ↗
-                </a>
-              ) : (
-                <span className="rounded-full border border-cream-300 bg-cream-100 px-4 py-2 text-xs text-ink-300">
-                  Interior PDF — pending
-                </span>
-              )}
-              {order.cover_pdf_url ? (
-                <a
-                  href={order.cover_pdf_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-full border border-cream-300 bg-cream-50 px-4 py-2 text-xs font-semibold text-ink-700 hover:border-moss-500 hover:bg-cream-100"
-                >
-                  Cover PDF ↗
-                </a>
-              ) : (
-                <span className="rounded-full border border-cream-300 bg-cream-100 px-4 py-2 text-xs text-ink-300">
-                  Cover PDF — pending
-                </span>
-              )}
+              <a
+                href={`/api/admin/stories/${order.story_id}/export-pdf?type=interior`}
+                className="rounded-full bg-moss-700 px-4 py-2 text-xs font-semibold text-cream-50 transition-colors hover:bg-moss-900"
+              >
+                Interior PDF ↓
+              </a>
+              <a
+                href={`/api/admin/stories/${order.story_id}/export-pdf?type=cover`}
+                className="rounded-full border border-cream-300 bg-cream-50 px-4 py-2 text-xs font-semibold text-ink-700 hover:border-moss-500 hover:bg-cream-100"
+              >
+                Cover PDF ↓
+              </a>
             </div>
           </section>
 
