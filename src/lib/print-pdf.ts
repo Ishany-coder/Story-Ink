@@ -77,6 +77,12 @@ async function embedFonts(pdf: PDFDocument): Promise<EmbeddedFonts> {
     pdf.embedFont(bytes.bold, { subset: true }),
     pdf.embedFont(bytes.italic, { subset: true }),
   ]);
+  console.log(
+    "[print-pdf] embedded fonts (subset):",
+    "Body-Regular",
+    "Body-Bold",
+    "Body-Italic"
+  );
   return { regular, bold, italic };
 }
 
@@ -191,27 +197,36 @@ async function fitForPrint(
   targetWidthPx: number,
   targetHeightPx: number
 ): Promise<{ bytes: Uint8Array; kind: "png" | "jpg" }> {
+  let inputW = 0;
+  let inputH = 0;
   try {
-    let pipeline = sharp(Buffer.from(bytes)).resize(
-      targetWidthPx,
-      targetHeightPx,
-      {
-        fit: "cover",
-        position: "center",
-        kernel: "lanczos3",
-        // Allow upscaling — Gemini's 1024px output is below our 300
-        // PPI target so we always need to enlarge.
-        withoutEnlargement: false,
-      }
-    );
+    const buf = Buffer.from(bytes);
+    const meta = await sharp(buf).metadata();
+    inputW = meta.width ?? 0;
+    inputH = meta.height ?? 0;
+
+    let pipeline = sharp(buf).resize(targetWidthPx, targetHeightPx, {
+      fit: "cover",
+      position: "center",
+      kernel: "lanczos3",
+      // Allow upscaling — Gemini's 1024px output is below our 300
+      // PPI target so we always need to enlarge.
+      withoutEnlargement: false,
+    });
     pipeline =
       kind === "png"
         ? pipeline.png({ compressionLevel: 6 })
-        : pipeline.jpeg({ quality: 92, mozjpeg: true });
+        : pipeline.jpeg({ quality: 92 });
     const out = await pipeline.toBuffer();
+    console.log(
+      `[print-pdf] image upscaled (${kind}): ${inputW}x${inputH} -> ${targetWidthPx}x${targetHeightPx}`
+    );
     return { bytes: new Uint8Array(out), kind };
   } catch (err) {
-    console.warn("[print-pdf] resize failed, embedding original:", err);
+    console.warn(
+      `[print-pdf] resize FAILED (${kind}, ${inputW}x${inputH} -> ${targetWidthPx}x${targetHeightPx}), embedding original:`,
+      err
+    );
     return { bytes, kind };
   }
 }
