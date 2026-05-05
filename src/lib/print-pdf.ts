@@ -638,16 +638,25 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
     }
   }
 
-  // Title text.
+  // Title text. Lulu requires a 0.75" safety margin on hardcover
+  // covers (per the Book Creation Guide and the cover-upload KB
+  // article) — content closer to the trim edge than that risks
+  // getting clipped by the trimming variance. Title is inset 0.75"
+  // from the spine-side, outer-side, AND top edges so it sits well
+  // inside the safe zone.
+  const COVER_SAFE_IN = 0.75;
+  const titleHeightIn = 1.4;
   drawCaption(
     page,
     story.title,
     font,
     {
-      x: frontX + 0.4 * PT_PER_IN,
-      y: frontY + trimPts * 0.78,
-      width: trimPts - 0.8 * PT_PER_IN,
-      height: trimPts * 0.18,
+      x: frontX + COVER_SAFE_IN * PT_PER_IN,
+      y:
+        frontY +
+        (TRIM_IN - COVER_SAFE_IN - titleHeightIn) * PT_PER_IN,
+      width: trimPts - COVER_SAFE_IN * 2 * PT_PER_IN,
+      height: titleHeightIn * PT_PER_IN,
     },
     rgb(1, 1, 1)
   );
