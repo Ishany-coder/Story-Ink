@@ -6,17 +6,79 @@
 
 import {
   PDFDocument,
-  StandardFonts,
   rgb,
   type PDFFont,
   type PDFPage,
   type RGB,
 } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import sharp from "sharp";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { Pet, Story, StoryPage } from "@/lib/types";
 import { uploadGeneratedAudio } from "@/lib/supabase";
 import { fetchWithTimeout, isAllowedContentUrl } from "@/lib/http";
 
 const PRINT_IMAGE_FETCH_TIMEOUT_MS = 15_000;
+
+// Lulu wants 200-600 PPI on print images and rejects/warns below 200.
+// We target 300 PPI (the spec's recommended value, page 4 of the
+// guide). For an 8.75" full-bleed page that's ceil(8.75 * 300) = 2625
+// pixels per side. Anything smaller gets upscaled with lanczos before
+// being embedded — sharper than pdf-lib's default scaling.
+const TARGET_DPI = 300;
+
+// ---------------------------------------------------------------------------
+// Font embedding
+//
+// Lulu rejects PDFs that reference fonts but don't embed them ("Some
+// fonts are not embedded" warning). pdf-lib's StandardFonts uses the
+// 14 PDF base fonts which are NOT embedded — they're just references
+// the reader is supposed to resolve. We bundle Source Sans 3 (OFL
+// licensed) as a real TTF and embed-subset it via fontkit, which
+// satisfies Lulu's preflight without bloating the PDF.
+//
+// Bytes are cached at module scope so repeated PDF builds don't
+// re-read the same files.
+// ---------------------------------------------------------------------------
+
+let _fontBytesPromise: Promise<{
+  regular: Uint8Array;
+  bold: Uint8Array;
+  italic: Uint8Array;
+}> | null = null;
+
+function loadFontBytes() {
+  if (_fontBytesPromise) return _fontBytesPromise;
+  const fontsDir = path.join(process.cwd(), "public", "fonts");
+  _fontBytesPromise = Promise.all([
+    readFile(path.join(fontsDir, "Body-Regular.ttf")),
+    readFile(path.join(fontsDir, "Body-Bold.ttf")),
+    readFile(path.join(fontsDir, "Body-Italic.ttf")),
+  ]).then(([regular, bold, italic]) => ({
+    regular: new Uint8Array(regular),
+    bold: new Uint8Array(bold),
+    italic: new Uint8Array(italic),
+  }));
+  return _fontBytesPromise;
+}
+
+interface EmbeddedFonts {
+  regular: PDFFont;
+  bold: PDFFont;
+  italic: PDFFont;
+}
+
+async function embedFonts(pdf: PDFDocument): Promise<EmbeddedFonts> {
+  pdf.registerFontkit(fontkit);
+  const bytes = await loadFontBytes();
+  const [regular, bold, italic] = await Promise.all([
+    pdf.embedFont(bytes.regular, { subset: true }),
+    pdf.embedFont(bytes.bold, { subset: true }),
+    pdf.embedFont(bytes.italic, { subset: true }),
+  ]);
+  return { regular, bold, italic };
+}
 
 // 8.5 × 8.5 inch trim. 72 PDF points per inch. Lulu requires 0.125" bleed
 // on all outer edges for interior pages, so the final PDF page size is
@@ -116,13 +178,53 @@ async function fetchImageBytes(
   }
 }
 
-async function embedImage(pdf: PDFDocument, url: string) {
+// Upscale `bytes` to at least `targetPx` on the longest side using
+// sharp's lanczos3 kernel. Returns the original bytes if already at or
+// above target. Output kind matches input — PNG stays PNG, JPG stays
+// JPG — so pdf-lib can pick the matching embed function.
+async function upscaleForPrint(
+  bytes: Uint8Array,
+  kind: "png" | "jpg",
+  targetPx: number
+): Promise<{ bytes: Uint8Array; kind: "png" | "jpg" }> {
+  try {
+    const buf = Buffer.from(bytes);
+    const meta = await sharp(buf).metadata();
+    const longest = Math.max(meta.width ?? 0, meta.height ?? 0);
+    if (longest >= targetPx) return { bytes, kind };
+
+    let pipeline = sharp(buf).resize(targetPx, targetPx, {
+      fit: "inside",
+      kernel: "lanczos3",
+    });
+    pipeline =
+      kind === "png"
+        ? pipeline.png({ compressionLevel: 6 })
+        : pipeline.jpeg({ quality: 92, mozjpeg: true });
+    const out = await pipeline.toBuffer();
+    return { bytes: new Uint8Array(out), kind };
+  } catch (err) {
+    console.warn("[print-pdf] upscale failed, embedding original:", err);
+    return { bytes, kind };
+  }
+}
+
+async function embedImage(
+  pdf: PDFDocument,
+  url: string,
+  // Pixel dimension of the box this image will be drawn into in the
+  // final PDF. We size the upscale target to (boxInches × TARGET_DPI)
+  // so the embedded image hits 300 PPI when scaled to that box.
+  drawSizeIn: number
+) {
   const img = await fetchImageBytes(url);
   if (!img) return null;
   try {
-    return img.kind === "png"
-      ? await pdf.embedPng(img.bytes)
-      : await pdf.embedJpg(img.bytes);
+    const targetPx = Math.ceil(drawSizeIn * TARGET_DPI);
+    const upscaled = await upscaleForPrint(img.bytes, img.kind, targetPx);
+    return upscaled.kind === "png"
+      ? await pdf.embedPng(upscaled.bytes)
+      : await pdf.embedJpg(upscaled.bytes);
   } catch (err) {
     console.warn("[print-pdf] image embed failed:", url, err);
     return null;
@@ -208,8 +310,7 @@ export async function buildInteriorPdf(
   options: InteriorPdfOptions = {}
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const italic = await pdf.embedFont(StandardFonts.HelveticaOblique);
+  const fonts = await embedFonts(pdf);
 
   const pageSize = (TRIM_IN + BLEED_IN * 2) * PT_PER_IN;
   const trimOffset = BLEED_IN * PT_PER_IN; // where the trim box starts
@@ -223,7 +324,7 @@ export async function buildInteriorPdf(
 
   // Front matter: dedication page on memorial books only.
   if (memorial && options.pet) {
-    drawDedicationPage(pdf, font, italic, options.pet, {
+    drawDedicationPage(pdf, fonts.bold, fonts.italic, options.pet, {
       pageSize,
       trimOffset,
       trimSize,
@@ -233,7 +334,7 @@ export async function buildInteriorPdf(
   }
 
   for (const storyPage of story.pages) {
-    await drawInteriorPage(pdf, storyPage, font, {
+    await drawInteriorPage(pdf, storyPage, fonts.bold, {
       pageSize,
       trimOffset,
       trimSize,
@@ -245,7 +346,7 @@ export async function buildInteriorPdf(
 
   // Back matter: a quieter "in loving memory" panel after the story.
   if (memorial && options.pet) {
-    drawDedicationPage(pdf, font, italic, options.pet, {
+    drawDedicationPage(pdf, fonts.bold, fonts.italic, options.pet, {
       pageSize,
       trimOffset,
       trimSize,
@@ -391,9 +492,11 @@ async function drawInteriorPage(
     color: rgb(0.98, 0.96, 0.99),
   });
 
-  // Image — full-bleed across the top portion of the page.
+  // Image — full-bleed across the top portion of the page. The image
+  // box reaches the full page-size on width (8.75") so we target a
+  // 300 PPI upscale for that dimension.
   const image = storyPage.imageUrl
-    ? await embedImage(pdf, storyPage.imageUrl)
+    ? await embedImage(pdf, storyPage.imageUrl, TRIM_IN + BLEED_IN * 2)
     : null;
   if (image) {
     const imgTop = pageSize; // include bleed on top + sides
@@ -447,7 +550,8 @@ const COVER_WRAP_IN = 0.75;
 
 export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const fonts = await embedFonts(pdf);
+  const font = fonts.bold;
 
   const pageCount = Math.max(story.pages.length, MIN_INTERIOR_PAGES);
   const spineIn = hardcoverSpineWidthIn(pageCount);
@@ -474,9 +578,10 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
   const trimPts = TRIM_IN * PT_PER_IN;
 
   // Front cover art: use the first page image as the cover illustration.
+  // Drawn into a TRIM_IN × TRIM_IN box, so target that size for upscale.
   const coverImageUrl = story.cover_image || story.pages[0]?.imageUrl;
   if (coverImageUrl) {
-    const img = await embedImage(pdf, coverImageUrl);
+    const img = await embedImage(pdf, coverImageUrl, TRIM_IN);
     if (img) {
       page.drawImage(img, {
         x: frontX,
