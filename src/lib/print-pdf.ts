@@ -178,25 +178,32 @@ async function fetchImageBytes(
   }
 }
 
-// Upscale `bytes` to at least `targetPx` on the longest side using
-// sharp's lanczos3 kernel. Returns the original bytes if already at or
-// above target. Output kind matches input — PNG stays PNG, JPG stays
-// JPG — so pdf-lib can pick the matching embed function.
-async function upscaleForPrint(
+// Resize `bytes` to exactly fit `targetWidthPx × targetHeightPx`
+// using sharp's "cover" fit — scale uniformly to fully cover the box,
+// then center-crop the overflow. This matches CSS object-fit: cover.
+// Aspect ratio of source is preserved; the source is never stretched.
+//
+// Output kind matches input so pdf-lib can pick the matching embed
+// function. Lanczos3 kernel keeps edges crisp when upscaling.
+async function fitForPrint(
   bytes: Uint8Array,
   kind: "png" | "jpg",
-  targetPx: number
+  targetWidthPx: number,
+  targetHeightPx: number
 ): Promise<{ bytes: Uint8Array; kind: "png" | "jpg" }> {
   try {
-    const buf = Buffer.from(bytes);
-    const meta = await sharp(buf).metadata();
-    const longest = Math.max(meta.width ?? 0, meta.height ?? 0);
-    if (longest >= targetPx) return { bytes, kind };
-
-    let pipeline = sharp(buf).resize(targetPx, targetPx, {
-      fit: "inside",
-      kernel: "lanczos3",
-    });
+    let pipeline = sharp(Buffer.from(bytes)).resize(
+      targetWidthPx,
+      targetHeightPx,
+      {
+        fit: "cover",
+        position: "center",
+        kernel: "lanczos3",
+        // Allow upscaling — Gemini's 1024px output is below our 300
+        // PPI target so we always need to enlarge.
+        withoutEnlargement: false,
+      }
+    );
     pipeline =
       kind === "png"
         ? pipeline.png({ compressionLevel: 6 })
@@ -204,7 +211,7 @@ async function upscaleForPrint(
     const out = await pipeline.toBuffer();
     return { bytes: new Uint8Array(out), kind };
   } catch (err) {
-    console.warn("[print-pdf] upscale failed, embedding original:", err);
+    console.warn("[print-pdf] resize failed, embedding original:", err);
     return { bytes, kind };
   }
 }
@@ -212,19 +219,22 @@ async function upscaleForPrint(
 async function embedImage(
   pdf: PDFDocument,
   url: string,
-  // Pixel dimension of the box this image will be drawn into in the
-  // final PDF. We size the upscale target to (boxInches × TARGET_DPI)
-  // so the embedded image hits 300 PPI when scaled to that box.
-  drawSizeIn: number
+  // Inches of the box this image will be drawn into. We resize the
+  // bytes to (drawWidthIn × TARGET_DPI) × (drawHeightIn × TARGET_DPI)
+  // pixels with cover-fit before embedding, so pdf-lib never has to
+  // stretch the image at draw time.
+  drawWidthIn: number,
+  drawHeightIn: number
 ) {
   const img = await fetchImageBytes(url);
   if (!img) return null;
   try {
-    const targetPx = Math.ceil(drawSizeIn * TARGET_DPI);
-    const upscaled = await upscaleForPrint(img.bytes, img.kind, targetPx);
-    return upscaled.kind === "png"
-      ? await pdf.embedPng(upscaled.bytes)
-      : await pdf.embedJpg(upscaled.bytes);
+    const targetW = Math.ceil(drawWidthIn * TARGET_DPI);
+    const targetH = Math.ceil(drawHeightIn * TARGET_DPI);
+    const fitted = await fitForPrint(img.bytes, img.kind, targetW, targetH);
+    return fitted.kind === "png"
+      ? await pdf.embedPng(fitted.bytes)
+      : await pdf.embedJpg(fitted.bytes);
   } catch (err) {
     console.warn("[print-pdf] image embed failed:", url, err);
     return null;
@@ -492,16 +502,20 @@ async function drawInteriorPage(
     color: rgb(0.98, 0.96, 0.99),
   });
 
-  // Image — full-bleed across the top portion of the page. The image
-  // box reaches the full page-size on width (8.75") so we target a
-  // 300 PPI upscale for that dimension.
+  // Image — full-bleed across the top portion of the page. Width is
+  // the full page-size (8.75" with bleed) and height is page minus
+  // the caption strip plus the top/side bleed area. We resize the
+  // bytes with cover-fit to the exact aspect of this box so pdf-lib
+  // doesn't stretch a square Gemini image into a non-square frame.
+  const imgTop = pageSize; // include bleed on top + sides
+  const imgBottom = trimOffset + captionBoxHeight; // stops above caption
+  const imgHeight = imgTop - imgBottom;
+  const imgWidthIn = (TRIM_IN + BLEED_IN * 2);
+  const imgHeightIn = imgHeight / PT_PER_IN;
   const image = storyPage.imageUrl
-    ? await embedImage(pdf, storyPage.imageUrl, TRIM_IN + BLEED_IN * 2)
+    ? await embedImage(pdf, storyPage.imageUrl, imgWidthIn, imgHeightIn)
     : null;
   if (image) {
-    const imgTop = pageSize; // include bleed on top + sides
-    const imgBottom = trimOffset + captionBoxHeight; // stops above caption
-    const imgHeight = imgTop - imgBottom;
     page.drawImage(image, {
       x: 0,
       y: imgBottom,
@@ -578,10 +592,10 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
   const trimPts = TRIM_IN * PT_PER_IN;
 
   // Front cover art: use the first page image as the cover illustration.
-  // Drawn into a TRIM_IN × TRIM_IN box, so target that size for upscale.
+  // Drawn into a TRIM_IN × TRIM_IN square box.
   const coverImageUrl = story.cover_image || story.pages[0]?.imageUrl;
   if (coverImageUrl) {
-    const img = await embedImage(pdf, coverImageUrl, TRIM_IN);
+    const img = await embedImage(pdf, coverImageUrl, TRIM_IN, TRIM_IN);
     if (img) {
       page.drawImage(img, {
         x: frontX,
