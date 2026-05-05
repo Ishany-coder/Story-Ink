@@ -571,17 +571,20 @@ async function drawInteriorPage(
 // ---------------------------------------------------------------------------
 // Cover PDF. A single landscape spread: back cover | spine | front cover.
 //
-// Lulu's "Upload Your Cover File" flow expects bleed-only dimensions
-// regardless of binding (per the page-13 spec in the Book Creation
-// Guide and the Upload Your Cover knowledge-base article):
+// Lulu casewrap hardcover requires wrap + bleed on every outer edge.
+// The wrap is the part that folds around the cover boards underneath
+// (0.75"); bleed is the 0.125" trim margin on top of that. Together
+// that's 0.875" per outer edge:
 //
-//   Width  = 2 × trim + spine + 2 × bleed   (0.125" bleed on left + right)
-//   Height = trim + 2 × bleed               (0.125" bleed top + bottom)
+//   Width  = 2 × trim + spine + 2 × (wrap + bleed)
+//   Height = trim + 2 × (wrap + bleed)
 //
-// The casewrap wrap that exists on Lulu's *downloadable* hardcover
-// template is added by Lulu during binding — uploaded PDFs should NOT
-// include it, or Lulu rejects the upload with "incorrect dimensions".
+// For an 8.5" sq, 24-page hardcover that comes out to 19" × 10.25",
+// matching what Lulu's preflight reports as the proper dimensions.
 // ---------------------------------------------------------------------------
+
+const COVER_WRAP_IN = 0.75;
+const COVER_EDGE_IN = COVER_WRAP_IN + BLEED_IN; // 0.875" per outer edge
 
 export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
@@ -590,15 +593,15 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
 
   const pageCount = Math.max(story.pages.length, MIN_INTERIOR_PAGES);
   const spineIn = hardcoverSpineWidthIn(pageCount);
-  const widthIn = TRIM_IN * 2 + spineIn + BLEED_IN * 2;
-  const heightIn = TRIM_IN + BLEED_IN * 2;
+  const widthIn = TRIM_IN * 2 + spineIn + COVER_EDGE_IN * 2;
+  const heightIn = TRIM_IN + COVER_EDGE_IN * 2;
   const width = widthIn * PT_PER_IN;
   const height = heightIn * PT_PER_IN;
 
   const page = pdf.addPage([width, height]);
 
   // Full-bleed background color so the physical cover is never white
-  // on the trimmed edge.
+  // on the trimmed edge or wrapped underside.
   page.drawRectangle({
     x: 0,
     y: 0,
@@ -608,10 +611,10 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
   });
 
   // Front cover occupies the right half of the spread (after the
-  // back cover + spine, with the left-side bleed offset).
+  // back cover + spine, with the wrap+bleed offset on the left).
   const frontX =
-    BLEED_IN * PT_PER_IN + TRIM_IN * PT_PER_IN + spineIn * PT_PER_IN;
-  const frontY = BLEED_IN * PT_PER_IN;
+    COVER_EDGE_IN * PT_PER_IN + TRIM_IN * PT_PER_IN + spineIn * PT_PER_IN;
+  const frontY = COVER_EDGE_IN * PT_PER_IN;
   const trimPts = TRIM_IN * PT_PER_IN;
 
   // Front cover art: use the first page image as the cover illustration.
