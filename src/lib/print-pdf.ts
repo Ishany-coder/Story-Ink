@@ -570,12 +570,18 @@ async function drawInteriorPage(
 
 // ---------------------------------------------------------------------------
 // Cover PDF. A single landscape spread: back cover | spine | front cover.
-// For a casewrap hardcover Lulu wants: (trim × 2) + spine + 0.75" wrap per
-// outer edge. We keep the title on the front cover and leave the spine
-// blank (safer for short books where the spine is thin).
+//
+// Lulu's "Upload Your Cover File" flow expects bleed-only dimensions
+// regardless of binding (per the page-13 spec in the Book Creation
+// Guide and the Upload Your Cover knowledge-base article):
+//
+//   Width  = 2 × trim + spine + 2 × bleed   (0.125" bleed on left + right)
+//   Height = trim + 2 × bleed               (0.125" bleed top + bottom)
+//
+// The casewrap wrap that exists on Lulu's *downloadable* hardcover
+// template is added by Lulu during binding — uploaded PDFs should NOT
+// include it, or Lulu rejects the upload with "incorrect dimensions".
 // ---------------------------------------------------------------------------
-
-const COVER_WRAP_IN = 0.75;
 
 export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
@@ -584,14 +590,15 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
 
   const pageCount = Math.max(story.pages.length, MIN_INTERIOR_PAGES);
   const spineIn = hardcoverSpineWidthIn(pageCount);
-  const widthIn = TRIM_IN * 2 + spineIn + COVER_WRAP_IN * 2;
-  const heightIn = TRIM_IN + COVER_WRAP_IN * 2;
+  const widthIn = TRIM_IN * 2 + spineIn + BLEED_IN * 2;
+  const heightIn = TRIM_IN + BLEED_IN * 2;
   const width = widthIn * PT_PER_IN;
   const height = heightIn * PT_PER_IN;
 
   const page = pdf.addPage([width, height]);
 
-  // Full-bleed background color so the physical casewrap is never white.
+  // Full-bleed background color so the physical cover is never white
+  // on the trimmed edge.
   page.drawRectangle({
     x: 0,
     y: 0,
@@ -600,10 +607,11 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
     color: rgb(0.94, 0.91, 1.0),
   });
 
-  // Front cover occupies the right half of the spread (after the wrap).
+  // Front cover occupies the right half of the spread (after the
+  // back cover + spine, with the left-side bleed offset).
   const frontX =
-    COVER_WRAP_IN * PT_PER_IN + TRIM_IN * PT_PER_IN + spineIn * PT_PER_IN;
-  const frontY = COVER_WRAP_IN * PT_PER_IN;
+    BLEED_IN * PT_PER_IN + TRIM_IN * PT_PER_IN + spineIn * PT_PER_IN;
+  const frontY = BLEED_IN * PT_PER_IN;
   const trimPts = TRIM_IN * PT_PER_IN;
 
   // Front cover art: use the first page image as the cover illustration.
