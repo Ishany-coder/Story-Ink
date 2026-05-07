@@ -15,11 +15,11 @@ export const HARDCOVER_PER_PAGE_OVER_30_USD = 0.5;
 export const HARDCOVER_MARGIN_FLOOR = 1.3;
 
 // Digital tier — the pet-photo-grounded story unlocked for online
-// reading + PDF download. Net of Stripe ($0.44) + Gemini (~$1) at
-// $4.99 leaves $3.55 per sale, ~71% margin. Strategic role is
-// acquisition: cheap impulse buy that gets a customer in the door
-// before upselling to the $34.99 hardcover keepsake.
-export const DIGITAL_PRICE_USD = 4.99;
+// reading + PDF download. Net of Stripe ($0.59) + Gemini (~$1) at
+// $9.99 leaves $8.40 per sale, ~84% margin. Premium positioning:
+// matches Hekaya / Imagitime ebook tier. Bundled free with hardcover
+// so customers who upgrade never see a separate digital charge.
+export const DIGITAL_PRICE_USD = 9.99;
 
 // Returns the customer-facing price for a hardcover at the given
 // page count, given Lulu's just-quoted cost (print + shipping + tax).
