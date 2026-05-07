@@ -68,10 +68,10 @@ export async function createCheckoutSession(
           product_data: {
             name:
               args.quantity > 1
-                ? `${args.quantity} × printed story: ${args.storyTitle.slice(0, 70)}`
-                : `Printed story: ${args.storyTitle.slice(0, 80)}`,
+                ? `${args.quantity} × personalized hardcover: ${args.storyTitle.slice(0, 60)}`
+                : `Personalized hardcover: ${args.storyTitle.slice(0, 70)}`,
             description:
-              "8.5×8.5 hardcover, full-color interior, shipped by Lulu.",
+              "8.5×8.5 hardcover, full-color interior. Free US shipping.",
           },
           unit_amount: Math.round(args.amountUsd * 100),
         },

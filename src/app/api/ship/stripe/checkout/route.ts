@@ -4,6 +4,7 @@ import { createCheckoutSession } from "@/lib/stripe";
 import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lulu";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
+import { priceHardcoverUsd } from "@/lib/pricing";
 import type { Story, StoryPage } from "@/lib/types";
 import type { ShippingAddress } from "@/lib/lulu";
 
@@ -149,7 +150,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const amountUsd = Math.round(quote.totalUsd * 100) / 100;
+  // Customer-facing price = list price (with per-page surcharge over
+  // 30 pages) OR the Lulu cost × margin-floor multiplier, whichever
+  // is higher. Lulu's quote.totalUsd covers print + shipping + tax
+  // and is what we'd pay them; priceHardcoverUsd guarantees we keep
+  // at least the configured margin on top of that.
+  const pageCount = (story.pages as StoryPage[]).length;
+  const rawAmountUsd = priceHardcoverUsd(pageCount, quote.totalUsd);
+  const amountUsd = Math.round(rawAmountUsd * 100) / 100;
   if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
     return NextResponse.json(
       { error: "Quote returned an invalid total" },
@@ -280,6 +288,13 @@ async function createAdminOrder(args: {
           : "Test order via BYPASS_STRIPE — no payment; PDFs built.",
       actor_id: args.userId,
     });
+    // Hardcover bundle includes the digital tier — unlock the online
+    // reader + PDF download. Same on the bypass path so testing
+    // matches production behavior.
+    await admin
+      .from("stories")
+      .update({ digital_unlocked: true })
+      .eq("id", args.storyId);
   } catch (err) {
     console.error("[admin order] pdf build failed:", err);
     await admin

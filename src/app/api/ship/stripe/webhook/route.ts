@@ -4,6 +4,7 @@ import {
   retrieveCheckoutSession,
 } from "@/lib/stripe";
 import { fulfillFromSession } from "@/lib/ship-fulfill";
+import { supabaseAdmin } from "@/lib/supabase";
 import type Stripe from "stripe";
 
 // Authoritative Stripe webhook. Configure it in the Stripe dashboard
@@ -77,6 +78,40 @@ export async function POST(request: Request) {
     // 5xx => Stripe retries. Transient network errors shouldn't drop
     // the order on the floor.
     return NextResponse.json({ error: "Temporary" }, { status: 503 });
+  }
+
+  // Branch on the metadata.kind we set at session-creation time.
+  // Digital purchases just unlock the story; they don't run the
+  // print fulfillment pipeline.
+  if (session.metadata?.kind === "digital") {
+    const storyId = session.metadata?.story_id;
+    if (!storyId) {
+      console.warn(
+        "[stripe/webhook] digital session missing story_id metadata"
+      );
+      return NextResponse.json(
+        { received: true, nonRetryable: true, error: "missing story_id" },
+        { status: 200 }
+      );
+    }
+    if (session.payment_status !== "paid") {
+      return NextResponse.json(
+        { received: true, ignored: "unpaid" },
+        { status: 200 }
+      );
+    }
+    const { error: updateErr } = await supabaseAdmin()
+      .from("stories")
+      .update({ digital_unlocked: true })
+      .eq("id", storyId);
+    if (updateErr) {
+      console.error("[stripe/webhook] digital unlock failed:", updateErr);
+      return NextResponse.json(
+        { error: "Couldn't unlock digital story" },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json({ received: true, kind: "digital", storyId });
   }
 
   const outcome = await fulfillFromSession(session);

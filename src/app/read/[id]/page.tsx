@@ -4,16 +4,22 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { Story } from "@/lib/types";
 import SlideReader from "@/components/SlideReader";
 import AdminExportPdfButton from "@/components/AdminExportPdfButton";
+import DigitalUpsell from "@/components/DigitalUpsell";
+import { DIGITAL_PRICE_USD } from "@/lib/pricing";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 export const revalidate = 0;
+// Force dynamic so the unlock state propagates instantly after a Stripe
+// return — the user shouldn't see a stale "locked" version after paying.
+export const dynamic = "force-dynamic";
 
 // Reading is allowed for public stories without sign-in — RLS shows
-// is_public=true rows to anon. Owners can also read their private rows.
-//
-// Admins bypass RLS via the service-role client so they can preview
-// any customer's storybook before fulfilling a print order.
+// is_public=true rows to anon. Owners can also read their own rows
+// (RLS too), but the owner has to unlock the digital tier (or pay for
+// a hardcover, which auto-unlocks) before they see the full story —
+// they get a 3-page watermarked preview otherwise. Admins bypass
+// everything.
 export default async function ReadStoryPage({
   params,
 }: {
@@ -34,7 +40,11 @@ export default async function ReadStoryPage({
     notFound();
   }
 
-  const story = data as Story;
+  const story = data as Story & {
+    user_id?: string | null;
+    digital_unlocked?: boolean;
+    is_public?: boolean;
+  };
 
   if (!story.pages || story.pages.length === 0) {
     return (
@@ -48,6 +58,21 @@ export default async function ReadStoryPage({
         </Link>
       </div>
     );
+  }
+
+  // Full-access conditions:
+  //   - admin
+  //   - story is public (is_public=true)
+  //   - digital tier unlocked (paid OR backfilled grandfather row)
+  // If none of those hold and the viewer is the owner, show the
+  // upsell. If they're not the owner, RLS already hid the row above
+  // and we never reach this point.
+  const fullAccess =
+    admin || story.digital_unlocked === true || story.is_public === true;
+  const isOwner = !!user && story.user_id === user.id;
+
+  if (!fullAccess && isOwner) {
+    return <DigitalUpsell story={story} priceUsd={DIGITAL_PRICE_USD} />;
   }
 
   return (

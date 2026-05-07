@@ -119,6 +119,13 @@ alter table public.stories
   -- regenerations and AI Assistant tweaks pick up the same look.
   add column if not exists image_style text not null default 'watercolor';
 
+-- Digital purchase flag. When true, anyone with the story's link can
+-- read all pages (paid digital tier). When false, non-owners see only
+-- a watermarked 3-page preview. Owners always see the full story
+-- regardless of this flag.
+alter table public.stories
+  add column if not exists digital_unlocked boolean not null default false;
+
 create index if not exists stories_created_at_idx on public.stories (created_at desc);
 create index if not exists stories_user_id_idx on public.stories (user_id);
 create index if not exists stories_pet_id_idx on public.stories (pet_id);

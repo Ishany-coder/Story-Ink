@@ -287,6 +287,14 @@ export async function fulfillFromSession(
     note: "Stripe payment confirmed; PDFs built; awaiting manual fulfillment.",
   });
 
+  // Hardcover bundle includes digital — unlock the online reader +
+  // PDF download for the buyer at the same time. No-op if already
+  // unlocked.
+  await admin
+    .from("stories")
+    .update({ digital_unlocked: true })
+    .eq("id", storyId);
+
   return {
     ok: true,
     orderId,
