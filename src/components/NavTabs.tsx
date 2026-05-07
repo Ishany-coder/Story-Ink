@@ -38,6 +38,12 @@ const TABS: Tab[] = [
     matches: (p) => p === "/orders" || p.startsWith("/orders/"),
     adminOnly: true,
   },
+  {
+    label: "Stats",
+    href: "/admin/stats",
+    matches: (p) => p.startsWith("/admin/stats"),
+    adminOnly: true,
+  },
 ];
 
 export default function NavTabs({ isAdmin = false }: { isAdmin?: boolean }) {
