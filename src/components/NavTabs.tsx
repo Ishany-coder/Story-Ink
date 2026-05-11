@@ -11,10 +11,12 @@ import type { NavFlags } from "@/lib/nav-flags";
 // The "+ New story" CTA lives outside this strip — see Navbar.tsx.
 // These tabs are pure browse/destination links.
 //
-// Per-tab visibility is controlled server-side via the SHOW_*
-// environment variables (see src/lib/nav-flags.ts). Setting
-// SHOW_SHIP=false in .env hides Ship from every user; default for
-// unset env vars is visible.
+// Per-tab visibility for the admin only is controlled server-side
+// via the SHOW_* environment variables (see src/lib/nav-flags.ts).
+// Setting SHOW_SHIP=false in .env hides Ship from the admin's
+// navbar; regular users always see every non-admin-only tab
+// regardless of the flag values. Default for unset env vars is
+// visible.
 
 interface Tab {
   label: string;
@@ -89,9 +91,14 @@ export default function NavTabs({
   flags: NavFlags;
 }) {
   const pathname = usePathname();
-  const visible = TABS.filter(
-    (t) => (!t.adminOnly || isAdmin) && flags[t.flag]
-  );
+  // Admin-only tabs are gated on isAdmin first. The SHOW_* flags
+  // then apply to the admin's view *only* — regular users see every
+  // non-admin-only tab regardless of how the env vars are set.
+  const visible = TABS.filter((t) => {
+    if (t.adminOnly && !isAdmin) return false;
+    if (isAdmin && !flags[t.flag]) return false;
+    return true;
+  });
 
   return (
     <div className="hidden items-center gap-1 sm:flex">

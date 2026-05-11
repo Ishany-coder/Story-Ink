@@ -1,6 +1,8 @@
-// Server-side feature flags for navbar visibility. Each flag maps to
-// an env var like SHOW_SHIP — set to "false" to hide that tab from
-// every user (admin and non-admin alike). Default is visible.
+// Server-side feature flags for navbar visibility on the *admin's*
+// view. Each flag maps to an env var like SHOW_SHIP — set to "false"
+// to hide that tab from the admin only. Regular users always see
+// every non-admin-only tab regardless of how these flags are set.
+// Default is visible.
 //
 // Read in server components only (relies on process.env). The result
 // is a plain object that can be passed as a prop into client

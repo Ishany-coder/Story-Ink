@@ -28,7 +28,7 @@ export default async function Navbar() {
 
         <div className="flex items-center gap-4">
           {user ? <NavTabs isAdmin={admin} flags={flags} /> : null}
-          {user && flags.help ? (
+          {user && (!admin || flags.help) ? (
             <SupportChatLauncher isAdmin={admin} />
           ) : null}
 
