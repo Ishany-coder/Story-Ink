@@ -5,32 +5,42 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 
-// Help pill in the navbar. Polls /api/support/unread every 30s so a
-// blue dot appears when the admin has replied since the user last
-// opened /help. The button itself is just a Link — the actual chat
-// UI lives on its own page at /help.
+// Help pill in the navbar. Routes differently based on admin status:
+//   - Admin → /admin/support (inbox of every user's thread)
+//   - User  → /help (their own conversation with the admin)
+//
+// Polls the matching unread endpoint every 30s so a blue dot appears
+// when there's something to act on. Stops polling when the user is
+// already on the destination page (nothing to nudge them about).
 //
 // Auth-gated upstream: parent only renders this when there's a
 // signed-in user.
 
 const POLL_MS = 30_000;
 
-export default function SupportChatLauncher() {
+export default function SupportChatLauncher({
+  isAdmin = false,
+}: {
+  isAdmin?: boolean;
+}) {
   const pathname = usePathname();
-  const onHelpPage = pathname?.startsWith("/help") ?? false;
+  const destination = isAdmin ? "/admin/support" : "/help";
+  const onDestination = pathname?.startsWith(destination) ?? false;
+  const unreadEndpoint = isAdmin
+    ? "/api/admin/support/unread"
+    : "/api/support/unread";
+
   const [hasUnread, setHasUnread] = useState(false);
 
-  // Stop polling while the user is on /help — the chat page is
-  // already loading + reading messages, no need for the dot.
   useEffect(() => {
-    if (onHelpPage) {
+    if (onDestination) {
       setHasUnread(false);
       return;
     }
     const ac = new AbortController();
     const check = async () => {
       try {
-        const res = await fetch("/api/support/unread", {
+        const res = await fetch(unreadEndpoint, {
           cache: "no-store",
           signal: ac.signal,
         });
@@ -49,23 +59,23 @@ export default function SupportChatLauncher() {
       ac.abort();
       clearInterval(id);
     };
-  }, [onHelpPage]);
+  }, [onDestination, unreadEndpoint]);
 
   return (
     <Link
-      href="/help"
-      aria-label="Help chat"
+      href={destination}
+      aria-label={isAdmin ? "Customer support inbox" : "Help chat"}
       className={`relative hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors sm:inline-flex ${
-        onHelpPage
+        onDestination
           ? "bg-ink-900 text-cream-50"
           : "text-ink-500 hover:bg-cream-200 hover:text-ink-900"
       }`}
     >
       <MessageCircle className="h-3.5 w-3.5" />
       Help
-      {hasUnread && !onHelpPage && (
+      {hasUnread && !onDestination && (
         <span
-          aria-label="Unread admin reply"
+          aria-label="Unread message"
           className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-moss-700 ring-2 ring-cream-100"
         />
       )}

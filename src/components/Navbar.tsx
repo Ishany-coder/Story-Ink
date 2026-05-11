@@ -26,7 +26,7 @@ export default async function Navbar() {
 
         <div className="flex items-center gap-4">
           {user ? <NavTabs isAdmin={admin} /> : null}
-          {user ? <SupportChatLauncher /> : null}
+          {user ? <SupportChatLauncher isAdmin={admin} /> : null}
 
           {user ? (
             <div className="flex items-center gap-3">
