@@ -46,38 +46,55 @@ export default function AdminSupportInbox() {
   const [error, setError] = useState<string | null>(null);
   const convScrollRef = useRef<HTMLDivElement>(null);
 
-  const loadThreads = useCallback(async () => {
+  const loadThreads = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/admin/support", { cache: "no-store" });
+      const res = await fetch("/api/admin/support", {
+        cache: "no-store",
+        signal,
+      });
       if (!res.ok) return;
       const data = (await res.json()) as { threads?: ThreadSummary[] };
+      if (signal?.aborted) return;
       const list = data.threads ?? [];
       setThreads(list);
       // Default selection: first thread (already sorted by recency).
       setSelectedId((prev) => prev ?? list[0]?.id ?? null);
     } catch (err) {
-      console.warn("[admin/support] list failed:", err);
+      if (!isAbortError(err)) {
+        console.warn("[admin/support] list failed:", err);
+      }
     }
   }, []);
 
-  const loadConversation = useCallback(async (threadId: string) => {
-    try {
-      const res = await fetch(`/api/admin/support/${threadId}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as { messages?: Message[] };
-      setMessages(data.messages ?? []);
-    } catch (err) {
-      console.warn("[admin/support] conv failed:", err);
-    }
-  }, []);
+  const loadConversation = useCallback(
+    async (threadId: string, signal?: AbortSignal) => {
+      try {
+        const res = await fetch(`/api/admin/support/${threadId}`, {
+          cache: "no-store",
+          signal,
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { messages?: Message[] };
+        if (signal?.aborted) return;
+        setMessages(data.messages ?? []);
+      } catch (err) {
+        if (!isAbortError(err)) {
+          console.warn("[admin/support] conv failed:", err);
+        }
+      }
+    },
+    []
+  );
 
   // Thread-list polling.
   useEffect(() => {
-    loadThreads();
-    const id = setInterval(loadThreads, POLL_LIST_MS);
-    return () => clearInterval(id);
+    const ac = new AbortController();
+    loadThreads(ac.signal);
+    const id = setInterval(() => loadThreads(ac.signal), POLL_LIST_MS);
+    return () => {
+      ac.abort();
+      clearInterval(id);
+    };
   }, [loadThreads]);
 
   // Conversation polling — reset interval when selection changes.
@@ -86,9 +103,16 @@ export default function AdminSupportInbox() {
       setMessages([]);
       return;
     }
-    loadConversation(selectedId);
-    const id = setInterval(() => loadConversation(selectedId), POLL_CONV_MS);
-    return () => clearInterval(id);
+    const ac = new AbortController();
+    loadConversation(selectedId, ac.signal);
+    const id = setInterval(
+      () => loadConversation(selectedId, ac.signal),
+      POLL_CONV_MS
+    );
+    return () => {
+      ac.abort();
+      clearInterval(id);
+    };
   }, [selectedId, loadConversation]);
 
   // Auto-scroll on new messages.
@@ -275,6 +299,20 @@ export default function AdminSupportInbox() {
       </div>
     </div>
   );
+}
+
+// Silently swallow cancelled fetches (effect cleanup, HMR reloads,
+// page-nav). Different runtimes throw either a DOMException with
+// name='AbortError' or a TypeError with message 'Failed to fetch'.
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (
+    err instanceof TypeError &&
+    /aborted|cancel|fail/i.test(err.message)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function Bubble({ message }: { message: Message }) {

@@ -34,47 +34,65 @@ export default function SupportChatLauncher() {
 
   // Closed-state unread polling. Runs whenever the panel is closed
   // so the blue dot stays in sync without holding the whole thread
-  // in memory.
+  // in memory. Each poll is wrapped in an AbortController whose
+  // signal fires when the effect re-runs, so cancelled requests
+  // exit silently instead of throwing "Failed to fetch" in the
+  // console.
   useEffect(() => {
     if (open) return;
-    let cancelled = false;
+    const ac = new AbortController();
     const check = async () => {
       try {
-        const res = await fetch("/api/support/unread", { cache: "no-store" });
+        const res = await fetch("/api/support/unread", {
+          cache: "no-store",
+          signal: ac.signal,
+        });
         if (!res.ok) return;
         const data = (await res.json()) as { unread?: boolean };
-        if (!cancelled) setHasUnread(!!data.unread);
-      } catch {
-        /* swallow */
+        if (!ac.signal.aborted) setHasUnread(!!data.unread);
+      } catch (err) {
+        if (!isAbortError(err)) {
+          console.warn("[support] unread check failed:", err);
+        }
       }
     };
     check();
     const id = setInterval(check, POLL_CLOSED_MS);
     return () => {
-      cancelled = true;
+      ac.abort();
       clearInterval(id);
     };
   }, [open]);
 
-  const loadThread = useCallback(async () => {
+  const loadThread = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/support", { cache: "no-store" });
+      const res = await fetch("/api/support", {
+        cache: "no-store",
+        signal,
+      });
       if (!res.ok) return;
       const data = (await res.json()) as { messages?: Message[] };
+      if (signal?.aborted) return;
       setMessages(data.messages ?? []);
       // Opening the panel also clears unread (the API marks read).
       setHasUnread(false);
     } catch (err) {
-      console.warn("[support] load failed:", err);
+      if (!isAbortError(err)) {
+        console.warn("[support] load failed:", err);
+      }
     }
   }, []);
 
   // Open-state message polling.
   useEffect(() => {
     if (!open) return;
-    loadThread();
-    const id = setInterval(loadThread, POLL_OPEN_MS);
-    return () => clearInterval(id);
+    const ac = new AbortController();
+    loadThread(ac.signal);
+    const id = setInterval(() => loadThread(ac.signal), POLL_OPEN_MS);
+    return () => {
+      ac.abort();
+      clearInterval(id);
+    };
   }, [open, loadThread]);
 
   // Auto-scroll to bottom on new messages.
@@ -103,7 +121,8 @@ export default function SupportChatLauncher() {
       }
       setDraft("");
       // Fetch updated messages immediately so the user sees their
-      // own bubble appear without waiting for the next poll.
+      // own bubble appear without waiting for the next poll. No
+      // signal — the user-initiated send shouldn't be cancellable.
       await loadThread();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't send");
@@ -203,6 +222,21 @@ export default function SupportChatLauncher() {
       )}
     </>
   );
+}
+
+// Aborted fetches throw a DOMException with name === "AbortError"
+// (or, in some runtimes, a TypeError with message "Failed to fetch"
+// when the request is cancelled before it resolves). Treat both as
+// expected silent cancellations.
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  if (
+    err instanceof TypeError &&
+    /aborted|cancel|fail/i.test(err.message)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function Bubble({ message }: { message: Message }) {
