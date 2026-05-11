@@ -351,6 +351,85 @@ create policy "events readable for the order's owner"
   );
 
 -- ---------------------------------------------------------------------------
+-- Support chat
+--
+-- One ongoing thread per user (UNIQUE on user_id). Users read/write
+-- their own thread via RLS; the admin uses the service-role client
+-- and bypasses RLS to read every thread and reply.
+--
+-- Read-receipt timestamps power the "blue dot" indicators on both
+-- sides: the user sees a dot when the admin replied after their
+-- last read; the admin sees a dot when the user messaged after the
+-- admin's last read.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.support_threads (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  last_message_at timestamptz not null default now(),
+  user_last_read_at timestamptz not null default now(),
+  admin_last_read_at timestamptz not null default now()
+);
+
+create index if not exists support_threads_user_id_idx
+  on public.support_threads (user_id);
+create index if not exists support_threads_last_message_idx
+  on public.support_threads (last_message_at desc);
+
+create table if not exists public.support_messages (
+  id uuid primary key default gen_random_uuid(),
+  thread_id uuid not null references public.support_threads(id) on delete cascade,
+  sender text not null check (sender in ('user','admin')),
+  body text not null check (length(body) > 0 and length(body) <= 4000),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists support_messages_thread_idx
+  on public.support_messages (thread_id, created_at);
+
+alter table public.support_threads enable row level security;
+alter table public.support_messages enable row level security;
+
+drop policy if exists "users read own support thread" on public.support_threads;
+create policy "users read own support thread"
+  on public.support_threads for select
+  using (user_id = auth.uid());
+
+drop policy if exists "users insert own support thread" on public.support_threads;
+create policy "users insert own support thread"
+  on public.support_threads for insert
+  with check (user_id = auth.uid());
+
+drop policy if exists "users update own support thread" on public.support_threads;
+create policy "users update own support thread"
+  on public.support_threads for update
+  using (user_id = auth.uid());
+
+drop policy if exists "users read own support messages" on public.support_messages;
+create policy "users read own support messages"
+  on public.support_messages for select
+  using (
+    exists (
+      select 1 from public.support_threads t
+      where t.id = support_messages.thread_id
+        and t.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "users insert own support messages" on public.support_messages;
+create policy "users insert own support messages"
+  on public.support_messages for insert
+  with check (
+    sender = 'user'
+    and exists (
+      select 1 from public.support_threads t
+      where t.id = support_messages.thread_id
+        and t.user_id = auth.uid()
+    )
+  );
+
+-- ---------------------------------------------------------------------------
 -- Atomic per-page updater (unchanged from previous schema). Used by
 -- overlay saves and AI regeneration to avoid a read-modify-write race
 -- on the entire stories.pages JSONB array.

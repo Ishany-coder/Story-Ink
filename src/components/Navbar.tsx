@@ -7,6 +7,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import NavTabs from "./NavTabs";
+import SupportChatLauncher from "./SupportChatLauncher";
 
 export default async function Navbar() {
   const user = await getCurrentUser();
@@ -25,6 +26,7 @@ export default async function Navbar() {
 
         <div className="flex items-center gap-4">
           {user ? <NavTabs isAdmin={admin} /> : null}
+          {user ? <SupportChatLauncher /> : null}
 
           {user ? (
             <div className="flex items-center gap-3">
