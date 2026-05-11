@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { NavFlags } from "@/lib/nav-flags";
 
 // Tab strip in the navbar. Pulled out as a client component so the
 // parent navbar can stay a server component (and read user session
@@ -9,52 +10,88 @@ import { usePathname } from "next/navigation";
 //
 // The "+ New story" CTA lives outside this strip — see Navbar.tsx.
 // These tabs are pure browse/destination links.
+//
+// Per-tab visibility is controlled server-side via the SHOW_*
+// environment variables (see src/lib/nav-flags.ts). Setting
+// SHOW_SHIP=false in .env hides Ship from every user; default for
+// unset env vars is visible.
 
 interface Tab {
   label: string;
   href: string;
   matches: (p: string) => boolean;
   adminOnly?: boolean;
+  // Key into the NavFlags map. When the flag is false, the tab is
+  // hidden regardless of admin status.
+  flag: keyof NavFlags;
 }
 
 const TABS: Tab[] = [
-  { label: "Home", href: "/", matches: (p) => p === "/" },
-  { label: "Pets", href: "/pets", matches: (p) => p.startsWith("/pets") },
-  { label: "Read", href: "/read", matches: (p) => p.startsWith("/read") },
+  { label: "Home", href: "/", matches: (p) => p === "/", flag: "home" },
+  {
+    label: "Pets",
+    href: "/pets",
+    matches: (p) => p.startsWith("/pets"),
+    flag: "pets",
+  },
+  {
+    label: "Read",
+    href: "/read",
+    matches: (p) => p.startsWith("/read"),
+    flag: "read",
+  },
   {
     label: "Studio",
     href: "/canvas",
     matches: (p) => p.startsWith("/canvas"),
+    flag: "studio",
   },
-  { label: "Ship", href: "/ship", matches: (p) => p.startsWith("/ship") },
+  {
+    label: "Ship",
+    href: "/ship",
+    matches: (p) => p.startsWith("/ship"),
+    flag: "ship",
+  },
   {
     label: "My orders",
     href: "/my-orders",
     matches: (p) => p.startsWith("/my-orders"),
+    flag: "myOrders",
   },
   {
     label: "Orders",
     href: "/orders",
     matches: (p) => p === "/orders" || p.startsWith("/orders/"),
     adminOnly: true,
+    flag: "orders",
   },
   {
     label: "Stats",
     href: "/admin/stats",
     matches: (p) => p.startsWith("/admin/stats"),
     adminOnly: true,
+    flag: "stats",
   },
   {
     label: "Support",
     href: "/admin/support",
     matches: (p) => p.startsWith("/admin/support"),
     adminOnly: true,
+    flag: "support",
   },
 ];
 
-export default function NavTabs({ isAdmin = false }: { isAdmin?: boolean }) {
+export default function NavTabs({
+  isAdmin = false,
+  flags,
+}: {
+  isAdmin?: boolean;
+  flags: NavFlags;
+}) {
   const pathname = usePathname();
-  const visible = TABS.filter((t) => !t.adminOnly || isAdmin);
+  const visible = TABS.filter(
+    (t) => (!t.adminOnly || isAdmin) && flags[t.flag]
+  );
 
   return (
     <div className="hidden items-center gap-1 sm:flex">
