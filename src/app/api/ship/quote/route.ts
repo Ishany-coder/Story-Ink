@@ -65,17 +65,19 @@ export async function POST(request: Request) {
   const unitUsd = priceHardcoverUsd(pageCount);
   const totalUsd = Math.round(unitUsd * quantity * 100) / 100;
 
+  // Response shape matches what the legacy Lulu-quote route returned
+  // (`printCostUsd` / `shippingCostUsd` / `taxUsd` / `totalUsd` /
+  // `currency`) so existing ShipStoryPage consumers keep working
+  // without a separate UI refactor. Shipping + tax are reported as 0
+  // — they're bundled into the list price now.
   return NextResponse.json({
     pageCount,
     quantity,
     unitUsd,
-    totalUsd,
-    // Kept in the response shape so existing UI consumers that read
-    // `printUsd` / `shippingUsd` / `taxUsd` don't crash. Shipping is
-    // bundled into the list price now, so shipping/tax are reported
-    // as zero rather than removed entirely.
-    printUsd: totalUsd,
-    shippingUsd: 0,
+    printCostUsd: totalUsd,
+    shippingCostUsd: 0,
     taxUsd: 0,
+    totalUsd,
+    currency: "USD",
   });
 }
