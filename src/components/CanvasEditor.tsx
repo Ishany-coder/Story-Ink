@@ -1145,146 +1145,185 @@ export default function CanvasEditor({
     [selectedLayer]
   );
 
+  // Pages strip groups pages into "spreads" (1·2, 3·4, ...). Build them once
+  // per page-count change so the bottom filmstrip can render in one pass.
+  const spreads: Array<[
+    typeof story.pages[number],
+    typeof story.pages[number] | undefined
+  ]> = [];
+  for (let i = 0; i < story.pages.length; i += 2) {
+    spreads.push([story.pages[i], story.pages[i + 1]]);
+  }
+
+  // Living vs memorial re-tints all accent surfaces. Forest is the
+  // default living accent; indigo is calmer for memorial stories.
+  // Resolved against the palette tokens added in globals.css.
+  const isMemorial = pet?.mode === "memorial";
+  const accent = isMemorial
+    ? "var(--color-indigo-500)"
+    : "var(--color-forest-500)";
+
+  // Floating AI dock visibility — when the user opens the assistant from a
+  // suggestion or the FAB. Sits position:fixed at bottom-right so it never
+  // competes with the canvas for horizontal space.
+  const [aiDockOpen, setAiDockOpen] = useState(false);
+
+  // Layout descriptions for the 2-col grid in the Layouts tab. The Layout
+  // type itself has no description field (it's a pure region spec) so we
+  // co-locate the human copy here. Keyed by layout id.
+  const LAYOUT_DESCRIPTIONS: Record<string, string> = {
+    "top-image-bottom-text": "⅔ image, ⅓ text below",
+    "full-bleed-caption": "Illustration fills the page",
+    "side-by-side": "Image left, text right",
+    "corner-caption": "Small caption tucked in a corner",
+    "pet-portrait": "Centered portrait with caption",
+    "in-loving-memory": "Soft frame · name + dates",
+    "photo-strip": "Three photos + long caption",
+    "quote-spread": "Image left, pull-quote right",
+  };
+
+  // Inspector idle-state quick prompts. These open the AI dock; the prompt
+  // is for inspiration — the user still types into the dock themselves so
+  // the actual generate is intentional.
+  const AI_SUGGESTIONS = [
+    "Make the morning light warmer",
+    "Rewrite paragraph in shorter sentences",
+    "Add a butterfly somewhere subtle",
+    "Match illustration to page 1",
+  ];
+
+  const lastSaved = useMemo(() => {
+    // We don't track per-page save timestamps server-side, so fall back to
+    // a stable "draft" / "dirty" / "saved just now" indicator that mirrors
+    // what the user actually cares about: is anything unsaved.
+    if (saving) return "saving…";
+    if (dirtyPageCount > 0)
+      return dirtyPageCount === 1
+        ? "1 page unsaved"
+        : `${dirtyPageCount} pages unsaved`;
+    return "all changes saved";
+  }, [saving, dirtyPageCount]);
+
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6">
-      {/* Header */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
+    <div className="mx-auto flex max-w-[1440px] flex-col gap-3 px-6 py-3">
+      {/* Story header — breadcrumb, title, meta on the left; history +
+          save controls on the right. Sized to feel like a chapter
+          opener, not a toolbar. */}
+      <header className="flex flex-wrap items-end justify-between gap-4 px-1 pb-1">
+        <div className="min-w-0">
           <Link
             href="/canvas"
-            className="text-sm font-bold text-ink-300 hover:text-moss-700"
+            className="text-[11px] font-medium text-stone-500 transition-colors hover:text-sage-700"
           >
-            &larr; All stories
+            ← All stories &nbsp;·&nbsp; Studio
           </Link>
-          <h1 className="mt-1 font-[family-name:var(--font-display)] text-2xl font-bold text-ink-900">
-            Studio: {story.title}
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          {saveError && (
-            <span className="text-sm font-bold text-rose-500">{saveError}</span>
-          )}
-          {dirtyPageCount > 0 && !saving && (
-            <span className="text-sm font-bold text-amber-500">
-              {dirtyPageCount === 1
-                ? "Unsaved changes"
-                : `${dirtyPageCount} pages unsaved`}
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <h1 className="font-[family-name:var(--font-display)] text-[32px] font-semibold leading-tight tracking-tight text-bark-900">
+              {story.title}
+            </h1>
+            <span className="text-xs text-stone-500">
+              {story.pages.length} pages &nbsp;·&nbsp; draft &nbsp;·&nbsp; {lastSaved}
             </span>
-          )}
-          <div className="flex items-center gap-1 rounded-full border border-cream-300 bg-cream-50 p-1">
-            <button
-              type="button"
-              onClick={handleUndo}
-              disabled={!history.canUndo}
-              title="Undo (⌘Z)"
-              aria-label="Undo"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-700 transition-colors hover:bg-cream-200 disabled:cursor-not-allowed disabled:text-ink-300 disabled:hover:bg-transparent"
-            >
-              <Undo2 size={16} strokeWidth={2} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={handleRedo}
-              disabled={!history.canRedo}
-              title="Redo (⌘⇧Z)"
-              aria-label="Redo"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-700 transition-colors hover:bg-cream-200 disabled:cursor-not-allowed disabled:text-ink-300 disabled:hover:bg-transparent"
-            >
-              <Redo2 size={16} strokeWidth={2} aria-hidden="true" />
-            </button>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {saveError && (
+            <span className="text-xs font-medium text-clay-500">{saveError}</span>
+          )}
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={!history.canUndo}
+            title="Undo (⌘Z)"
+            aria-label="Undo"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-linen-200 bg-paper text-sage-700 transition-colors hover:border-stone-500/30 disabled:cursor-not-allowed disabled:text-stone-500/30 disabled:hover:border-linen-200"
+          >
+            <Undo2 size={14} strokeWidth={1.75} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={!history.canRedo}
+            title="Redo (⌘⇧Z)"
+            aria-label="Redo"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-linen-200 bg-paper text-sage-700 transition-colors hover:border-stone-500/30 disabled:cursor-not-allowed disabled:text-stone-500/30 disabled:hover:border-linen-200"
+          >
+            <Redo2 size={14} strokeWidth={1.75} aria-hidden="true" />
+          </button>
+          {/* "Save page" — outline pill, accent-tinted. The secondary action. */}
           <button
             type="button"
             onClick={savePage}
             disabled={saving || !isDirty}
-            className="rounded-2xl bg-gradient-to-r from-moss-700 to-moss-700 px-5 py-2 text-sm font-black text-cream-50 shadow-md shadow-cream-300 transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+            style={{ borderColor: accent, color: accent }}
+            className="rounded-full border bg-paper px-4 py-2 text-[13px] font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {saving ? "Saving..." : "Save page"}
+            {saving ? "Saving…" : "Save page"}
           </button>
+          {/* "Save all" — filled accent pill. The primary action. */}
           <button
             type="button"
             onClick={saveAllPages}
-            disabled={saving || dirtyPageCount < 2}
+            disabled={saving || dirtyPageCount < 1}
             title={
-              dirtyPageCount < 2
-                ? "No other pages have unsaved changes"
-                : `Save ${dirtyPageCount} pages`
+              dirtyPageCount < 1
+                ? "Nothing to save"
+                : `Save ${dirtyPageCount} ${dirtyPageCount === 1 ? "page" : "pages"}`
             }
-            className="rounded-2xl border-2 border-cream-400 bg-cream-50 px-4 py-2 text-sm font-black text-moss-700 shadow-sm transition-all hover:border-moss-500 hover:bg-cream-200 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: accent }}
+            className="rounded-full px-4 py-2 text-[13px] font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
           >
             {saving
-              ? "Saving..."
+              ? "Saving…"
               : dirtyPageCount > 1
               ? `Save all (${dirtyPageCount})`
               : "Save all"}
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Page selector */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        {story.pages.map((p, i) => (
-          <button
-            key={p.pageNumber}
-            type="button"
-            onClick={() => {
-              setPageIdx(i);
-              setSelectedId(null);
-              setEditingTextId(null);
-            }}
-            className={`rounded-full px-4 py-1.5 text-xs font-black transition-all ${
-              i === pageIdx
-                ? "bg-gradient-to-r from-moss-500 to-moss-500 text-cream-50 shadow-md"
-                : "bg-cream-200 text-ink-300 hover:bg-moss-100"
-            } ${dirty[p.pageNumber] ? "ring-2 ring-amber-300" : ""}`}
-          >
-            Page {p.pageNumber}
-          </button>
-        ))}
-      </div>
-
-      {/* Symmetric side panels (240px each) so the canvas sits in the
-          actual center of the viewport. Earlier shape (220px / 260px)
-          pushed the canvas ~20px off-center because the right panel
-          ate more horizontal space than the left. */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)_240px]">
+      {/* Workspace — fixed-width side rails so the canvas sits perfectly
+          centred. Heights line up to a calc'd viewport target so the
+          bottom Pages rail is always visible on a 900px+ screen. */}
+      <div className="grid min-h-[640px] grid-cols-1 gap-[18px] lg:grid-cols-[290px_minmax(0,1fr)_334px]">
         {/* Left: tools sidebar */}
-        <aside className="rounded-3xl border-2 border-cream-300 bg-cream-50 p-4 shadow-sm">
-          <div className="mb-4 grid grid-cols-3 gap-1">
+        <aside className="flex flex-col overflow-hidden rounded-[10px] border border-linen-200 bg-cream-50 p-4">
+          <div className="mb-3 flex flex-wrap items-center gap-1">
             {(
               [
                 "layouts",
                 "text",
                 "shapes",
                 "images",
-                "assistant",
-              ] as SidebarTab[]
+              ] as Exclude<SidebarTab, "assistant">[]
             ).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
-                className={`rounded-xl px-2 py-2 text-[11px] font-black uppercase transition-all ${
+                style={
                   tab === t
-                    ? "bg-ink-900 text-cream-50 shadow-sm"
-                    : "bg-cream-200 text-ink-500 hover:bg-cream-300 hover:text-ink-900"
+                    ? { background: "var(--color-bark-900)", color: "var(--color-cream-50)" }
+                    : undefined
+                }
+                className={`rounded-full px-3 py-[7px] text-[11px] font-semibold uppercase tracking-[.10em] transition-colors ${
+                  tab === t ? "" : "text-sage-700 hover:bg-cream-200"
                 }`}
               >
-                {t === "assistant" ? "AI" : t}
+                {t}
               </button>
             ))}
           </div>
-
-          {tab === "layouts" && !defineMode && (
-            <div className="space-y-2">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {tab === "layouts" && !defineMode && (
               <div>
-                <div className="mb-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
+                <div className="mb-2 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
                   Apply to
                 </div>
                 <div
                   role="radiogroup"
                   aria-label="Layout apply scope"
-                  className="flex rounded-2xl border-2 border-cream-300 bg-cream-100/60 p-1"
+                  className="mb-4 flex rounded-lg border border-linen-200 bg-paper p-0.5"
                 >
                   {/* Order matches default: "This page" is the safe
                       action and ships first; "All pages" is the
@@ -1295,10 +1334,11 @@ export default function CanvasEditor({
                     role="radio"
                     aria-checked={layoutScope === "page"}
                     onClick={() => setLayoutScope("page")}
-                    className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
+                    style={layoutScope === "page" ? { color: accent } : undefined}
+                    className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
                       layoutScope === "page"
-                        ? "bg-cream-50 text-moss-700 shadow-sm"
-                        : "text-ink-300 hover:text-ink-500"
+                        ? "bg-cream-50 shadow-sm"
+                        : "text-stone-500 hover:text-sage-700"
                     }`}
                   >
                     This page
@@ -1308,147 +1348,170 @@ export default function CanvasEditor({
                     role="radio"
                     aria-checked={layoutScope === "all"}
                     onClick={() => setLayoutScope("all")}
-                    className={`flex-1 rounded-xl px-2 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
+                    style={layoutScope === "all" ? { color: accent } : undefined}
+                    className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
                       layoutScope === "all"
-                        ? "bg-cream-50 text-moss-700 shadow-sm"
-                        : "text-ink-300 hover:text-ink-500"
+                        ? "bg-cream-50 shadow-sm"
+                        : "text-stone-500 hover:text-sage-700"
                     }`}
                   >
                     All pages
                   </button>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={startDefineLayout}
-                className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-3 py-3 text-[11px] font-black uppercase text-ink-500 transition-all hover:border-moss-500 hover:bg-moss-100"
-              >
-                <span className="text-base leading-none">+</span>
-                Custom layout
-              </button>
-              {visibleBuiltinLayouts.map((l) => (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => applyLayout(l.id)}
-                  className={`w-full overflow-hidden rounded-2xl border-2 text-left transition-all ${
-                    currentLayoutId === l.id
-                      ? "border-moss-500 bg-cream-200 shadow-md"
-                      : "border-cream-300 bg-cream-50 hover:border-cream-400 hover:bg-cream-200"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 px-2 py-2">
-                    <LayoutThumbnail layout={l} />
-                    <span className="text-[11px] font-black uppercase text-ink-500">
-                      {l.name}
-                    </span>
-                  </div>
-                </button>
-              ))}
-              {customLayouts.length > 0 && (
-                <>
-                  <div className="pt-3 pb-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
-                    Your layouts
-                  </div>
-                  {customLayouts.map((l) => (
-                    <div
-                      key={l.id}
-                      className={`group relative w-full overflow-hidden rounded-2xl border-2 text-left transition-all ${
-                        currentLayoutId === l.id
-                          ? "border-moss-500 bg-cream-200 shadow-md"
-                          : "border-cream-300 bg-cream-50 hover:border-cream-400 hover:bg-cream-200"
-                      }`}
-                    >
+
+                {/* Built-in presets as a 2-col grid of cards — thumbnail
+                    on top, name + one-line description below. */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  {visibleBuiltinLayouts.map((l) => {
+                    const isActive = currentLayoutId === l.id;
+                    return (
                       <button
+                        key={l.id}
                         type="button"
                         onClick={() => applyLayout(l.id)}
-                        className="flex w-full items-center gap-2 px-2 py-2 text-left"
+                        style={
+                          isActive
+                            ? {
+                                outline: `2px solid ${accent}`,
+                                outlineOffset: -1,
+                                background: "var(--color-paper)",
+                              }
+                            : undefined
+                        }
+                        className={`overflow-hidden rounded-md p-2 text-left transition-colors ${
+                          isActive
+                            ? ""
+                            : "border border-linen-200 bg-cream-50 hover:bg-cream-100"
+                        }`}
                       >
                         <LayoutThumbnail layout={l} />
-                        <div className="flex min-w-0 flex-1 flex-col">
-                          <span className="truncate text-[11px] font-black uppercase text-ink-500">
-                            {l.name}
-                          </span>
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-ink-300">
-                            {l.scope === "global" ? "All books" : "This book"}
-                          </span>
+                        <div className="mt-2 text-[11px] font-semibold leading-tight text-bark-900">
+                          {l.name}
+                        </div>
+                        <div className="mt-0.5 text-[10px] leading-tight text-stone-500">
+                          {LAYOUT_DESCRIPTIONS[l.id] ?? ""}
                         </div>
                       </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={startDefineLayout}
+                  style={{ borderColor: accent, color: accent }}
+                  className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed bg-transparent px-3 py-2.5 text-[12px] font-medium transition-opacity hover:opacity-80"
+                >
+                  ＋ Save current as preset
+                </button>
+
+                {customLayouts.length > 0 && (
+                  <>
+                    <div className="mt-4 mb-2 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+                      Your layouts
                     </div>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {customLayouts.map((l) => {
+                        const isActive = currentLayoutId === l.id;
+                        return (
+                          <button
+                            key={l.id}
+                            type="button"
+                            onClick={() => applyLayout(l.id)}
+                            style={
+                              isActive
+                                ? {
+                                    outline: `2px solid ${accent}`,
+                                    outlineOffset: -1,
+                                    background: "var(--color-paper)",
+                                  }
+                                : undefined
+                            }
+                            className={`overflow-hidden rounded-md p-2 text-left transition-colors ${
+                              isActive
+                                ? ""
+                                : "border border-linen-200 bg-cream-50 hover:bg-cream-100"
+                            }`}
+                          >
+                            <LayoutThumbnail layout={l} />
+                            <div className="mt-2 truncate text-[11px] font-semibold text-bark-900">
+                              {l.name}
+                            </div>
+                            <div className="mt-0.5 text-[10px] text-stone-500">
+                              {l.scope === "global" ? "All books" : "This book"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
-          {tab === "layouts" && defineMode && (
-            <DefineLayoutForm
-              name={defineName}
-              onNameChange={setDefineName}
-              scope={defineScope}
-              onScopeChange={setDefineScope}
-              imageCount={defineMode.imageRects.length}
-              textCount={defineMode.textRects.length}
-              onAddImage={addDefineImageBox}
-              onAddText={addDefineTextBox}
-              pending={saveLayoutPending}
-              error={saveLayoutError}
-              onCancel={cancelDefineLayout}
-              onSave={saveCustomLayout}
-            />
-          )}
+            {tab === "layouts" && defineMode && (
+              <DefineLayoutForm
+                name={defineName}
+                onNameChange={setDefineName}
+                scope={defineScope}
+                onScopeChange={setDefineScope}
+                imageCount={defineMode.imageRects.length}
+                textCount={defineMode.textRects.length}
+                onAddImage={addDefineImageBox}
+                onAddText={addDefineTextBox}
+                pending={saveLayoutPending}
+                error={saveLayoutError}
+                onCancel={cancelDefineLayout}
+                onSave={saveCustomLayout}
+              />
+            )}
 
-          {tab === "text" && (
-            <button
-              type="button"
-              onClick={() => addLayer(makeText())}
-              className="w-full rounded-2xl border-2 border-dashed border-cream-400 bg-cream-100/60 px-3 py-6 text-center font-[family-name:var(--font-display)] text-2xl font-bold text-moss-700 hover:bg-moss-100"
-            >
-              + Add text box
-            </button>
-          )}
+            {tab === "text" && (
+              <button
+                type="button"
+                onClick={() => addLayer(makeText())}
+                className="w-full rounded-lg border border-dashed border-linen-200 bg-cream-100/40 px-3 py-5 text-center font-[family-name:var(--font-display)] text-xl font-semibold text-moss-700 transition-colors hover:border-moss-500 hover:bg-cream-200"
+              >
+                + Add text box
+              </button>
+            )}
 
-          {tab === "shapes" && (
-            <ShapesPanel
-              search={shapeSearch}
-              onSearchChange={setShapeSearch}
-              onAddPrimitive={(s) => addLayer(makePrimitiveShape(s))}
-              onAddIcon={(name) => addLayer(makeIconShape(name))}
-              onUploadSvg={handleSvgUpload}
-            />
-          )}
+            {tab === "shapes" && (
+              <ShapesPanel
+                search={shapeSearch}
+                onSearchChange={setShapeSearch}
+                onAddPrimitive={(s) => addLayer(makePrimitiveShape(s))}
+                onAddIcon={(name) => addLayer(makeIconShape(name))}
+                onUploadSvg={handleSvgUpload}
+              />
+            )}
 
-          {tab === "images" && (
-            <ImagesPanel
-              story={story}
-              onAddImageBox={() => addLayer(makeImageBox())}
-              onUpload={handleUpload}
-              onInsertImage={(url) => addLayer(makeUploadImage(url))}
-            />
-          )}
-
-          {tab === "assistant" && currentPage && (
-            <AIAssistantPanel
-              storyId={story.id}
-              storyAiSystemPrompt={story.ai_system_prompt}
-              currentPage={currentPage}
-              onApplyText={applyAssistantText}
-              onApplyImage={applyAssistantImage}
-              onStoryPromptSaved={onStoryPromptSaved}
-            />
-          )}
+            {tab === "images" && (
+              <ImagesPanel
+                story={story}
+                onAddImageBox={() => addLayer(makeImageBox())}
+                onUpload={handleUpload}
+                onInsertImage={(url) => addLayer(makeUploadImage(url))}
+              />
+            )}
+          </div>
         </aside>
 
-        {/* Center: canvas */}
-        <div className="flex flex-col items-center justify-center gap-3">
+        {/* Center: canvas. Plain frame, no surrounding panel — the page
+            sits directly on the body so it reads as a single sheet. */}
+        <div className="flex flex-col items-center justify-center gap-2 py-1">
           {defineMode && (
-            <div className="w-full max-w-[720px] rounded-2xl border-2 border-cream-400 bg-cream-200 px-4 py-2 text-center text-[11px] font-black uppercase tracking-wide text-moss-700">
+            <div className="w-full max-w-[640px] rounded-lg border border-linen-200 bg-cream-100 px-4 py-1.5 text-center text-[11px] font-medium text-moss-700">
               Drag and resize the boxes to design your layout
             </div>
           )}
           <div
             ref={canvasRef}
-            className="relative aspect-square w-full max-w-[720px] overflow-hidden rounded-3xl border-4 border-cream-300 bg-gradient-to-br from-cream-100 to-cream-200 shadow-xl"
+            className="relative aspect-square w-full max-w-[640px] overflow-hidden rounded-[4px] bg-paper"
+            style={{
+              boxShadow:
+                "0 24px 48px -16px rgba(30,20,10,.25), 0 2px 6px rgba(30,20,10,.08)",
+            }}
             onPointerDown={() => {
               if (defineMode) {
                 setDefineMode((m) => (m ? { ...m, active: null } : m));
@@ -1566,27 +1629,263 @@ export default function CanvasEditor({
                 ))}
               </>
             )}
+            {/* Page-number indicator — bottom-right of the canvas, like a
+                printed page foot. Tabular-nums so the digits don't dance
+                as the user pages through the story. */}
+            {currentPage && !defineMode && (
+              <div
+                className="pointer-events-none absolute bottom-3 right-3.5 font-[family-name:var(--font-sans)] text-[10px] uppercase tracking-[.16em] text-stone-500"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {String(currentPage.pageNumber).padStart(2, "0")} /{" "}
+                {String(story.pages.length).padStart(2, "0")}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Right: properties */}
-        <aside className="rounded-3xl border-2 border-cream-300 bg-cream-50 p-4 shadow-sm">
-          {selectedLayer ? (
-            <PropertiesPanel
-              layer={selectedLayer}
-              showRegenerate={selectedIsLayoutText}
-              regenPending={regenPending}
-              onRegenerate={regenerateLayoutText}
-              onChange={(patch) => updateLayer(selectedLayer.id, patch)}
-              onDelete={() => deleteLayer(selectedLayer.id)}
-            />
-          ) : (
-            <div className="py-10 text-center text-xs font-bold text-ink-300">
-              Select a layer to edit its properties.
-            </div>
-          )}
+        {/* Right: contextual inspector. When a layer is selected we show
+            its properties; otherwise we show a "This page" overview —
+            quote, meta table, and a handful of quick-prompt suggestions
+            that open the floating AI dock. The full assistant lives in
+            the floating dock at bottom-right, not inside this panel. */}
+        <aside className="flex flex-col overflow-hidden rounded-[10px] border border-linen-200 bg-cream-50 p-[18px]">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {selectedLayer ? (
+              <PropertiesPanel
+                layer={selectedLayer}
+                showRegenerate={selectedIsLayoutText}
+                regenPending={regenPending}
+                onRegenerate={regenerateLayoutText}
+                onChange={(patch) => updateLayer(selectedLayer.id, patch)}
+                onDelete={() => deleteLayer(selectedLayer.id)}
+              />
+            ) : currentPage ? (
+              <div>
+                <div className="mb-2.5 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+                  This page
+                </div>
+                <p className="font-[family-name:var(--font-display)] text-[16px] font-medium leading-snug text-bark-900">
+                  &ldquo;
+                  {(currentPage.text ?? "").slice(0, 90).trim()}
+                  {(currentPage.text ?? "").length > 90 ? "…" : ""}&rdquo;
+                </p>
+                <dl className="mt-3.5 grid grid-cols-[auto_1fr] gap-x-3.5 gap-y-2 text-[12px]">
+                  <dt className="text-stone-500">Layout</dt>
+                  <dd className="text-bark-900">
+                    {visibleBuiltinLayouts.find(
+                      (l) => l.id === currentLayoutId
+                    )?.name ??
+                      customLayouts.find((l) => l.id === currentLayoutId)
+                        ?.name ??
+                      "—"}
+                  </dd>
+                  <dt className="text-stone-500">Layers</dt>
+                  <dd className="text-bark-900">{layers.length}</dd>
+                  <dt className="text-stone-500">Words</dt>
+                  <dd className="text-bark-900">
+                    {(currentPage.text ?? "")
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .length}
+                  </dd>
+                  <dt className="text-stone-500">Page</dt>
+                  <dd className="text-bark-900">
+                    {currentPage.pageNumber} of {story.pages.length}
+                  </dd>
+                </dl>
+
+                <div className="mt-5 mb-2 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+                  Ask the assistant
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {AI_SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setAiDockOpen(true)}
+                      className="rounded-lg border border-linen-200 bg-paper px-3 py-2 text-left text-[12px] text-bark-900 transition-colors hover:bg-cream-50"
+                    >
+                      <span
+                        aria-hidden="true"
+                        style={{ color: accent }}
+                        className="mr-2 font-semibold"
+                      >
+                        ✦
+                      </span>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </aside>
       </div>
+
+      {/* Pages rail — single horizontal strip across the bottom. Each
+          thumbnail represents one page; pairs are grouped under a
+          spread label (1·2, 3·4, …) so the user can navigate by
+          spread the way the printed book reads. */}
+      {/* Bottom filmstrip — spread thumbnails matching design A. Each
+          spread is a left+right page pair separated by a center gutter,
+          mimicking how the printed book reads. Clicking either half of
+          a spread navigates to that page. */}
+      <footer
+        className="flex items-center gap-2 rounded-[10px] border border-linen-200 bg-cream-50 px-[18px] py-3 overflow-x-auto"
+        style={{ minHeight: 96 }}
+      >
+        <span className="mr-2 shrink-0 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+          Spreads
+        </span>
+        {spreads.map(([left, right], spreadIdx) => {
+          const activeOnLeft = left?.pageNumber === currentPage?.pageNumber;
+          const activeOnRight = right?.pageNumber === currentPage?.pageNumber;
+          const isActive = activeOnLeft || activeOnRight;
+          const halfClick = (page: typeof left | undefined) => {
+            if (!page) return;
+            const idx = story.pages.findIndex(
+              (x) => x.pageNumber === page.pageNumber
+            );
+            setPageIdx(idx);
+            setSelectedId(null);
+            setEditingTextId(null);
+          };
+          return (
+            <div
+              key={spreadIdx}
+              className="flex shrink-0 flex-col items-center"
+            >
+              <div
+                className="overflow-hidden rounded-[3px] bg-paper transition-transform"
+                style={{
+                  width: 88,
+                  height: 56,
+                  boxShadow: "0 1px 2px rgba(40,30,20,.08)",
+                  outline: isActive ? `2px solid ${accent}` : "1px solid var(--color-linen-200)",
+                  outlineOffset: isActive ? 2 : 0,
+                }}
+              >
+                <div className="flex h-full w-full">
+                  <button
+                    type="button"
+                    onClick={() => halfClick(left)}
+                    className="relative flex-1 cursor-pointer border-r border-linen-200 bg-cream-100"
+                    title={left ? `Page ${left.pageNumber}` : ""}
+                  >
+                    {left?.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={left.imageUrl}
+                        alt=""
+                        className="h-full w-full object-cover opacity-90"
+                      />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => halfClick(right)}
+                    disabled={!right}
+                    className="relative flex-1 cursor-pointer bg-cream-100 disabled:cursor-default"
+                    title={right ? `Page ${right.pageNumber}` : ""}
+                  >
+                    {right?.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={right.imageUrl}
+                        alt=""
+                        className="h-full w-full object-cover opacity-90"
+                      />
+                    ) : null}
+                  </button>
+                </div>
+              </div>
+              <span
+                className="mt-1 text-center text-[9px] uppercase tracking-[.04em]"
+                style={{
+                  color: isActive ? accent : "var(--color-stone-500)",
+                  fontWeight: isActive ? 600 : 500,
+                }}
+              >
+                {right
+                  ? `${left.pageNumber}·${right.pageNumber}`
+                  : `${left.pageNumber}`}
+              </span>
+            </div>
+          );
+        })}
+        <div className="flex-1" />
+        <button
+          type="button"
+          disabled
+          className="shrink-0 cursor-not-allowed rounded-lg border border-dashed border-linen-200 bg-transparent px-3 py-2 text-[11px] font-medium text-sage-700/60"
+          title="Add page (coming soon)"
+        >
+          ＋ Add page
+        </button>
+      </footer>
+
+      {/* Floating AI dock — collapsed pill that expands to a chat panel.
+          Lives at bottom-right of the viewport so it doesn't compete
+          with the canvas for horizontal space. */}
+      {currentPage && (
+        <div className="fixed bottom-5 right-5 z-30">
+          {aiDockOpen ? (
+            <div
+              className="flex max-h-[520px] w-[360px] flex-col overflow-hidden rounded-2xl bg-paper"
+              style={{
+                boxShadow:
+                  "0 18px 40px rgba(30,20,10,.18), 0 0 0 1px var(--color-linen-200)",
+              }}
+            >
+              <div className="flex items-center justify-between border-b border-linen-200 bg-cream-50 px-4 py-3">
+                <div className="flex items-baseline gap-2">
+                  <span style={{ color: accent }} className="text-base">
+                    ✦
+                  </span>
+                  <span className="font-[family-name:var(--font-display)] text-[17px] font-semibold text-bark-900">
+                    Assistant
+                  </span>
+                  <span className="text-[10px] font-medium uppercase tracking-[.08em] text-stone-500">
+                    · page {currentPage.pageNumber}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAiDockOpen(false)}
+                  className="text-lg leading-none text-stone-500 hover:text-bark-900"
+                  aria-label="Close assistant"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                <AIAssistantPanel
+                  storyId={story.id}
+                  storyAiSystemPrompt={story.ai_system_prompt}
+                  currentPage={currentPage}
+                  onApplyText={applyAssistantText}
+                  onApplyImage={applyAssistantImage}
+                  onStoryPromptSaved={onStoryPromptSaved}
+                />
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAiDockOpen(true)}
+              style={{
+                background: accent,
+                boxShadow: "0 10px 24px rgba(30,20,10,.20)",
+              }}
+              className="inline-flex items-center gap-2 rounded-full px-5 py-3 text-[13px] font-semibold text-white"
+            >
+              <span aria-hidden="true">✦</span>
+              Ask the assistant
+            </button>
+          )}
+        </div>
+      )}
 
       {pickingLayerId && (
         <ImagePickerModal
@@ -2043,22 +2342,40 @@ function PropertiesPanel({
   onChange: (patch: Partial<Layer>) => void;
   onDelete: () => void;
 }) {
+  // Map raw layer type to a humane heading that matches the mockup
+  // ("Story text" for a layout-bound caption, "Text" for a user layer,
+  // "Shape" for primitives + icons).
+  const headingType =
+    layer.type === "text" && layer.source === "layout" ? "Story text" : layer.type;
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-black uppercase tracking-wider text-ink-300">
-          {layer.type}
-          {layer.source === "layout" && (
-            <span className="ml-1 text-ink-300">· layout</span>
-          )}
+      <div>
+        <div className="flex items-center justify-between text-[11px] text-stone-500">
+          <span>
+            {layer.type}
+            {layer.source === "layout" && " layer"}
+          </span>
+          <div className="flex items-center gap-3 text-[12px] font-medium">
+            <button
+              type="button"
+              className="text-bark-900 hover:text-moss-700"
+              title="Duplicate (not yet)"
+              disabled
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              className="text-clay-500 hover:text-clay-500/80"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+        <h3 className="mt-1 font-[family-name:var(--font-display)] text-[22px] font-semibold capitalize text-bark-900">
+          {headingType}
         </h3>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-500 hover:bg-rose-500 hover:text-cream-50"
-        >
-          Delete
-        </button>
       </div>
 
       {/* Common: size + rotation */}
