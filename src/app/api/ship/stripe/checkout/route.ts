@@ -5,7 +5,7 @@ import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lul
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { priceHardcoverUsd } from "@/lib/pricing";
-import { assertNoBypassInProd } from "@/lib/env-guard";
+import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
 import type { Story, StoryPage } from "@/lib/types";
 import type { ShippingAddress } from "@/lib/lulu";
 
@@ -99,6 +99,9 @@ export async function POST(request: Request) {
   // BYPASS_STRIPE leaks into prod env — and assertNoBypassInProd hard-
   // fails the request if the flag is set in production at all.
   assertNoBypassInProd();
+  // Hard-fail if STRIPE_SECRET_KEY's mode (test/live) doesn't match
+  // NODE_ENV — prevents accidentally hitting live Stripe from dev.
+  assertStripeKeyMatchesEnv();
   // Admin always bypasses (test orders, demo fulfillment). BYPASS_STRIPE
   // is a dev-time convenience that only takes effect for admins — a
   // misconfigured prod env can't unlock free orders for normal users.
