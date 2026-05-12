@@ -295,13 +295,23 @@ export default function ShipStoryPage({
             {addressComplete && !quoting && quote && (
               <div className="space-y-1 font-bold text-moss-700">
                 <div className="flex justify-between">
-                  <span>Print</span>
+                  <span>Hardcover</span>
                   <span>${quote.printCostUsd.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Shipping</span>
-                  <span>${quote.shippingCostUsd.toFixed(2)}</span>
-                </div>
+                {/* Shipping is bundled into the list price for now —
+                    only render the line when it's a non-zero charge,
+                    otherwise show a small "free shipping" hint. */}
+                {quote.shippingCostUsd > 0 ? (
+                  <div className="flex justify-between">
+                    <span>Shipping</span>
+                    <span>${quote.shippingCostUsd.toFixed(2)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between text-[11px] font-medium text-stone-500">
+                    <span>Shipping</span>
+                    <span>Free</span>
+                  </div>
+                )}
                 {quote.taxUsd > 0 && (
                   <div className="flex justify-between">
                     <span>Tax</span>
