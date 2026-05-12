@@ -93,11 +93,25 @@ create table if not exists public.stories (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   prompt text not null,
-  page_count int not null check (page_count between 24 and 800),
+  -- 6-page floor: shorter than that doesn't read as a story; 800 cap
+  -- protects against a malformed client request kicking off a runaway
+  -- image job. Hardcover printing additionally requires >= 24 pages
+  -- and is gated on the /ship route — that check is application-level
+  -- so the same row can still be sold as a digital book.
+  page_count int not null check (page_count between 6 and 800),
   pages jsonb not null,
   cover_image text,
   created_at timestamptz not null default now()
 );
+
+-- Existing deployed DBs may have the old `between 24 and 800` check;
+-- drop the old constraint (named auto by Postgres as
+-- `stories_page_count_check`) so they accept the new floor on re-run.
+-- Safe to repeat: drop-if-exists handles the no-op case, the add-check
+-- below puts the new constraint in place.
+alter table public.stories drop constraint if exists stories_page_count_check;
+alter table public.stories add constraint stories_page_count_check
+  check (page_count between 6 and 800);
 
 -- Legacy columns removed when entity stickers and comic mode were dropped.
 alter table public.stories drop column if exists entities;

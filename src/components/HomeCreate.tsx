@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import GeneratingOverlay from "./GeneratingOverlay";
+import LegalConsentModal, { readStoredConsent } from "./LegalConsentModal";
 import PetAvatar from "./PetAvatar";
 import { useJobPolling } from "@/lib/useJobPolling";
 import { startersForMode } from "@/lib/story-starters";
@@ -14,13 +15,14 @@ import {
 } from "@/lib/image-styles";
 import type { Pet } from "@/lib/types";
 
-// Lulu hardcover requires a minimum of 24 interior pages and tops out
-// at 800. We surface a few common presets and a "Custom" chip so users
-// can pick anything in the supported range without being forced into a
-// chip that doesn't fit.
-const PAGE_OPTIONS = [24, 30, 40, 60];
-const MIN_PAGES = 24;
+// Page-count options. 6 is the practical story floor; 800 is the cap.
+// Hardcover printing additionally requires >= 24 pages — picking a
+// shorter length is fine but the /ship checkout will offer digital
+// only. A small badge on chips below 24 hints at that constraint.
+const PAGE_OPTIONS = [8, 16, 24, 30, 40, 60];
+const MIN_PAGES = 6;
 const MAX_PAGES = 800;
+const PRINT_MIN_PAGES = 24;
 
 interface Props {
   pets: Pet[];
@@ -50,6 +52,11 @@ export default function HomeCreate({ pets }: Props) {
     current: number;
     total: number;
   } | null>(null);
+  // First-time consent gate. Read lazily at submit time — checking
+  // localStorage on mount would require a setState-in-effect dance
+  // that triggers a lint rule (and an extra render) for no benefit;
+  // the user only cares about the gate when they're about to submit.
+  const [consentModalOpen, setConsentModalOpen] = useState(false);
 
   const { state, start } = useJobPolling<{ storyId: string }>();
 
@@ -98,7 +105,18 @@ export default function HomeCreate({ pets }: Props) {
     e.preventDefault();
     if (!prompt.trim()) return;
     if (kind === "pet" && !petId) return;
+    // First-time gate: if there's no stored consent yet, open the
+    // modal and park the submission. `runGenerate` is called from the
+    // modal's onAccept callback. Reading at submit time (not on mount)
+    // avoids a setState-in-effect lint complaint and an extra render.
+    if (readStoredConsent() === null) {
+      setConsentModalOpen(true);
+      return;
+    }
+    await runGenerate();
+  }
 
+  async function runGenerate() {
     setGenerating(true);
     setGeneratingProgress(null);
     setError("");
@@ -135,6 +153,18 @@ export default function HomeCreate({ pets }: Props) {
   return (
     <>
       {generating && <GeneratingOverlay progress={generatingProgress} />}
+      <LegalConsentModal
+        open={consentModalOpen}
+        onAccept={() => {
+          setConsentModalOpen(false);
+          // Resume the submission the user originally triggered. The
+          // modal has already persisted the consent record so the
+          // next submit won't re-prompt.
+          void runGenerate();
+        }}
+        onCancel={() => setConsentModalOpen(false)}
+      />
+
 
       <form onSubmit={handleSubmit} className="w-full space-y-6">
         {/* Mode toggle */}
@@ -198,6 +228,11 @@ export default function HomeCreate({ pets }: Props) {
                       setPageCount(n);
                       setCustomMode(false);
                     }}
+                    title={
+                      n < PRINT_MIN_PAGES
+                        ? `${n} pages — digital only (hardcover needs at least ${PRINT_MIN_PAGES})`
+                        : `${n} pages`
+                    }
                     className={`h-8 min-w-[2.25rem] rounded-lg px-2 text-sm font-medium transition-colors ${
                       !customMode && pageCount === n
                         ? "bg-ink-900 text-cream-50"
@@ -245,6 +280,15 @@ export default function HomeCreate({ pets }: Props) {
               </div>
             </div>
           </div>
+          {pageCount < PRINT_MIN_PAGES && (
+            <div className="flex items-start gap-2 border-t border-cream-200 bg-amber-50/60 px-5 py-2 text-[11px] font-medium text-amber-900">
+              <span aria-hidden="true">ⓘ</span>
+              <span>
+                Stories under {PRINT_MIN_PAGES} pages can be read online or
+                downloaded as a PDF, but can&rsquo;t be ordered as a hardcover.
+              </span>
+            </div>
+          )}
         </div>
 
         <StylePicker value={imageStyle} onChange={setImageStyle} />

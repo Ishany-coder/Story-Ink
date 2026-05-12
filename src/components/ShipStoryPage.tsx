@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Story } from "@/lib/types";
 
+// Hardcover printing requires a 24-page minimum. Below that we offer
+// the digital tier instead — the same number must match the schema
+// CHECK and the /api/generate clamp in src/app/api/generate/route.ts.
+const PRINT_MIN_PAGES = 24;
+
 interface Props {
   story: Story;
   // Server-determined; admin sees a "Place free admin order" CTA
@@ -187,6 +192,13 @@ export default function ShipStoryPage({
       pageCount: story.pages.length,
     };
   }, [story]);
+
+  // Short stories can't be printed as hardcovers — bail out of the
+  // address/checkout flow entirely and show a focused "digital only"
+  // notification with a deep link to the digital reader / unlock.
+  if (preview.pageCount < PRINT_MIN_PAGES) {
+    return <ShortStoryDigitalOnlyNotice story={story} />;
+  }
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -495,3 +507,90 @@ function Field({
 
 const inputCls =
   "w-full rounded-xl border-2 border-cream-300 bg-cream-50 px-3 py-1.5 text-sm font-bold text-ink-900 outline-none focus:border-moss-700";
+
+// Replacement view for /ship/<id> when the story has fewer pages than
+// the hardcover floor (PRINT_MIN_PAGES). Explains why hardcover isn't
+// available and routes the user toward the digital tier instead.
+function ShortStoryDigitalOnlyNotice({ story }: { story: Story }) {
+  const pageCount = story.pages.length;
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function unlock() {
+    setPending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/digital/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyId: story.id }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(body.error || "Checkout failed");
+      }
+      const { url } = (await res.json()) as { url: string };
+      window.location.href = url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Checkout failed");
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-12">
+      <Link
+        href={`/read/${story.id}`}
+        className="text-sm font-bold text-ink-300 hover:text-moss-700"
+      >
+        &larr; Back to story
+      </Link>
+
+      <div className="mt-6 rounded-3xl border border-amber-200 bg-amber-50 p-6">
+        <div className="mb-2 flex items-start gap-3">
+          <span aria-hidden="true" className="text-2xl leading-none">
+            ⓘ
+          </span>
+          <div>
+            <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
+              Hardcover isn&rsquo;t available for short stories
+            </h1>
+            <p className="mt-2 text-sm text-ink-700">
+              &ldquo;{story.title}&rdquo; is {pageCount} pages. Our hardcovers
+              need at least {PRINT_MIN_PAGES} interior pages for the spine
+              and binding to look right. You can still read it online or
+              download it as a PDF.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-3xl border-2 border-cream-300 bg-cream-50 p-6 text-center shadow-sm">
+        <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+          Keep it digital
+        </h2>
+        <p className="mt-1 text-sm text-ink-500">
+          Read all {pageCount} pages on any device, plus a downloadable PDF
+          you can save and share.
+        </p>
+        <button
+          type="button"
+          onClick={unlock}
+          disabled={pending}
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-moss-700 px-6 py-3 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {pending ? "Opening checkout…" : "Unlock digital"}
+        </button>
+        {error && (
+          <p className="mt-3 text-xs font-medium text-rose-600">{error}</p>
+        )}
+        <p className="mt-4 text-[11px] text-ink-300">
+          Want a hardcover? Regenerate this idea at {PRINT_MIN_PAGES}+
+          pages.
+        </p>
+      </div>
+    </div>
+  );
+}

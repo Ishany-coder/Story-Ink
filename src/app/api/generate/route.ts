@@ -52,10 +52,13 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    // Lulu hardcover floor is 24 pages; cap is 800. Clamp aggressively
-    // so a malformed client request can't kick off a runaway 10000-page
-    // image generation job.
-    const pageCount = Math.min(Math.max(body.pageCount || 24, 24), 800);
+    // Practical floor is 6 pages (anything shorter doesn't read like a
+    // story). Cap at 800. Stories shorter than 24 pages still generate
+    // fine but can't be printed as a hardcover — /ship/[id] gates the
+    // hardcover checkout on `pages.length >= 24` and offers digital
+    // instead. Clamp aggressively so a malformed client request can't
+    // kick off a runaway 10000-page image generation job.
+    const pageCount = Math.min(Math.max(body.pageCount || 24, 6), 800);
     const kind = body.kind === "pet" ? "pet" : "generic";
     const petId = kind === "pet" ? body.petId ?? null : null;
     if (kind === "pet" && !petId) {
