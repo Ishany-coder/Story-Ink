@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 
-Next.js 16 App Router, React 19, Tailwind 4, TypeScript (strict). Supabase (Postgres + Auth + Storage) via `@supabase/ssr` and `@supabase/supabase-js`. AI via `@google/generative-ai` (Gemini text + image). Async work via Inngest. Print fulfillment via Stripe Checkout + Lulu Direct + `pdf-lib`. `@/*` path alias maps to `src/*`.
+Next.js 16 App Router, React 19, Tailwind 4, TypeScript (strict). Supabase (Postgres + Auth + Storage) via `@supabase/ssr` and `@supabase/supabase-js`. AI via `@google/generative-ai` (Gemini text + image). Async work via Inngest. Payment via Stripe Checkout; print PDFs built with `pdf-lib`; physical fulfillment is **manual** — an admin reads the `print_orders` queue and places the print order with whatever vendor they want (no third-party print API is wired up). `@/*` path alias maps to `src/*`.
 
 > Heed the AGENTS.md warning: this is **Next.js 16**, not the version in your training data. App Router conventions, params, and APIs may differ — read `node_modules/next/dist/docs/` before touching framework-specific code.
 
@@ -36,7 +36,6 @@ There is no test runner configured.
 - `GEMINI_API_KEY`
 - `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY` — production only; dev mode is auto-detected via `NODE_ENV`
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
-- `LULU_CLIENT_KEY`, `LULU_CLIENT_SECRET`, `LULU_ENV` (`production` | unset for sandbox), optional `LULU_PRODUCT_SKU`
 - `ALLOWED_IMAGE_HOSTS` — optional comma-separated extension to the SSRF allowlist (`isAllowedContentUrl`)
 
 ## Database
@@ -90,15 +89,15 @@ Pet stories also prepend `buildPetStorySystemPrompt(pet)` (`src/lib/pet-prompt.t
 
 Two system prompt layers concat into every assistant call: a **global** prompt the user sets in browser localStorage and a **per-story** `stories.ai_system_prompt`. Routes compose with `composeSystemPrompt(global, perStory)` — global first.
 
-### Print + ship pipeline
+### Print + ship pipeline (manual admin fulfillment)
 
-1. `POST /api/ship/quote` → `quotePrintAndShipping()` (`src/lib/lulu.ts`) returns a Lulu cost calc the customer sees.
-2. `POST /api/ship/stripe/...` opens a Stripe Checkout session with the address packed into session metadata (`packAddressMetadata` — single `address` key under Stripe's 500-char metadata limit).
-3. Fulfillment runs via `fulfillFromSession()` (`src/lib/ship-fulfill.ts`), called from **two** entry points: the signature-verified webhook (authoritative in prod) and an opportunistic `confirm` route hit by the success page (safety net + dev convenience).
+1. `POST /api/ship/quote` returns the customer-facing price computed from page count + quantity via `priceHardcoverUsd()` (`src/lib/pricing.ts`). Shipping is bundled into the list price; there's no live shipping API.
+2. `POST /api/ship/stripe/checkout` opens a Stripe Checkout session with the address packed into session metadata (`packAddressMetadata` — single `address` key under Stripe's 500-char metadata limit). Server-authoritative pricing — the client can't dictate the amount charged.
+3. Fulfillment runs via `fulfillFromSession()` (`src/lib/ship-fulfill.ts`), called from **two** entry points: the signature-verified webhook (authoritative in prod) and an opportunistic `confirm` route hit by the success page (safety net + dev convenience). It builds the interior + cover PDFs, uploads them to Supabase Storage, and marks the order `status = "received"` for the admin queue to pick up. **No third-party print API is called — admins fulfill manually.**
 
-Idempotency lives in three places that must stay aligned: a unique index on `print_orders.stripe_session_id`, an existing-row check, and an atomic CAS update from `paid → processing` (`update().eq("status","paid")` returning rows-affected). Two concurrent fulfillers cannot create two Lulu print jobs.
+Idempotency lives in three places that must stay aligned: a unique index on `print_orders.stripe_session_id`, an existing-row check, and an atomic CAS update from `paid → building` (`update().eq("status","paid")` returning rows-affected). Two concurrent fulfillers cannot build two PDFs for the same session.
 
-Print PDFs are built by `pdf-lib` in `src/lib/print-pdf.ts`. Trim is 8.5×8.5 with 0.125" bleed; minimum 24 interior pages (Lulu hardcover requirement) padded with blanks. Memorial stories add front + back dedication pages; the page count returned for spine math reflects them.
+Print PDFs are built by `pdf-lib` in `src/lib/print-pdf.ts`. Trim is 8.5×8.5 with 0.125" bleed; minimum 24 interior pages padded with blanks. Memorial stories add front + back dedication pages; the page count returned for spine math reflects them.
 
 ### SSRF-sensitive code paths
 

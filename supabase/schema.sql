@@ -279,11 +279,17 @@ create table if not exists public.print_orders (
   amount_usd numeric(10, 2),
   paypal_capture_id text,
   stripe_session_id text,
-  lulu_print_job_id text,
   interior_pdf_url text,
   cover_pdf_url text,
   created_at timestamptz not null default now()
 );
+
+-- Note: a `lulu_print_job_id text` column existed in earlier deploys
+-- when fulfillment was auto-routed through Lulu Direct. Lulu has been
+-- removed; admins now fulfill orders manually. The column is harmless
+-- if it still exists in your DB (always null going forward); drop it
+-- with `alter table public.print_orders drop column if exists lulu_print_job_id;`
+-- when you're ready.
 
 alter table public.print_orders
   add column if not exists stripe_session_id text,

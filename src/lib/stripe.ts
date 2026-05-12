@@ -14,7 +14,7 @@
 // accidentally cross the streams (live key in dev, or test key in prod).
 
 import Stripe from "stripe";
-import type { ShippingAddress } from "@/lib/lulu";
+import type { ShippingAddress } from "@/lib/shipping";
 
 let _client: Stripe | null = null;
 let _modeLogged = false;
