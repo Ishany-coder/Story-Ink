@@ -49,6 +49,21 @@
   --color-gold-500: #c9a96b;
   --color-gold-700: #ad8a4d;
   --color-gold-900: #87683a;
+
+  /* Studio-refined neutrals. Warmer than ink-* (which is navy-leaning) —
+     they sit better against the cream surfaces in the Studio chrome.
+     Used in CanvasEditor and child panels. */
+  --color-linen-200: #e7e0d2;   /* hairline panel borders */
+  --color-sage-700:  #445d4f;   /* inactive nav / sub-headers */
+  --color-sage-200:  #cdd6c9;   /* layout-thumbnail fills */
+  --color-stone-500: #7a7163;   /* captions, meta */
+  --color-bark-900:  #1d2620;   /* warm body text */
+  --color-clay-500:  #9a4a3a;   /* destructive (Delete) */
+  --color-paper:     #fffbf3;   /* "real paper" surface — page board + input bg */
+  --color-forest-500: #2c4a3c;  /* primary accent (matches design A spec) */
+  --color-rose-500:  #c47a64;   /* living-mode soft accent */
+  --color-indigo-500:#6e7299;   /* memorial-mode accent */
+  --color-indigo-200:#c8c9d8;   /* memorial soft */
 }
 
 :root {
