@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getCurrentUser } from "@/lib/supabase-server";
+import { isAllowedContentUrl } from "@/lib/http";
 import {
   PET_SPECIES,
   type CreatePetInput,
@@ -40,6 +41,11 @@ function sanitizePhotos(v: unknown): string[] | null {
     if (typeof p !== "string") return null;
     const t = p.trim();
     if (!t) continue;
+    // Each photo URL must live on the Supabase storage host (or any
+    // host in ALLOWED_IMAGE_HOSTS). Stops javascript: / data: / cross-
+    // origin URLs from being persisted as stored XSS surfaces when
+    // they're later rendered via <img src=...>.
+    if (!isAllowedContentUrl(t)) return null;
     out.push(t);
     if (out.length > MAX_PHOTOS) return null;
   }

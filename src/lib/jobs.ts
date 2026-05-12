@@ -15,6 +15,7 @@ export interface JobRow {
   error: string | null;
   created_at: string;
   updated_at: string;
+  user_id: string | null;
 }
 
 export async function createJob(
@@ -87,7 +88,7 @@ export async function markFailed(
 export async function readJob(jobId: string): Promise<JobRow | null> {
   const { data, error } = await supabaseAdmin()
     .from("jobs")
-    .select("id, type, status, result, error, created_at, updated_at")
+    .select("id, type, status, result, error, created_at, updated_at, user_id")
     .eq("id", jobId)
     .single<JobRow>();
   if (error || !data) return null;

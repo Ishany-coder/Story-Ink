@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createJob } from "@/lib/jobs";
 import { inngest } from "@/inngest/client";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 
 export const maxDuration = 10;
 
@@ -13,6 +14,11 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.regenText,
+    key: userKey("regenText", user.id),
+  });
+  if (limited) return limited;
   const { id, pageNumber } = await ctx.params;
   const pageNum = Number(pageNumber);
   if (!Number.isFinite(pageNum)) {
@@ -27,7 +33,7 @@ export async function POST(
   const jobId = await createJob("story.regen-text", user.id);
   await inngest.send({
     name: "story/regen-text.requested",
-    data: { jobId, storyId: id, pageNumber: pageNum },
+    data: { jobId, userId: user.id, storyId: id, pageNumber: pageNum },
   });
   return NextResponse.json({ jobId }, { status: 202 });
 }

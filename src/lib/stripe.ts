@@ -48,6 +48,10 @@ export interface CreateCheckoutArgs {
   quantity: number;
   successUrl: string;
   cancelUrl: string;
+  // Buyer's auth.users.id. Stashed in session metadata so the webhook
+  // and confirm routes can authorize the caller (and detect a buyer/
+  // owner mismatch before flipping digital_unlocked).
+  userId: string;
 }
 
 export async function createCheckoutSession(
@@ -83,6 +87,7 @@ export async function createCheckoutSession(
     },
     metadata: {
       story_id: args.storyId,
+      user_id: args.userId,
       address: packAddressMetadata(args.address),
       quantity: String(args.quantity),
     },

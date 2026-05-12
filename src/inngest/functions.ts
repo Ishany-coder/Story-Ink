@@ -61,15 +61,23 @@ function composeSystemPrompt(
   return g || s || null;
 }
 
-async function fetchStoryAndPage(storyId: string, pageNumber: number) {
+async function fetchStoryAndPage(
+  storyId: string,
+  pageNumber: number,
+  expectedUserId: string | null
+) {
   // Inngest workers run with no auth session, so the anon client
   // can't see private stories under the new RLS policies. Use the
-  // service-role admin client — RLS bypassed, but ownership has
-  // already been verified by the route handler that fired the
-  // event (assertOwnsStory in /api/stories/[id]/...).
+  // service-role admin client — RLS bypassed, but we re-verify
+  // ownership here defensively. The route handler already called
+  // assertOwnsStory before firing the event, but the Inngest event
+  // bus is its own trust boundary: anyone with INNGEST_EVENT_KEY can
+  // fire arbitrary payloads, so we don't take the route's word for it.
   const { data, error } = await supabaseAdmin()
     .from("stories")
-    .select("id, title, prompt, pages, ai_system_prompt, image_style")
+    .select(
+      "id, title, prompt, pages, ai_system_prompt, image_style, user_id"
+    )
     .eq("id", storyId)
     .single<
       Pick<
@@ -80,9 +88,16 @@ async function fetchStoryAndPage(storyId: string, pageNumber: number) {
         | "pages"
         | "ai_system_prompt"
         | "image_style"
-      >
+      > & { user_id: string | null }
     >();
   if (error || !data) throw new Error("Story not found");
+  if (
+    expectedUserId &&
+    data.user_id &&
+    data.user_id !== expectedUserId
+  ) {
+    throw new Error("Story ownership mismatch");
+  }
   const page = data.pages.find((p) => p.pageNumber === pageNumber);
   if (!page) throw new Error("Page not found");
   return { story: data, page };
@@ -303,15 +318,16 @@ export const regenTextFn = inngest.createFunction(
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, storyId, pageNumber } = event.data as {
+    const { jobId, userId, storyId, pageNumber } = event.data as {
       jobId: string;
+      userId?: string;
       storyId: string;
       pageNumber: number;
     };
     await step.run("mark-running", () => markRunning(jobId));
 
     const { story } = await step.run("fetch", () =>
-      fetchStoryAndPage(storyId, pageNumber)
+      fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
 
     const text = await step.run("regenerate", () =>
@@ -358,9 +374,10 @@ export const assistTextFn = inngest.createFunction(
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, storyId, pageNumber, prompt, globalSystemPrompt } =
+    const { jobId, userId, storyId, pageNumber, prompt, globalSystemPrompt } =
       event.data as {
         jobId: string;
+        userId?: string;
         storyId: string;
         pageNumber: number;
         prompt: string;
@@ -369,7 +386,7 @@ export const assistTextFn = inngest.createFunction(
     await step.run("mark-running", () => markRunning(jobId));
 
     const { story, page } = await step.run("fetch", () =>
-      fetchStoryAndPage(storyId, pageNumber)
+      fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
 
     const text = await step.run("generate", () =>
@@ -409,9 +426,10 @@ export const assistImageFn = inngest.createFunction(
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, storyId, pageNumber, prompt, globalSystemPrompt } =
+    const { jobId, userId, storyId, pageNumber, prompt, globalSystemPrompt } =
       event.data as {
         jobId: string;
+        userId?: string;
         storyId: string;
         pageNumber: number;
         prompt: string;
@@ -420,7 +438,7 @@ export const assistImageFn = inngest.createFunction(
     await step.run("mark-running", () => markRunning(jobId));
 
     const { story, page } = await step.run("fetch", () =>
-      fetchStoryAndPage(storyId, pageNumber)
+      fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
 
     const imageUrl = await step.run("generate-and-upload", async () => {
@@ -460,6 +478,7 @@ export const assistInferFn = inngest.createFunction(
   async ({ event, step }) => {
     const {
       jobId,
+      userId,
       storyId,
       pageNumber,
       prompt,
@@ -467,6 +486,7 @@ export const assistInferFn = inngest.createFunction(
       targets: overrideTargets,
     } = event.data as {
       jobId: string;
+      userId?: string;
       storyId: string;
       pageNumber: number;
       prompt: string;
@@ -476,7 +496,7 @@ export const assistInferFn = inngest.createFunction(
     await step.run("mark-running", () => markRunning(jobId));
 
     const { story, page } = await step.run("fetch", () =>
-      fetchStoryAndPage(storyId, pageNumber)
+      fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
     const systemPrompt = composeSystemPrompt(
       globalSystemPrompt,

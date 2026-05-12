@@ -85,6 +85,7 @@ export async function POST(request: Request) {
   // print fulfillment pipeline.
   if (session.metadata?.kind === "digital") {
     const storyId = session.metadata?.story_id;
+    const metaUserId = session.metadata?.user_id;
     if (!storyId) {
       console.warn(
         "[stripe/webhook] digital session missing story_id metadata"
@@ -97,6 +98,48 @@ export async function POST(request: Request) {
     if (session.payment_status !== "paid") {
       return NextResponse.json(
         { received: true, ignored: "unpaid" },
+        { status: 200 }
+      );
+    }
+    // Cross-check buyer vs story owner. The buyer's user_id was stashed
+    // in metadata at checkout time; the story's owner is the source of
+    // truth for who gets the unlock. A mismatch indicates either a
+    // future "gift purchase" feature (not yet implemented) or
+    // tampering — refuse the unlock until the legitimate flow exists.
+    const { data: storyRow, error: storyErr } = await supabaseAdmin()
+      .from("stories")
+      .select("user_id")
+      .eq("id", storyId)
+      .maybeSingle<{ user_id: string | null }>();
+    if (storyErr) {
+      console.error("[stripe/webhook] story lookup failed:", storyErr);
+      return NextResponse.json(
+        { error: "Couldn't validate story owner" },
+        { status: 503 }
+      );
+    }
+    if (!storyRow) {
+      console.warn("[stripe/webhook] story not found for digital unlock");
+      return NextResponse.json(
+        {
+          received: true,
+          nonRetryable: true,
+          error: "story not found",
+        },
+        { status: 200 }
+      );
+    }
+    if (metaUserId && storyRow.user_id && metaUserId !== storyRow.user_id) {
+      console.warn(
+        "[stripe/webhook] digital buyer/owner mismatch — refusing unlock",
+        { storyId, metaUserId, ownerId: storyRow.user_id }
+      );
+      return NextResponse.json(
+        {
+          received: true,
+          nonRetryable: true,
+          error: "buyer/owner mismatch",
+        },
         { status: 200 }
       );
     }

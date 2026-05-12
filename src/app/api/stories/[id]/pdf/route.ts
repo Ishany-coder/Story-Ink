@@ -63,6 +63,20 @@ export async function GET(_request: Request, ctx: Ctx) {
     pet = petRow ?? null;
   }
 
+  // Pet privacy gate: the story can be public while the pet is private.
+  // If the caller is not the pet's owner and the pet isn't marked
+  // public, hide the pet's PII (name, dates, dedication, photos) from
+  // the rendered PDF — dedication pages are skipped and the renderer
+  // gets no pet object. Owners and admins always see everything.
+  if (
+    pet &&
+    pet.user_id !== user.id &&
+    !pet.is_public &&
+    !isAdminUser(user)
+  ) {
+    pet = null;
+  }
+
   let bytes: Uint8Array;
   try {
     bytes = await buildInteriorPdf(story, { pet });

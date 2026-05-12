@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
-import { supabase, supabaseAdmin } from "@/lib/supabase";
-import { getCurrentUser } from "@/lib/supabase-server";
+import { supabaseAdmin } from "@/lib/supabase";
+import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 import type { CustomLayout, Rect } from "@/lib/types";
+
+// UUID v4-ish regex. Strict enough to refuse the PostgREST filter-
+// injection vector ("00000000-0000-0000-0000-000000000000),or=(...").
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const maxDuration = 10;
 
@@ -55,22 +60,39 @@ function toRectArray(v: unknown): Rect[] | null {
 // GET /api/custom-layouts?storyId=<uuid>
 // Returns every global layout plus any layouts scoped to the provided story.
 // storyId is optional — omit it to fetch globals only.
+//
+// Requires sign-in. Story-scoped layouts go through RLS via the user-
+// scoped server client; the user can only see their own scoped rows.
 export async function GET(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in required" }, { status: 401 });
+  }
   const url = new URL(request.url);
-  const storyId = url.searchParams.get("storyId");
+  const storyIdRaw = url.searchParams.get("storyId");
+  const storyId =
+    storyIdRaw && UUID_RE.test(storyIdRaw) ? storyIdRaw : null;
+  if (storyIdRaw && !storyId) {
+    return NextResponse.json(
+      { error: "storyId must be a UUID" },
+      { status: 400 }
+    );
+  }
 
-  // Supabase `or` filter: story_id is null OR matches storyId.
-  const filter = storyId
-    ? `story_id.is.null,story_id.eq.${storyId}`
-    : `story_id.is.null`;
-
-  const { data, error } = await supabase
+  // Build the filter via the typed query builder rather than raw
+  // string interpolation — defends against any future PostgREST
+  // filter-grammar quirks even though storyId is already UUID-validated.
+  const supa = await getSupabaseServer();
+  const baseQuery = supa
     .from("custom_layouts")
     .select(
       "id, name, image_region, text_region, extra_image_regions, extra_text_regions, story_id, created_at"
     )
-    .or(filter)
     .order("created_at", { ascending: false });
+
+  const { data, error } = await (storyId
+    ? baseQuery.or(`story_id.is.null,story_id.eq.${storyId}`)
+    : baseQuery.is("story_id", null));
 
   if (error) {
     console.error("[custom-layouts] list failed:", error);
@@ -97,6 +119,11 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.customLayouts,
+    key: userKey("customLayouts", user.id),
+  });
+  if (limited) return limited;
   const body = (await request.json().catch(() => ({}))) as CreateBody;
 
   const name =

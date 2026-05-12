@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
@@ -18,9 +18,29 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 type Mode = "signin" | "signup";
 
+// Reject non-relative or protocol-relative `next` values so a phishing
+// link can't bounce a freshly-signed-in user to an attacker host.
+function safeNext(raw: string | null): string {
+  if (!raw || !raw.startsWith("/")) return "/";
+  if (raw.startsWith("//")) return "/";
+  if (raw.startsWith("/\\")) return "/";
+  return raw;
+}
+
+// Next.js 16 prerender requires useSearchParams consumers to live inside
+// a Suspense boundary. Wrap the form so the page itself can statically
+// render the shell while the search-params-dependent part hydrates.
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const next = safeNext(searchParams.get("next"));
 
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");

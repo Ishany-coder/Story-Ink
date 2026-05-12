@@ -5,6 +5,7 @@ import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lul
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { priceHardcoverUsd } from "@/lib/pricing";
+import { assertNoBypassInProd } from "@/lib/env-guard";
 import type { Story, StoryPage } from "@/lib/types";
 import type { ShippingAddress } from "@/lib/lulu";
 
@@ -93,11 +94,15 @@ export async function POST(request: Request) {
   }
 
   // Skip Stripe entirely when (a) the user is the admin or (b) the
-  // dev/testing flag BYPASS_STRIPE=1 is set in the environment.
-  // Either way: insert the print_orders row directly in "received"
-  // state, build the PDFs, and return a redirect URL the client can
-  // navigate to. The flag is server-side only — clients can't tamper.
-  const bypass = isAdminUser(user) || process.env.BYPASS_STRIPE === "1";
+  // dev/testing flag BYPASS_STRIPE=1 is set in the environment AND the
+  // caller is admin. A non-admin caller never gets a bypass even if
+  // BYPASS_STRIPE leaks into prod env — and assertNoBypassInProd hard-
+  // fails the request if the flag is set in production at all.
+  assertNoBypassInProd();
+  // Admin always bypasses (test orders, demo fulfillment). BYPASS_STRIPE
+  // is a dev-time convenience that only takes effect for admins — a
+  // misconfigured prod env can't unlock free orders for normal users.
+  const bypass = isAdminUser(user);
   if (bypass) {
     const adminOrigin =
       process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
@@ -201,6 +206,7 @@ export async function POST(request: Request) {
       quantity,
       successUrl: `${origin}/ship/${storyId}/success`,
       cancelUrl: `${origin}/ship/${storyId}`,
+      userId: user.id,
     });
     return NextResponse.json({ url, amountUsd });
   } catch (err) {

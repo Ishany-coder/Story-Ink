@@ -4,6 +4,7 @@ import { createJob } from "@/lib/jobs";
 import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/supabase-server";
 import { DEFAULT_IMAGE_STYLE, isImageStyleId } from "@/lib/image-styles";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 
 // Kicks off the Inngest `story/generate.requested` function. Returns a
 // jobId immediately — the client polls /api/jobs/[id] until status is
@@ -37,6 +38,12 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const limited = await enforceRateLimit({
+      ...LIMITS.generate,
+      key: userKey("generate", user.id),
+    });
+    if (limited) return limited;
 
     const body = (await request.json()) as PetGenerateBody;
     if (!body.prompt || body.prompt.trim().length === 0) {

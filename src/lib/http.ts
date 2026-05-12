@@ -72,15 +72,11 @@ export function isAllowedContentUrl(raw: string | null | undefined): boolean {
   if (supaUrl) {
     try {
       const supaHost = new URL(supaUrl).host;
-      // Supabase Storage lives on the same project host as the REST API
-      // (typically <project>.supabase.co). Storage CDN URLs also use
-      // *.supabase.co — allow any subdomain of the project's base domain
-      // so /storage/v1/... and /storage/v1/render/... both pass.
+      // Pin to the EXACT project host. The previous "sibling subdomain
+      // of *.supabase.co" wildcard let any other team's project host
+      // through, which we never wanted. If you run a CDN in front of
+      // Storage, list it in ALLOWED_IMAGE_HOSTS instead.
       if (url.host === supaHost) return true;
-      // Allow sibling hosts like <anything>.supabase.co if the env var
-      // points there, for CDN/edge variants.
-      const base = supaHost.split(".").slice(-2).join(".");
-      if (base && url.host.endsWith(`.${base}`)) return true;
     } catch {
       // fall through to false
     }

@@ -14,6 +14,26 @@ export const revalidate = 0;
 // return — the user shouldn't see a stale "locked" version after paying.
 export const dynamic = "force-dynamic";
 
+// Public-safe column list. We deliberately do NOT include `user_id`,
+// `ai_system_prompt`, `pet_id`, or `prompt` on the row that ends up
+// serialized to the client — those leak the owning user's identity and
+// any private notes the owner has stashed in the system prompt.
+const PUBLIC_COLUMNS =
+  "id, title, page_count, pages, cover_image, image_style, is_public, digital_unlocked, created_at";
+
+interface StoryRowWithOwner {
+  id: string;
+  title: string;
+  page_count: number;
+  pages: Story["pages"];
+  cover_image: string | null;
+  image_style: string;
+  is_public: boolean;
+  digital_unlocked: boolean;
+  created_at: string;
+  user_id: string | null;
+}
+
 // Reading is allowed for public stories without sign-in — RLS shows
 // is_public=true rows to anon. Owners can also read their own rows
 // (RLS too), but the owner has to unlock the digital tier (or pay for
@@ -29,19 +49,37 @@ export default async function ReadStoryPage({
 
   const user = await getCurrentUser();
   const admin = isAdminUser(user);
+
+  // Fetch the visible columns through the user-scoped client (RLS keeps
+  // private rows hidden) PLUS a separate admin-side ownership lookup
+  // for the owner check. We never hydrate user_id onto the page that
+  // the client receives.
   const supa = admin ? supabaseAdmin() : await getSupabaseServer();
-  const { data, error } = await supa
+  const { data: visible, error } = await supa
     .from("stories")
-    .select("*")
+    .select(PUBLIC_COLUMNS)
     .eq("id", id)
     .single();
 
-  if (error || !data) {
+  if (error || !visible) {
     notFound();
   }
 
-  const story = data as Story & {
-    user_id?: string | null;
+  // Owner check runs against a separate select that includes user_id —
+  // the value never leaves the server.
+  let ownerUserId: string | null = null;
+  if (user) {
+    const { data: ownerRow } = await supabaseAdmin()
+      .from("stories")
+      .select("user_id")
+      .eq("id", id)
+      .maybeSingle<{ user_id: string | null }>();
+    ownerUserId = ownerRow?.user_id ?? null;
+  }
+
+  const story = visible as Omit<StoryRowWithOwner, "user_id"> & {
+    user_id?: undefined;
+  } satisfies Omit<Story, "user_id" | "pet_id" | "ai_system_prompt" | "prompt"> & {
     digital_unlocked?: boolean;
     is_public?: boolean;
   };
@@ -69,15 +107,20 @@ export default async function ReadStoryPage({
   // and we never reach this point.
   const fullAccess =
     admin || story.digital_unlocked === true || story.is_public === true;
-  const isOwner = !!user && story.user_id === user.id;
+  const isOwner = !!user && !!ownerUserId && ownerUserId === user.id;
 
   if (!fullAccess && isOwner) {
-    return <DigitalUpsell story={story} priceUsd={DIGITAL_PRICE_USD} />;
+    return (
+      <DigitalUpsell
+        story={story as unknown as Story}
+        priceUsd={DIGITAL_PRICE_USD}
+      />
+    );
   }
 
   return (
     <>
-      <SlideReader story={story} />
+      <SlideReader story={story as unknown as Story} />
       {admin && <AdminExportPdfButton storyId={story.id} />}
     </>
   );

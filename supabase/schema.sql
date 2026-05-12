@@ -194,6 +194,12 @@ create policy "jobs readable by owner"
   on public.jobs for select
   using (user_id = auth.uid());
 
+-- Jobs are only ever written from server contexts (HTTP routes that
+-- created the job + Inngest functions that mutate it). Explicit revoke
+-- on writes keeps the table honest even if a future contributor swaps
+-- in a user-scoped client.
+revoke insert, update, delete on public.jobs from anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Storage: "uploads" bucket
 --
@@ -309,6 +315,13 @@ create policy "print orders readable by owner"
   on public.print_orders for select
   using (user_id = auth.uid());
 
+-- Explicit deny on writes via PostgREST. RLS without an INSERT/UPDATE/
+-- DELETE policy already blocks anon + authenticated writers, but the
+-- explicit revoke makes the intent obvious and survives any future
+-- "permissive by default" misconfiguration. All writes flow through
+-- service-role only.
+revoke insert, update, delete on public.print_orders from anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Print-order audit log
 --
@@ -349,6 +362,8 @@ create policy "events readable for the order's owner"
         and po.user_id = auth.uid()
     )
   );
+
+revoke insert, update, delete on public.print_order_events from anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Support chat
@@ -430,6 +445,61 @@ create policy "users insert own support messages"
   );
 
 -- ---------------------------------------------------------------------------
+-- Rate limiting (Postgres-backed, fixed-window counter).
+--
+-- Used by /api/generate, the AI Assistant routes, and /api/upload to cap
+-- per-user request volume. Keyed by an opaque string like
+-- "generate:<userId>"; the check_rate_limit function atomically
+-- increments and returns whether the caller is still within budget.
+-- Service-role only (never exposed to anon/authenticated).
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.rate_limits (
+  key text primary key,
+  count int not null default 0,
+  window_start timestamptz not null default now()
+);
+
+create index if not exists rate_limits_window_idx
+  on public.rate_limits (window_start);
+
+alter table public.rate_limits enable row level security;
+revoke all on public.rate_limits from anon, authenticated;
+
+create or replace function public.check_rate_limit(
+  p_key text,
+  p_limit int,
+  p_window_seconds int
+) returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_count int;
+begin
+  insert into public.rate_limits (key, count, window_start)
+  values (p_key, 1, now())
+  on conflict (key) do update set
+    count = case
+      when extract(epoch from (now() - public.rate_limits.window_start)) > p_window_seconds
+        then 1
+      else public.rate_limits.count + 1
+    end,
+    window_start = case
+      when extract(epoch from (now() - public.rate_limits.window_start)) > p_window_seconds
+        then now()
+      else public.rate_limits.window_start
+    end
+  returning count into v_count;
+
+  return v_count <= p_limit;
+end;
+$$;
+
+revoke all on function public.check_rate_limit(text, int, int) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Atomic per-page updater (unchanged from previous schema). Used by
 -- overlay saves and AI regeneration to avoid a read-modify-write race
 -- on the entire stories.pages JSONB array.
@@ -442,12 +512,47 @@ create or replace function public.update_story_page_fields(
 ) returns void
 language plpgsql
 security definer
+-- Pin search_path so a malicious schema in front of public can't shadow
+-- the stories table or jsonb operators when this SECURITY DEFINER runs.
+set search_path = public, pg_temp
 as $$
 declare
   v_idx int;
   v_merged jsonb;
   v_current jsonb;
+  v_owner uuid;
+  v_caller uuid;
+  v_safe_patch jsonb;
 begin
+  -- Ownership gate. Service-role callers have auth.uid() = null and
+  -- pass through (the application layer has already done its checks).
+  -- Any other caller must own the story.
+  v_caller := auth.uid();
+  select user_id into v_owner from public.stories where id = p_story_id;
+  if v_owner is null then
+    raise exception 'Story % not found', p_story_id using errcode = 'P0002';
+  end if;
+  if v_caller is not null and v_caller <> v_owner then
+    raise exception 'Not authorized to modify story %', p_story_id
+      using errcode = '42501';
+  end if;
+
+  -- Whitelist patch keys — refuse to merge anything the app doesn't
+  -- expect (defense in depth against schema-bloat attacks).
+  v_safe_patch := '{}'::jsonb;
+  if p_patch ? 'text' then
+    v_safe_patch := v_safe_patch || jsonb_build_object('text', p_patch->'text');
+  end if;
+  if p_patch ? 'imageUrl' then
+    v_safe_patch := v_safe_patch || jsonb_build_object('imageUrl', p_patch->'imageUrl');
+  end if;
+  if p_patch ? 'overlays' then
+    v_safe_patch := v_safe_patch || jsonb_build_object('overlays', p_patch->'overlays');
+  end if;
+  if p_patch ? 'layoutId' then
+    v_safe_patch := v_safe_patch || jsonb_build_object('layoutId', p_patch->'layoutId');
+  end if;
+
   select pos - 1
     into v_idx
     from public.stories s,
@@ -462,7 +567,7 @@ begin
   end if;
 
   select pages->v_idx into v_current from public.stories where id = p_story_id;
-  v_merged := coalesce(v_current, '{}'::jsonb) || coalesce(p_patch, '{}'::jsonb);
+  v_merged := coalesce(v_current, '{}'::jsonb) || v_safe_patch;
 
   update public.stories
      set pages = jsonb_set(pages, array[v_idx::text], v_merged, false)
@@ -472,3 +577,7 @@ $$;
 
 revoke all on function public.update_story_page_fields(uuid, int, jsonb) from public;
 revoke all on function public.update_story_page_fields(uuid, int, jsonb) from anon;
+-- Also revoke from authenticated so the RPC is unreachable via PostgREST
+-- (Supabase grants execute to authenticated by default on every function
+-- in `public`). The only legitimate caller is the service-role client.
+revoke all on function public.update_story_page_fields(uuid, int, jsonb) from authenticated;

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { supabaseAdmin } from "@/lib/supabase";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
+import { assertNoBypassInProd } from "@/lib/env-guard";
 
 // Digital tier checkout. Unlocks online reading + PDF download for the
 // owner's own story. No print pipeline, no shipping address, no Lulu
@@ -52,8 +54,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ url: successUrl, alreadyUnlocked: true });
   }
 
-  // Bypass flow — flip the flag and short-circuit Stripe.
-  if (process.env.BYPASS_STRIPE === "1") {
+  // Bypass flow — flip the flag and short-circuit Stripe. Gated to
+  // admin-only (mirrors the ship/stripe/checkout bypass behavior). A
+  // misconfigured BYPASS_STRIPE=1 in prod must not give every signed-in
+  // user a free unlock; the env-guard throws on that combination.
+  assertNoBypassInProd();
+  if (isAdminUser(user) && process.env.BYPASS_STRIPE === "1") {
     await admin
       .from("stories")
       .update({ digital_unlocked: true })

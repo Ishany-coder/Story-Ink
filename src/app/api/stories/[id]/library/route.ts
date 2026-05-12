@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
+import { isAllowedContentUrl } from "@/lib/http";
 
 // Persist a user-uploaded image URL into stories.library_images so the
 // Studio's Images tab and picker keep showing it even after every layer
@@ -36,6 +37,15 @@ export async function POST(
   const url = typeof body.url === "string" ? body.url.trim() : "";
   if (!url) {
     return NextResponse.json({ error: "url is required" }, { status: 400 });
+  }
+  // Reject anything that isn't on our allowlisted hosts — library URLs
+  // get rendered into the Studio canvas as <img src> and end up in
+  // printed PDFs. javascript:/data:/cross-origin URLs must not survive.
+  if (!isAllowedContentUrl(url)) {
+    return NextResponse.json(
+      { error: "URL must be on the allowed host list" },
+      { status: 400 }
+    );
   }
 
   const current = await readLibrary(id);
