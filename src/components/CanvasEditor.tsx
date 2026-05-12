@@ -104,23 +104,75 @@ async function pollJob<T>(jobId: string): Promise<T> {
   throw new Error("Generation timed out");
 }
 
-function makeText(): TextLayer {
+function makeText(
+  opts: {
+    text?: string;
+    fontSize?: number;
+    fontWeight?: TextLayer["fontWeight"];
+    fontFamily?: string;
+  } = {}
+): TextLayer {
   return {
     id: uid(),
     type: "text",
-    text: "Double-click to edit",
+    text: opts.text ?? "Double-click to edit",
     x: 240,
     y: 360,
     width: 320,
     height: 80,
     rotation: 0,
-    fontSize: 24,
-    color: "#1f1147",
-    fontFamily: "var(--font-display), serif",
-    fontWeight: "bold",
+    fontSize: opts.fontSize ?? 24,
+    color: "#1d2620",
+    fontFamily: opts.fontFamily ?? "var(--font-display), serif",
+    fontWeight: opts.fontWeight ?? "bold",
     source: "user",
   };
 }
+
+// Text tab presets. Each is a one-click "add a text box pre-sized for X"
+// affordance. Sizes mirror the design spec (28/18/11) and the labels are
+// what the user sees in the preview row.
+const TEXT_PRESETS: Array<{
+  label: string;
+  fontSize: number;
+  fontWeight: TextLayer["fontWeight"];
+  fontFamily: string;
+}> = [
+  {
+    label: "Heading",
+    fontSize: 28,
+    fontWeight: "bold",
+    fontFamily: 'var(--font-display), "EB Garamond", serif',
+  },
+  {
+    label: "Story body",
+    fontSize: 18,
+    fontWeight: "normal",
+    fontFamily: 'var(--font-display), "EB Garamond", serif',
+  },
+  {
+    label: "Caption",
+    fontSize: 11,
+    fontWeight: "normal",
+    fontFamily: '"Albert Sans", var(--font-sans), system-ui, sans-serif',
+  },
+];
+
+// Fonts users can pick from the "Story fonts" list. Each click adds a
+// 18px sample text in that family — clicking again with a layer
+// selected swaps the family.
+const STORY_FONTS: Array<{ label: string; family: string }> = [
+  {
+    label: "EB Garamond",
+    family: 'var(--font-display), "EB Garamond", serif',
+  },
+  { label: "Lora", family: '"Lora", serif' },
+  { label: "Crimson Pro", family: '"Crimson Pro", serif' },
+  {
+    label: "Albert Sans",
+    family: '"Albert Sans", var(--font-sans), system-ui, sans-serif',
+  },
+];
 
 type PrimitiveShape = "rect" | "circle" | "line";
 
@@ -1145,16 +1197,6 @@ export default function CanvasEditor({
     [selectedLayer]
   );
 
-  // Pages strip groups pages into "spreads" (1·2, 3·4, ...). Build them once
-  // per page-count change so the bottom filmstrip can render in one pass.
-  const spreads: Array<[
-    typeof story.pages[number],
-    typeof story.pages[number] | undefined
-  ]> = [];
-  for (let i = 0; i < story.pages.length; i += 2) {
-    spreads.push([story.pages[i], story.pages[i + 1]]);
-  }
-
   // Living vs memorial re-tints all accent surfaces. Forest is the
   // default living accent; indigo is calmer for memorial stories.
   // Resolved against the palette tokens added in globals.css.
@@ -1205,7 +1247,11 @@ export default function CanvasEditor({
   }, [saving, dirtyPageCount]);
 
   return (
-    <div className="mx-auto flex max-w-[1440px] flex-col gap-3 px-6 py-3">
+    // The Studio is height-constrained to the viewport (minus the
+    // fixed 64px Navbar) so the side panels can scroll internally
+    // without pushing the canvas down. Per-panel scroll containers
+    // below have `overflow-y-auto`.
+    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-[1440px] flex-col gap-3 overflow-hidden px-6 py-3">
       {/* Story header — breadcrumb, title, meta on the left; history +
           save controls on the right. Sized to feel like a chapter
           opener, not a toolbar. */}
@@ -1283,9 +1329,11 @@ export default function CanvasEditor({
       </header>
 
       {/* Workspace — fixed-width side rails so the canvas sits perfectly
-          centred. Heights line up to a calc'd viewport target so the
-          bottom Pages rail is always visible on a 900px+ screen. */}
-      <div className="grid min-h-[640px] grid-cols-1 gap-[18px] lg:grid-cols-[290px_minmax(0,1fr)_334px]">
+          centred. `min-h-0` lets the children's `overflow-y-auto`
+          actually engage (otherwise flex children default to their
+          content height and the page grows instead of the panel
+          scrolling). */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-[18px] lg:grid-cols-[290px_minmax(0,1fr)_334px]">
         {/* Left: tools sidebar */}
         <aside className="flex flex-col overflow-hidden rounded-[10px] border border-linen-200 bg-cream-50 p-4">
           <div className="mb-3 flex flex-wrap items-center gap-1">
@@ -1467,13 +1515,81 @@ export default function CanvasEditor({
             )}
 
             {tab === "text" && (
-              <button
-                type="button"
-                onClick={() => addLayer(makeText())}
-                className="w-full rounded-lg border border-dashed border-linen-200 bg-cream-100/40 px-3 py-5 text-center font-[family-name:var(--font-display)] text-xl font-semibold text-moss-700 transition-colors hover:border-moss-500 hover:bg-cream-200"
-              >
-                + Add text box
-              </button>
+              <div>
+                <div className="mb-2.5 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+                  Add text
+                </div>
+                <div className="flex flex-col gap-2">
+                  {TEXT_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() =>
+                        addLayer(
+                          makeText({
+                            text: p.label,
+                            fontSize: p.fontSize,
+                            fontWeight: p.fontWeight,
+                            fontFamily: p.fontFamily,
+                          })
+                        )
+                      }
+                      className="flex w-full items-baseline justify-between rounded-lg border border-linen-200 bg-paper px-3 py-2.5 text-left transition-colors hover:bg-cream-50"
+                    >
+                      <span
+                        style={{
+                          fontFamily: p.fontFamily,
+                          fontWeight:
+                            p.fontWeight === "bold" ? 600 : 500,
+                          // Cap rendered preview size so all three rows
+                          // stay roughly the same vertical rhythm
+                          fontSize: Math.min(p.fontSize, 22),
+                          color: "var(--color-bark-900)",
+                        }}
+                      >
+                        {p.label}
+                      </span>
+                      <span className="text-[10px] text-stone-500">
+                        {p.fontSize}px
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-5 mb-2.5 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+                  Story fonts
+                </div>
+                <div className="flex flex-col gap-2">
+                  {STORY_FONTS.map((f) => (
+                    <button
+                      key={f.label}
+                      type="button"
+                      onClick={() => {
+                        // If a text layer is selected, retypeset it.
+                        // Otherwise add a new 18px sample in that family.
+                        if (selectedLayer && selectedLayer.type === "text") {
+                          updateLayer(selectedLayer.id, {
+                            fontFamily: f.family,
+                          });
+                        } else {
+                          addLayer(
+                            makeText({
+                              text: f.label,
+                              fontSize: 18,
+                              fontWeight: "normal",
+                              fontFamily: f.family,
+                            })
+                          );
+                        }
+                      }}
+                      className="w-full rounded-lg border border-linen-200 bg-paper px-3 py-2.5 text-left text-[13px] text-bark-900 transition-colors hover:bg-cream-50"
+                      style={{ fontFamily: f.family }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             {tab === "shapes" && (
@@ -1498,8 +1614,12 @@ export default function CanvasEditor({
         </aside>
 
         {/* Center: canvas. Plain frame, no surrounding panel — the page
-            sits directly on the body so it reads as a single sheet. */}
-        <div className="flex flex-col items-center justify-center gap-2 py-1">
+            sits directly on the body so it reads as a single sheet.
+            `min-h-0` lets the parent grid constrain this column's
+            height; the canvas itself uses `aspect-square` against the
+            smaller dimension so it stays visually a page no matter the
+            viewport. */}
+        <div className="flex min-h-0 min-w-0 flex-col items-center justify-center gap-2 py-1">
           {defineMode && (
             <div className="w-full max-w-[640px] rounded-lg border border-linen-200 bg-cream-100 px-4 py-1.5 text-center text-[11px] font-medium text-moss-700">
               Drag and resize the boxes to design your layout
@@ -1507,8 +1627,16 @@ export default function CanvasEditor({
           )}
           <div
             ref={canvasRef}
-            className="relative aspect-square w-full max-w-[640px] overflow-hidden rounded-[4px] bg-paper"
+            // `max-w` AND `max-h` cap on both axes so the square always
+            // fits in whatever the smaller dimension is. `min(...)` so
+            // it doesn't have to grow to fill — keeps the page centered
+            // in the column with breathing room.
+            className="relative aspect-square shrink overflow-hidden rounded-[4px] bg-paper"
             style={{
+              width: "min(100%, 640px)",
+              height: "min(100%, 640px)",
+              maxWidth: "min(100%, 640px)",
+              maxHeight: "min(100%, 640px)",
               boxShadow:
                 "0 24px 48px -16px rgba(30,20,10,.25), 0 2px 6px rgba(30,20,10,.08)",
             }}
@@ -1727,89 +1855,65 @@ export default function CanvasEditor({
           thumbnail represents one page; pairs are grouped under a
           spread label (1·2, 3·4, …) so the user can navigate by
           spread the way the printed book reads. */}
-      {/* Bottom filmstrip — spread thumbnails matching design A. Each
-          spread is a left+right page pair separated by a center gutter,
-          mimicking how the printed book reads. Clicking either half of
-          a spread navigates to that page. */}
+      {/* Bottom filmstrip — one thumbnail per page, in order. Each
+          thumb shows the page image (or a paper placeholder) and is
+          captioned with its page number; the active page gets an
+          accent outline. Horizontally scrollable. */}
       <footer
-        className="flex items-center gap-2 rounded-[10px] border border-linen-200 bg-cream-50 px-[18px] py-3 overflow-x-auto"
+        className="flex shrink-0 items-center gap-2 overflow-x-auto rounded-[10px] border border-linen-200 bg-cream-50 px-[18px] py-3"
         style={{ minHeight: 96 }}
       >
         <span className="mr-2 shrink-0 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
-          Spreads
+          Pages
         </span>
-        {spreads.map(([left, right], spreadIdx) => {
-          const activeOnLeft = left?.pageNumber === currentPage?.pageNumber;
-          const activeOnRight = right?.pageNumber === currentPage?.pageNumber;
-          const isActive = activeOnLeft || activeOnRight;
-          const halfClick = (page: typeof left | undefined) => {
-            if (!page) return;
-            const idx = story.pages.findIndex(
-              (x) => x.pageNumber === page.pageNumber
-            );
-            setPageIdx(idx);
-            setSelectedId(null);
-            setEditingTextId(null);
-          };
+        {story.pages.map((page, idx) => {
+          const isActive = page.pageNumber === currentPage?.pageNumber;
+          const isDirtyPage = !!dirty[page.pageNumber];
           return (
             <div
-              key={spreadIdx}
+              key={page.pageNumber}
               className="flex shrink-0 flex-col items-center"
             >
-              <div
-                className="overflow-hidden rounded-[3px] bg-paper transition-transform"
+              <button
+                type="button"
+                onClick={() => {
+                  setPageIdx(idx);
+                  setSelectedId(null);
+                  setEditingTextId(null);
+                }}
+                title={`Page ${page.pageNumber}`}
+                className="relative overflow-hidden rounded-[3px] bg-paper transition-transform"
                 style={{
-                  width: 88,
+                  width: 48,
                   height: 56,
                   boxShadow: "0 1px 2px rgba(40,30,20,.08)",
-                  outline: isActive ? `2px solid ${accent}` : "1px solid var(--color-linen-200)",
+                  outline: isActive
+                    ? `2px solid ${accent}`
+                    : "1px solid var(--color-linen-200)",
                   outlineOffset: isActive ? 2 : 0,
                 }}
               >
-                <div className="flex h-full w-full">
-                  <button
-                    type="button"
-                    onClick={() => halfClick(left)}
-                    className="relative flex-1 cursor-pointer border-r border-linen-200 bg-cream-100"
-                    title={left ? `Page ${left.pageNumber}` : ""}
-                  >
-                    {left?.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={left.imageUrl}
-                        alt=""
-                        className="h-full w-full object-cover opacity-90"
-                      />
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => halfClick(right)}
-                    disabled={!right}
-                    className="relative flex-1 cursor-pointer bg-cream-100 disabled:cursor-default"
-                    title={right ? `Page ${right.pageNumber}` : ""}
-                  >
-                    {right?.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={right.imageUrl}
-                        alt=""
-                        className="h-full w-full object-cover opacity-90"
-                      />
-                    ) : null}
-                  </button>
-                </div>
-              </div>
+                {page.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={page.imageUrl}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover opacity-90"
+                  />
+                ) : null}
+                {isDirtyPage && !isActive && (
+                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-clay-500" />
+                )}
+              </button>
               <span
                 className="mt-1 text-center text-[9px] uppercase tracking-[.04em]"
                 style={{
                   color: isActive ? accent : "var(--color-stone-500)",
                   fontWeight: isActive ? 600 : 500,
+                  fontVariantNumeric: "tabular-nums",
                 }}
               >
-                {right
-                  ? `${left.pageNumber}·${right.pageNumber}`
-                  : `${left.pageNumber}`}
+                {String(page.pageNumber).padStart(2, "0")}
               </span>
             </div>
           );
