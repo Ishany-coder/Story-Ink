@@ -97,7 +97,6 @@ interface UpdateBody {
   photos?: unknown;
   quirks?: unknown;
   dedication_text?: unknown;
-  is_public?: unknown;
 }
 
 export async function PATCH(request: Request, ctx: Ctx) {
@@ -224,16 +223,6 @@ export async function PATCH(request: Request, ctx: Ctx) {
       );
     }
     patch.quirks = quirks;
-  }
-
-  if (body.is_public !== undefined) {
-    if (typeof body.is_public !== "boolean") {
-      return NextResponse.json(
-        { error: "is_public must be a boolean" },
-        { status: 400 }
-      );
-    }
-    patch.is_public = body.is_public;
   }
 
   patch.updated_at = new Date().toISOString();

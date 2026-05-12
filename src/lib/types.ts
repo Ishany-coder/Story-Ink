@@ -194,7 +194,6 @@ export interface Pet {
   // Null falls back to the templated "In loving memory of {name},
   // {dates}" when generating PDFs.
   dedication_text?: string | null;
-  is_public: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -212,7 +211,6 @@ export interface CreatePetInput {
   photos?: string[];
   quirks?: PetQuirk[];
   dedication_text?: string | null;
-  is_public?: boolean;
 }
 
 export interface GenerateRequest {
