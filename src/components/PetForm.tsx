@@ -35,7 +35,6 @@ export default function PetForm({ initial = null }: Props) {
   const [mode, setMode] = useState<PetMode>(initial?.mode ?? "living");
   const [passedAt, setPassedAt] = useState(initial?.passed_at ?? "");
   const [dedication, setDedication] = useState(initial?.dedication_text ?? "");
-  const [isPublic, setIsPublic] = useState(initial?.is_public ?? false);
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
   // Quirk rows. Default 5 from QUIRK_BANK pre-populated with empty
   // answers; the user fills any subset. Editing a pet seeds with their
@@ -160,7 +159,6 @@ export default function PetForm({ initial = null }: Props) {
         mode === "memorial" && dedication.trim() ? dedication.trim() : null,
       photos,
       quirks,
-      is_public: isPublic,
     };
 
     try {
@@ -442,25 +440,6 @@ export default function PetForm({ initial = null }: Props) {
         </div>
       </Field>
 
-      <Field label="Visibility">
-        <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-cream-300 bg-cream-50 px-4 py-3 transition-colors hover:border-cream-300">
-          <input
-            type="checkbox"
-            checked={isPublic}
-            onChange={(e) => setIsPublic(e.target.checked)}
-            className="h-4 w-4 accent-moss-700"
-          />
-          <div className="flex-1">
-            <div className="text-sm font-medium text-ink-900">
-              Make this pet&rsquo;s profile public
-            </div>
-            <div className="text-xs text-ink-500">
-              Off by default. Public stories about this pet are still
-              controlled per-story.
-            </div>
-          </div>
-        </label>
-      </Field>
 
       {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
 

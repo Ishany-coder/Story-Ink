@@ -174,7 +174,6 @@ export async function POST(request: Request) {
     photos,
     quirks,
     dedication_text: sanitizeStr(body.dedication_text, 600),
-    is_public: body.is_public === true,
   };
 
   const { data, error } = await supabaseAdmin()

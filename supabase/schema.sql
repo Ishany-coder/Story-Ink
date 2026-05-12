@@ -36,15 +36,17 @@ create table if not exists public.pets (
   -- printed memorial books. NULL → use the template "In loving memory
   -- of {name}, {dates}".
   dedication_text text,
-  -- Per-pet visibility. Independent of any story's is_public — a pet
-  -- can stay private even if some of its stories are public.
-  is_public boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 -- Idempotent for existing deployments that pre-date this column.
 alter table public.pets add column if not exists dedication_text text;
+
+-- The pet `is_public` flag was removed (pets are always private now —
+-- story-level sharing via stories.is_public is the only shareable
+-- axis). Drop the column from deployed DBs when ready.
+alter table public.pets drop column if exists is_public;
 
 -- Structured "personality DNA" — a list of {prompt, answer} entries
 -- the user fills out from a curated bank of specific quirk
@@ -59,10 +61,13 @@ create index if not exists pets_created_at_idx on public.pets (created_at desc);
 
 alter table public.pets enable row level security;
 
+-- Old "pets visible to owner or public" policy (when is_public existed)
+-- is replaced with owner-only: a pet only ever resolves for its owner.
 drop policy if exists "pets visible to owner or public" on public.pets;
-create policy "pets visible to owner or public"
+drop policy if exists "pets visible to owner" on public.pets;
+create policy "pets visible to owner"
   on public.pets for select
-  using (is_public or user_id = auth.uid());
+  using (user_id = auth.uid());
 
 drop policy if exists "pets insert by owner" on public.pets;
 create policy "pets insert by owner"
