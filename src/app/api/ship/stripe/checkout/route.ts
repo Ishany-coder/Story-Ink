@@ -1,23 +1,21 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { createCheckoutSession } from "@/lib/stripe";
-import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lulu";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { priceHardcoverUsd } from "@/lib/pricing";
-import { assertNoBypassInProd } from "@/lib/env-guard";
+import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
+import { isShippingAddress, type ShippingAddress } from "@/lib/shipping";
 import type { Story, StoryPage } from "@/lib/types";
-import type { ShippingAddress } from "@/lib/lulu";
 
 // Creates a Stripe Checkout Session. The client redirects to the returned
 // URL; Stripe handles card entry on their hosted page. On success they
 // redirect back to /ship/[id]/success?session_id=...
 //
-// The total is recomputed server-side from a fresh Lulu quote — the
-// client is never allowed to dictate the amount charged. The client's
-// displayed quote may have drifted (address changed, Lulu price update),
-// in which case we return the new quote so the UI can re-confirm before
-// charging.
+// The total is recomputed server-side from the static price formula so
+// the client can't dictate the amount charged. Pricing is page-count
+// based (shipping bundled in); Lulu auto-quote/auto-fulfill was removed
+// in favor of manual admin fulfillment.
 
 export const maxDuration = 30;
 
@@ -46,22 +44,6 @@ function parseQuantity(raw: unknown): number {
   return n;
 }
 
-function isAddress(v: unknown): v is ShippingAddress {
-  if (!v || typeof v !== "object") return false;
-  const a = v as Record<string, unknown>;
-  const str = (k: string) =>
-    typeof a[k] === "string" && (a[k] as string).trim().length > 0;
-  return !!(
-    str("name") &&
-    str("street1") &&
-    str("city") &&
-    str("state_code") &&
-    str("country_code") &&
-    str("postcode") &&
-    str("phone_number")
-  );
-}
-
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
@@ -72,7 +54,7 @@ export async function POST(request: Request) {
   if (!storyId) {
     return NextResponse.json({ error: "storyId is required" }, { status: 400 });
   }
-  if (!isAddress(body.address)) {
+  if (!isShippingAddress(body.address)) {
     return NextResponse.json(
       { error: "Invalid shipping address" },
       { status: 400 }
@@ -99,6 +81,9 @@ export async function POST(request: Request) {
   // BYPASS_STRIPE leaks into prod env — and assertNoBypassInProd hard-
   // fails the request if the flag is set in production at all.
   assertNoBypassInProd();
+  // Hard-fail if STRIPE_SECRET_KEY's mode (test/live) doesn't match
+  // NODE_ENV — prevents accidentally hitting live Stripe from dev.
+  assertStripeKeyMatchesEnv();
   // Admin always bypasses (test orders, demo fulfillment). BYPASS_STRIPE
   // is a dev-time convenience that only takes effect for admins — a
   // misconfigured prod env can't unlock free orders for normal users.
@@ -132,54 +117,30 @@ export async function POST(request: Request) {
     }
   }
 
-  // Recompute the quote from Lulu *right now*, using the address the
-  // user just submitted. This is the only amount we charge — whatever
-  // the client said is ignored.
-  let quote;
-  try {
-    quote = await quotePrintAndShipping({
-      pageCount: (story.pages as StoryPage[]).length,
-      quantity,
-      address: body.address,
-    });
-  } catch (err) {
-    if (err instanceof LuluError) {
-      console.error("[stripe/checkout] lulu quote error:", err);
-      const status = err.status === 400 ? 400 : 502;
-      return NextResponse.json({ error: friendlyLuluMessage(err) }, { status });
-    }
-    console.error("[stripe/checkout] quote failed:", err);
-    return NextResponse.json(
-      { error: "Couldn't get a shipping quote. Try again." },
-      { status: 500 }
-    );
-  }
-
-  // Customer-facing price = list price (with per-page surcharge over
-  // 30 pages) OR the Lulu cost × margin-floor multiplier, whichever
-  // is higher. Lulu's quote.totalUsd covers print + shipping + tax
-  // and is what we'd pay them; priceHardcoverUsd guarantees we keep
-  // at least the configured margin on top of that.
+  // Static price: HARDCOVER_BASE_USD + per-page surcharge over 30,
+  // multiplied by quantity. Shipping is bundled in. The client's
+  // displayed price is informational only — server is authoritative.
   const pageCount = (story.pages as StoryPage[]).length;
-  const rawAmountUsd = priceHardcoverUsd(pageCount, quote.totalUsd);
+  const unitUsd = priceHardcoverUsd(pageCount);
+  const rawAmountUsd = unitUsd * quantity;
   const amountUsd = Math.round(rawAmountUsd * 100) / 100;
   if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
     return NextResponse.json(
-      { error: "Quote returned an invalid total" },
-      { status: 502 }
+      { error: "Couldn't compute an order total" },
+      { status: 500 }
     );
   }
   if (amountUsd > MAX_ALLOWED_USD) {
     return NextResponse.json(
-      { error: "Quote exceeds safety cap; contact support" },
+      { error: "Order exceeds safety cap; contact support" },
       { status: 400 }
     );
   }
 
-  // Drift check: if the caller told us what price they were shown and it
-  // disagrees with the live quote by more than 25¢, refuse and return
-  // the fresh quote so the UI can re-confirm. Prevents "price jumped in
-  // the 30 seconds between quote and checkout" surprise charges.
+  // Drift check: if the caller told us what price they were shown and
+  // it disagrees with the server total by more than 25¢, refuse so the
+  // UI can re-confirm. Now that pricing is static this only fires when
+  // the page count or quantity changed between display and submit.
   const expected =
     typeof body.expectedAmountUsd === "number" ? body.expectedAmountUsd : null;
   if (expected !== null && Math.abs(expected - amountUsd) > 0.25) {
@@ -187,7 +148,7 @@ export async function POST(request: Request) {
       {
         error: "Price changed — please re-confirm the updated total.",
         code: "price_changed",
-        quote,
+        amountUsd,
       },
       { status: 409 }
     );

@@ -4,11 +4,29 @@
 // We use Stripe Checkout (hosted page) instead of Elements so that no card
 // data ever touches our server, and Stripe handles Apple Pay / Google Pay /
 // saved-card UX for free.
+//
+// Test vs live: the Stripe SDK auto-detects the mode from the key prefix
+// (`sk_test_…` vs `sk_live_…`), so the same code paths handle both. Just
+// put the right key in the right environment:
+//   - .env.local on your laptop   → sk_test_…  (use with `stripe listen`)
+//   - production deploy           → sk_live_…
+// `assertStripeKeyMatchesEnv` in env-guard.ts hard-fails the boot if you
+// accidentally cross the streams (live key in dev, or test key in prod).
 
 import Stripe from "stripe";
-import type { ShippingAddress } from "@/lib/lulu";
+import type { ShippingAddress } from "@/lib/shipping";
 
 let _client: Stripe | null = null;
+let _modeLogged = false;
+
+export type StripeMode = "live" | "test";
+
+// Look at the secret-key prefix to figure out which Stripe environment the
+// app is talking to. Used for log lines and the env-guard cross-check.
+export function stripeMode(): StripeMode {
+  const key = process.env.STRIPE_SECRET_KEY ?? "";
+  return key.startsWith("sk_live_") ? "live" : "test";
+}
 
 export function stripe(): Stripe {
   if (_client) return _client;
@@ -19,6 +37,13 @@ export function stripe(): Stripe {
     );
   }
   _client = new Stripe(key);
+  // First-use log so you can confirm at a glance which Stripe account /
+  // mode the server is wired to — especially useful when bouncing
+  // between local dev (sk_test_) and a production deploy (sk_live_).
+  if (!_modeLogged) {
+    console.info(`[stripe] connected in ${stripeMode()} mode`);
+    _modeLogged = true;
+  }
   return _client;
 }
 

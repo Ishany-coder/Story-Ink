@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
-import { assertNoBypassInProd } from "@/lib/env-guard";
+import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
 
 // Digital tier checkout. Unlocks online reading + PDF download for the
 // owner's own story. No print pipeline, no shipping address, no Lulu
@@ -59,6 +59,9 @@ export async function POST(request: Request) {
   // misconfigured BYPASS_STRIPE=1 in prod must not give every signed-in
   // user a free unlock; the env-guard throws on that combination.
   assertNoBypassInProd();
+  // Hard-fail if STRIPE_SECRET_KEY's mode (test/live) doesn't match
+  // NODE_ENV — prevents accidentally hitting live Stripe from dev.
+  assertStripeKeyMatchesEnv();
   if (isAdminUser(user) && process.env.BYPASS_STRIPE === "1") {
     await admin
       .from("stories")

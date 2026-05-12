@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { quotePrintAndShipping, LuluError, friendlyLuluMessage } from "@/lib/lulu";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
+import { priceHardcoverUsd } from "@/lib/pricing";
+import { isShippingAddress } from "@/lib/shipping";
 import type { Story, StoryPage } from "@/lib/types";
 
-// Live quote from Lulu for the given address + story. The address is sent
-// to Lulu to compute shipping but NOT persisted anywhere on our side — this
-// route reads the body, forwards it, and returns the cost breakdown.
+// Returns the customer-facing price for a hardcover of this story at
+// the requested quantity. Static pricing — shipping is bundled into
+// the list price and the admin fulfills the print order manually
+// (Lulu auto-fulfillment has been removed). The address is still
+// validated here so the client gets the same "this field is missing"
+// errors before the user lands on Stripe Checkout.
 
-export const maxDuration = 20;
+export const maxDuration = 10;
 
 interface Body {
   storyId?: unknown;
@@ -27,31 +31,6 @@ function parseQuantity(raw: unknown): number {
   return n;
 }
 
-function isAddress(v: unknown): v is {
-  name: string;
-  street1: string;
-  street2?: string;
-  city: string;
-  state_code: string;
-  country_code: string;
-  postcode: string;
-  phone_number: string;
-  email?: string;
-} {
-  if (!v || typeof v !== "object") return false;
-  const a = v as Record<string, unknown>;
-  const str = (k: string) => typeof a[k] === "string" && (a[k] as string).trim();
-  return !!(
-    str("name") &&
-    str("street1") &&
-    str("city") &&
-    str("state_code") &&
-    str("country_code") &&
-    str("postcode") &&
-    str("phone_number")
-  );
-}
-
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
@@ -62,7 +41,7 @@ export async function POST(request: Request) {
   if (!storyId) {
     return NextResponse.json({ error: "storyId is required" }, { status: 400 });
   }
-  if (!isAddress(body.address)) {
+  if (!isShippingAddress(body.address)) {
     return NextResponse.json(
       { error: "Invalid shipping address" },
       { status: 400 }
@@ -81,24 +60,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Story not found" }, { status: 404 });
   }
 
-  try {
-    const quote = await quotePrintAndShipping({
-      pageCount: (story.pages as StoryPage[]).length,
-      quantity: parseQuantity(body.quantity),
-      address: body.address,
-    });
-    return NextResponse.json(quote);
-  } catch (err) {
-    if (err instanceof LuluError) {
-      console.error("[ship/quote] lulu error:", err);
-      // 400 = bad customer input (bad address); anything else is upstream.
-      const status = err.status === 400 ? 400 : 502;
-      return NextResponse.json({ error: friendlyLuluMessage(err) }, { status });
-    }
-    console.error("[ship/quote] unexpected:", err);
-    return NextResponse.json(
-      { error: "Quote failed" },
-      { status: 500 }
-    );
-  }
+  const pageCount = (story.pages as StoryPage[]).length;
+  const quantity = parseQuantity(body.quantity);
+  const unitUsd = priceHardcoverUsd(pageCount);
+  const totalUsd = Math.round(unitUsd * quantity * 100) / 100;
+
+  return NextResponse.json({
+    pageCount,
+    quantity,
+    unitUsd,
+    totalUsd,
+    // Kept in the response shape so existing UI consumers that read
+    // `printUsd` / `shippingUsd` / `taxUsd` don't crash. Shipping is
+    // bundled into the list price now, so shipping/tax are reported
+    // as zero rather than removed entirely.
+    printUsd: totalUsd,
+    shippingUsd: 0,
+    taxUsd: 0,
+  });
 }
