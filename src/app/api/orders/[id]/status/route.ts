@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { isAdminUser } from "@/lib/admin";
 import { getCurrentUser } from "@/lib/supabase-server";
+import { sendEmail } from "@/lib/email";
+import { orderShipped } from "@/lib/email-templates/order-shipped";
+import { reportError } from "@/lib/sentry";
 
 // Admin-only: advance a print_orders row through the fulfillment
 // state machine. Each transition writes an audit row to
@@ -60,9 +63,14 @@ export async function POST(request: Request, ctx: Ctx) {
 
   const { data: order, error: fetchErr } = await admin
     .from("print_orders")
-    .select("id, status")
+    .select("id, status, story_id, user_id")
     .eq("id", id)
-    .maybeSingle<{ id: string; status: string }>();
+    .maybeSingle<{
+      id: string;
+      status: string;
+      story_id: string | null;
+      user_id: string | null;
+    }>();
   if (fetchErr || !order) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
@@ -99,5 +107,52 @@ export async function POST(request: Request, ctx: Ctx) {
     actor_id: (user as { id: string }).id,
   });
 
+  // Fire the customer-facing "shipped" email on the in_progress →
+  // shipped transition. Failures are reported but never roll back
+  // the status change — the admin already advanced the order.
+  if (nextStatus === "shipped" && order.user_id && order.story_id) {
+    try {
+      await sendShippedEmail({
+        userId: order.user_id,
+        storyId: order.story_id,
+        orderId: id,
+      });
+    } catch (err) {
+      reportError(err, "orders.status.send-shipped");
+    }
+  }
+
   return NextResponse.json({ ok: true, status: nextStatus });
+}
+
+// Look up the buyer's email + the story title, then send the
+// "your book shipped" template. All best-effort: a missing user,
+// missing story, or send failure is swallowed (after Sentry capture)
+// so the admin's status update isn't blocked on email delivery.
+async function sendShippedEmail(args: {
+  userId: string;
+  storyId: string;
+  orderId: string;
+}): Promise<void> {
+  const admin = supabaseAdmin();
+  const [userRes, storyRes] = await Promise.all([
+    admin.auth.admin.getUserById(args.userId),
+    admin
+      .from("stories")
+      .select("title")
+      .eq("id", args.storyId)
+      .maybeSingle<{ title: string }>(),
+  ]);
+  const email = userRes.data.user?.email;
+  if (!email) return;
+  const tpl = orderShipped({
+    storyTitle: storyRes.data?.title ?? "your storybook",
+    orderId: args.orderId,
+  });
+  await sendEmail({
+    to: email,
+    subject: tpl.subject,
+    html: tpl.html,
+    text: tpl.text,
+  });
 }

@@ -339,8 +339,9 @@ export async function fulfillFromSession(
   // Fire the customer-facing order confirmation email. Failures here
   // don't roll back fulfillment — `sendEmail` swallows + reports its
   // own errors, and the admin queue is still the source of truth.
-  // TODO: wire the "shipped" notification from the admin orders page
-  //       once a real shipping carrier + tracking URL is in place.
+  // The companion "shipped" email is fired from
+  // /api/orders/[id]/status when the admin advances the order to
+  // 'shipped'.
   await sendOrderConfirmationEmail({
     userId: (story as Story & { user_id?: string | null }).user_id ?? null,
     storyTitle: story.title,
