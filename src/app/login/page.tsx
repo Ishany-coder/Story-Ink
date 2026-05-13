@@ -45,6 +45,11 @@ function LoginPageInner() {
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // COPPA age gate. Signup is contractually 13+ per our Terms — we ask
+  // for explicit affirmation at the only place a new account can be
+  // created. This is a self-attestation, not verification; that's the
+  // standard SaaS posture. Reset every time the user flips into signup.
+  const [confirmedAdult, setConfirmedAdult] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmEmailNotice, setConfirmEmailNotice] = useState(false);
@@ -52,6 +57,13 @@ function LoginPageInner() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password) return;
+    // Belt-and-suspenders: the submit button is also disabled when this
+    // is false in signup mode, but guard here too in case a future edit
+    // forgets the disabled prop.
+    if (mode === "signup" && !confirmedAdult) {
+      setError("Please confirm you're 13 or older to create an account.");
+      return;
+    }
     setPending(true);
     setError(null);
     setConfirmEmailNotice(false);
@@ -98,6 +110,9 @@ function LoginPageInner() {
     setMode(to);
     setError(null);
     setConfirmEmailNotice(false);
+    // Don't carry the 13+ tick across modes — flipping back to signup
+    // should re-prompt for the affirmation.
+    setConfirmedAdult(false);
   }
 
   return (
@@ -148,9 +163,29 @@ function LoginPageInner() {
               }
               className="w-full rounded-xl border border-cream-300 bg-cream-50 px-4 py-2.5 text-base text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
             />
+            {mode === "signup" && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-cream-300 bg-cream-100/60 px-4 py-3 text-sm text-ink-700 transition-colors hover:border-cream-400">
+                <input
+                  type="checkbox"
+                  checked={confirmedAdult}
+                  onChange={(e) => setConfirmedAdult(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-moss-700"
+                />
+                <span>
+                  I confirm I&rsquo;m at least 13 years old. StoryInk
+                  isn&rsquo;t available to children under 13. Under-13
+                  accounts may be removed without notice.
+                </span>
+              </label>
+            )}
             <button
               type="submit"
-              disabled={pending || !email.trim() || !password}
+              disabled={
+                pending ||
+                !email.trim() ||
+                !password ||
+                (mode === "signup" && !confirmedAdult)
+              }
               className="w-full rounded-full bg-moss-700 px-4 sm:px-6 lg:px-8 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending
