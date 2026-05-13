@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { readNavFlags } from "@/lib/nav-flags";
 import NavTabs from "./NavTabs";
+import MobileMenu from "./MobileMenu";
 import SupportChatLauncher from "./SupportChatLauncher";
 
 export default async function Navbar() {
@@ -17,7 +18,7 @@ export default async function Navbar() {
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-cream-300 bg-cream-100/85 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link
           href="/"
           className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink-900 transition-colors hover:text-ink-700"
@@ -26,35 +27,42 @@ export default async function Navbar() {
           <span className="text-moss-700">Ink</span>
         </Link>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
           {user ? <NavTabs isAdmin={admin} flags={flags} /> : null}
           {user && (!admin || flags.help) ? (
             <SupportChatLauncher isAdmin={admin} />
           ) : null}
 
           {user ? (
-            <div className="flex items-center gap-3">
-              <Link
-                href="/create"
-                className="hidden items-center gap-1.5 rounded-full bg-moss-700 px-4 py-1.5 text-sm font-semibold text-cream-50 shadow-sm transition-all hover:bg-moss-900 sm:inline-flex"
-              >
-                <PlusIcon />
-                New story
-              </Link>
-              <form action="/auth/signout" method="post">
-                <button
-                  type="submit"
-                  className="hidden items-center gap-2 rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-500 transition-colors hover:border-cream-400 hover:bg-cream-200 md:flex"
-                  title={user.email ?? "Signed in"}
+            <>
+              <div className="hidden items-center gap-3 md:flex">
+                <Link
+                  href="/create"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-4 py-1.5 text-sm font-semibold text-cream-50 shadow-sm transition-all hover:bg-moss-900"
                 >
-                  <span className="hidden text-ink-300 lg:inline">
-                    {user.email}
-                  </span>
-                  <span className="hidden text-cream-400 lg:inline">·</span>
-                  <span>Sign out</span>
-                </button>
-              </form>
-            </div>
+                  <PlusIcon />
+                  New story
+                </Link>
+                <form action="/auth/signout" method="post">
+                  <button
+                    type="submit"
+                    className="flex items-center gap-2 rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-500 transition-colors hover:border-cream-400 hover:bg-cream-200"
+                    title={user.email ?? "Signed in"}
+                  >
+                    <span className="hidden text-ink-300 lg:inline">
+                      {user.email}
+                    </span>
+                    <span className="hidden text-cream-400 lg:inline">·</span>
+                    <span>Sign out</span>
+                  </button>
+                </form>
+              </div>
+              <MobileMenu
+                isAdmin={admin}
+                flags={flags}
+                email={user.email ?? null}
+              />
+            </>
           ) : (
             <Link
               href="/login"
