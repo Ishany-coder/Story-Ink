@@ -36,6 +36,7 @@ import {
   type FontCategory,
   type FontOption,
 } from "@/lib/fonts";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 
 interface CanvasEditorProps {
   story: Story;
@@ -318,7 +319,25 @@ const SWATCHES = [
   "#000000",
 ];
 
-export default function CanvasEditor({
+// The outer export gates the heavy editor implementation on viewport
+// width. Below md (phones) we render <StudioMobileNotice> instead —
+// the inner editor never mounts, so none of its state/effects/listeners
+// allocate. SSR defaults `isDesktop` to true so the server-rendered
+// HTML matches the desktop path; phones unmount the editor on the
+// first client paint.
+//
+// Splitting the gate out of the implementation keeps the Rules of
+// Hooks happy: the outer component calls exactly one hook, the inner
+// component calls many but only mounts when the viewport allows it.
+export default function CanvasEditor(props: CanvasEditorProps) {
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  if (!isDesktop) {
+    return <StudioMobileNotice storyId={props.story.id} />;
+  }
+  return <CanvasEditorDesktop {...props} />;
+}
+
+function CanvasEditorDesktop({
   story: initialStory,
   pet = null,
 }: CanvasEditorProps) {
@@ -1337,18 +1356,14 @@ export default function CanvasEditor({
 
   return (
     <>
-      {/* Below md (phones): the Studio needs more screen than is
-          available. Surface a clear notice + a fallback CTA to the
-          read view, rather than rendering an unusable 3-column
-          editor inside a 375px viewport. */}
-      <StudioMobileNotice storyId={story.id} />
-
       {/* The Studio is height-constrained to the viewport (minus the
           fixed 64px Navbar) so the side panels can scroll internally
           without pushing the canvas down. Per-panel scroll containers
-          below have `overflow-y-auto`. Hidden below md; tablet uses
-          a narrower 3-col grid; desktop uses the original spec. */}
-      <div className="mx-auto hidden h-[calc(100vh-4rem)] max-w-[1440px] flex-col gap-3 overflow-hidden px-4 py-3 md:flex lg:px-6">
+          below have `overflow-y-auto`. The phone fallback lives in the
+          outer <CanvasEditor> gate; below md this component never
+          mounts. Tablet uses a narrower 3-col grid; desktop uses the
+          original spec. */}
+      <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-[1440px] flex-col gap-3 overflow-hidden px-4 py-3 lg:px-6">
       {/* Story header — breadcrumb, title, meta on the left; history +
           save controls on the right. Sized to feel like a chapter
           opener, not a toolbar. */}
