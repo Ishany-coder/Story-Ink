@@ -27,10 +27,46 @@ const playfair = Playfair_Display({
   style: ["normal", "italic"],
 });
 
+// Centralised site descriptors so the same strings populate <title>,
+// description, Open Graph, and Twitter cards without drift.
+//
+// NOTE: /og.png, /favicon.ico, and /apple-touch-icon.png are
+// REFERENCED here but the bitmap assets don't yet live in public/.
+// Drop the designed PNGs into that folder before launch; the routes
+// will just 404 until then. See the commit body for the asset list.
+const SITE_NAME = "StoryInk";
+const SITE_TITLE = "StoryInk — The fine art of pet storytelling";
+const SITE_DESCRIPTION =
+  "Hand-illustrated keepsake storybooks starring your pet. Living adventures and Rainbow Bridge memorials, printed as museum-grade hardcovers.";
+const SITE_BASE_URL = (
+  process.env.NEXT_PUBLIC_BASE_URL ?? "https://storyink.ai"
+).replace(/\/$/, "");
+
 export const metadata: Metadata = {
-  title: "StoryInk — The fine art of pet storytelling",
-  description:
-    "Hand-illustrated keepsake storybooks starring your pet. Living adventures and Rainbow Bridge memorials, printed as museum-grade hardcovers.",
+  metadataBase: new URL(SITE_BASE_URL),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  // TODO(launch): drop the designed bitmaps into /public — see the
+  // commit body. Until then these URLs 404, which is harmless.
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  openGraph: {
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    url: SITE_BASE_URL,
+    siteName: SITE_NAME,
+    type: "website",
+    locale: "en_US",
+    images: ["/og.png"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({
