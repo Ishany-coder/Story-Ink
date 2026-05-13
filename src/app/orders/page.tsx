@@ -140,65 +140,123 @@ export default async function OrdersPage({
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-cream-300 bg-cream-50">
-          <table className="w-full text-sm">
-            <thead className="bg-cream-100 text-left text-[11px] font-medium uppercase tracking-wider text-ink-500">
-              <tr>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Story</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-cream-200">
-              {(orders ?? []).map((o) => (
-                <tr key={o.id} className="hover:bg-cream-100/60">
-                  <td className="whitespace-nowrap px-4 py-3 text-ink-500">
+        <>
+          {/* Mobile (≤md): each order as a stacked card. Tables are
+              built for column scanning, which only works horizontally
+              — on a 375px screen a 6-column table either overflows
+              or is unreadable. Same data, different shape. */}
+          <div className="space-y-3 md:hidden">
+            {(orders ?? []).map((o) => (
+              <div
+                key={o.id}
+                className="rounded-2xl border border-cream-300 bg-cream-50 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-ink-900">
+                      {o.story_id ? storyTitle.get(o.story_id) ?? "—" : "—"}
+                      {o.quantity && o.quantity > 1 ? (
+                        <span className="ml-2 rounded-full bg-cream-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-700">
+                          × {o.quantity}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-ink-500">
+                      {o.user_id ? emailsByUserId.get(o.user_id) ?? "—" : "—"}
+                    </p>
+                  </div>
+                  <StatusBadge status={o.status} />
+                </div>
+                <div className="mt-3 flex items-baseline justify-between gap-3 text-xs text-ink-500">
+                  <span>
                     {new Date(o.created_at).toLocaleDateString("en-US", {
                       month: "short",
                       day: "numeric",
                       year: "numeric",
                     })}
-                  </td>
-                  <td className="px-4 py-3 text-ink-700">
-                    {o.user_id ? emailsByUserId.get(o.user_id) ?? "—" : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-ink-900">
-                    {o.story_id ? storyTitle.get(o.story_id) ?? "—" : "—"}
-                    {o.quantity && o.quantity > 1 ? (
-                      <span className="ml-2 rounded-full bg-cream-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-700">
-                        × {o.quantity}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={o.status} />
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-ink-700">
+                  </span>
+                  <span className="font-mono text-ink-700">
                     {o.amount_usd != null
                       ? `$${o.amount_usd.toFixed(2)}`
                       : "—"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
-                    <div className="inline-flex items-center gap-2">
-                      <Link
-                        href={`/orders/${o.id}`}
-                        className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1 text-xs font-medium text-ink-700 hover:border-moss-500 hover:bg-cream-100"
-                      >
-                        View
-                      </Link>
-                      {CANCELLABLE_STATUSES.has(o.status) && (
-                        <AdminQuickCancelButton orderId={o.id} />
-                      )}
-                    </div>
-                  </td>
+                  </span>
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <Link
+                    href={`/orders/${o.id}`}
+                    className="flex-1 rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-center text-xs font-medium text-ink-700 hover:border-moss-500 hover:bg-cream-100"
+                  >
+                    View
+                  </Link>
+                  {CANCELLABLE_STATUSES.has(o.status) && (
+                    <AdminQuickCancelButton orderId={o.id} />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* md+: original table layout. */}
+          <div className="hidden overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 md:block">
+            <table className="w-full text-sm">
+              <thead className="bg-cream-100 text-left text-[11px] font-medium uppercase tracking-wider text-ink-500">
+                <tr>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Story</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="px-4 py-3"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-cream-200">
+                {(orders ?? []).map((o) => (
+                  <tr key={o.id} className="hover:bg-cream-100/60">
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-500">
+                      {new Date(o.created_at).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </td>
+                    <td className="px-4 py-3 text-ink-700">
+                      {o.user_id ? emailsByUserId.get(o.user_id) ?? "—" : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-ink-900">
+                      {o.story_id ? storyTitle.get(o.story_id) ?? "—" : "—"}
+                      {o.quantity && o.quantity > 1 ? (
+                        <span className="ml-2 rounded-full bg-cream-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-700">
+                          × {o.quantity}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={o.status} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-ink-700">
+                      {o.amount_usd != null
+                        ? `$${o.amount_usd.toFixed(2)}`
+                        : "—"}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                      <div className="inline-flex items-center gap-2">
+                        <Link
+                          href={`/orders/${o.id}`}
+                          className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1 text-xs font-medium text-ink-700 hover:border-moss-500 hover:bg-cream-100"
+                        >
+                          View
+                        </Link>
+                        {CANCELLABLE_STATUSES.has(o.status) && (
+                          <AdminQuickCancelButton orderId={o.id} />
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
