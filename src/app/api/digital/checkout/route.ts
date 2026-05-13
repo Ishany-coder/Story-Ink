@@ -6,6 +6,7 @@ import { isAdminUser } from "@/lib/admin";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
 import { isBetaTesting } from "@/lib/beta-flag";
 import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 
 // Digital tier checkout. Unlocks online reading + PDF download for the
 // owner's own story. No print pipeline, no shipping address, no Lulu
@@ -31,6 +32,11 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.checkout,
+    key: userKey("checkout", user.id),
+  });
+  if (limited) return limited;
   const body = (await request.json().catch(() => ({}))) as Body;
   const storyId = typeof body.storyId === "string" ? body.storyId : "";
   if (!storyId) {

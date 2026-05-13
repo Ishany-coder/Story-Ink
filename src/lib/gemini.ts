@@ -1,6 +1,9 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { fetchWithTimeout, isAllowedContentUrl, withTimeout } from "@/lib/http";
 import { getImageStyle, type ImageStyleId } from "@/lib/image-styles";
+import { assertGeminiGlobalCap } from "@/lib/rate-limit";
+
+export { GeminiDailyCapExceededError } from "@/lib/rate-limit";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -404,6 +407,14 @@ async function withGeminiRetry<T>(
   fn: () => Promise<T>,
   opts: { label: string; maxAttempts?: number } = { label: "gemini" }
 ): Promise<T> {
+  // Global daily ceiling. Every Gemini call (text or image) routes
+  // through here, so this is the single chokepoint where we count
+  // calls toward GEMINI_DAILY_CAP. Once exceeded, this throws
+  // GeminiDailyCapExceededError before we burn a network round-trip.
+  // Routes can map that error to a 503 "Service paused for the day,
+  // try again tomorrow." response.
+  await assertGeminiGlobalCap();
+
   const maxAttempts = opts.maxAttempts ?? 3;
   const delays = [2000, 5000];
   let lastErr: unknown;

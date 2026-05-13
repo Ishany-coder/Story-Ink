@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getCurrentUser } from "@/lib/supabase-server";
 import { isAllowedContentUrl } from "@/lib/http";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 import {
   PET_SPECIES,
   type CreatePetInput,
@@ -101,6 +102,11 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.pets,
+    key: userKey("pets", user.id),
+  });
+  if (limited) return limited;
 
   const body = (await request.json().catch(() => ({}))) as CreatePetInput;
 

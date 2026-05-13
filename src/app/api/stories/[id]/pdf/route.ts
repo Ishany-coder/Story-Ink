@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { buildInteriorPdf } from "@/lib/print-pdf";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 import type { Pet, Story } from "@/lib/types";
 
 // Owner / admin / digital-unlocked PDF download. Streams the
@@ -21,6 +22,11 @@ export async function GET(_request: Request, ctx: Ctx) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.pdf,
+    key: userKey("pdf", user.id),
+  });
+  if (limited) return limited;
 
   const { id: storyId } = await ctx.params;
   const admin = supabaseAdmin();

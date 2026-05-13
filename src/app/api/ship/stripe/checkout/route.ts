@@ -7,6 +7,7 @@ import { isBetaTesting } from "@/lib/beta-flag";
 import { priceHardcoverUsd } from "@/lib/pricing";
 import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
 import { isShippingAddress, type ShippingAddress } from "@/lib/shipping";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 import type { Story, StoryPage } from "@/lib/types";
 
 // Creates a Stripe Checkout Session. The client redirects to the returned
@@ -55,6 +56,11 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.checkout,
+    key: userKey("checkout", user.id),
+  });
+  if (limited) return limited;
   const body = (await request.json().catch(() => ({}))) as Body;
   const storyId = typeof body.storyId === "string" ? body.storyId : "";
   if (!storyId) {
