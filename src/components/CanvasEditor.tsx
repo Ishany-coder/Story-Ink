@@ -3846,8 +3846,7 @@ function StudioMobileNotice({ storyId }: { storyId: string }) {
         </p>
         <Link
           href={`/read/${storyId}`}
-          className="mt-5 inline-flex items-center justify-center rounded-full bg-sage-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-sage-900"
-          style={{ background: "var(--color-bark-900)" }}
+          className="mt-5 inline-flex items-center justify-center rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
         >
           Read the story
         </Link>
