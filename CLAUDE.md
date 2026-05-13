@@ -27,6 +27,13 @@ There is no test runner configured.
 1. `npm run dev`
 2. `npx inngest-cli@latest dev` — the Inngest dev server. It auto-discovers `/api/inngest` and serves a UI at http://localhost:8288. Without it, story generation will sit in `queued` forever because nothing executes the functions in `src/inngest/functions.ts`.
 
+## Operations docs
+
+- `docs/email-deployment.md` — Resend domain verification + `EMAIL_FROM` rollout.
+- `docs/disaster-recovery.md` — backup strategy, restore procedure, quarterly drill checklist, scenario response (Supabase outage, webhook breakage, quota exhaustion, key leak, DNS hijack).
+
+Uptime probe lives at `GET /api/health` — returns `{ ok, supabase, stripe, email, gemini }` with 200 when every required dependency is configured + 503 otherwise. The handler is deliberately cheap (env-presence checks only, no DB ping) — point monitors at it directly, do not add expensive work here.
+
 ## Environment
 
 `.env.local` keys actually consumed by the code:
