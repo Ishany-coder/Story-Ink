@@ -105,6 +105,19 @@ export async function fulfillFromSession(
     };
   }
 
+  // Refuse to advance a refunded / disputed / expired order. These are
+  // terminal-ish states set by the Stripe webhook (charge.refunded,
+  // charge.dispute.created, checkout.session.expired) and we must not
+  // build PDFs or move the order toward fulfillment under any of them.
+  if (existing && ["refunded", "disputed", "expired"].includes(existing.status)) {
+    return {
+      ok: false,
+      status: 409,
+      error: `Order is in '${existing.status}' state — refusing to advance to fulfillment.`,
+      orderId: existing.id,
+    };
+  }
+
   // Fetch the full story for PDF generation. Use the admin client so
   // we bypass RLS — the webhook path has no user session, and the
   // confirm path has already verified ownership before getting here.

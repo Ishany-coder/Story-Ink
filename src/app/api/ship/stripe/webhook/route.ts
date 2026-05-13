@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   constructWebhookEvent,
   retrieveCheckoutSession,
+  stripe,
 } from "@/lib/stripe";
 import { fulfillFromSession } from "@/lib/ship-fulfill";
 import { supabaseAdmin } from "@/lib/supabase";
@@ -10,9 +11,13 @@ import type Stripe from "stripe";
 
 // Authoritative Stripe webhook. Configure it in the Stripe dashboard
 // against this URL (e.g. https://yourapp.com/api/ship/stripe/webhook)
-// with the event type `checkout.session.completed`. Stripe signs every
-// delivery with STRIPE_WEBHOOK_SECRET — we verify here and refuse
-// unsigned or tampered traffic.
+// with these event types subscribed:
+//   - checkout.session.completed     → fulfillment (PDFs, mark received)
+//   - checkout.session.expired       → mark print_orders.status = "expired"
+//   - charge.refunded                → mark "refunded", revoke digital unlock
+//   - charge.dispute.created         → mark "disputed", admin investigates
+// Stripe signs every delivery with STRIPE_WEBHOOK_SECRET — we verify
+// here and refuse unsigned or tampered traffic.
 //
 // On success we hand off to `fulfillFromSession`, which is idempotent
 // on stripe_session_id. Stripe retries failed deliveries with backoff;
@@ -58,8 +63,17 @@ export async function POST(request: Request) {
     );
   }
 
-  // We only act on paid checkout sessions. Other event types ack with
-  // 200 so Stripe stops delivering them (we can widen the list later).
+  // Route on event type. Anything we don't recognize is ack'd with 200
+  // so Stripe stops re-delivering it.
+  if (event.type === "charge.refunded") {
+    return handleChargeRefunded(event.data.object as Stripe.Charge);
+  }
+  if (event.type === "charge.dispute.created") {
+    return handleDisputeCreated(event.data.object as Stripe.Dispute);
+  }
+  if (event.type === "checkout.session.expired") {
+    return handleSessionExpired(event.data.object as Stripe.Checkout.Session);
+  }
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true, ignored: event.type });
   }
@@ -189,5 +203,203 @@ export async function POST(request: Request) {
     orderId: outcome.orderId,
     status: outcome.status,
     alreadyProcessed: outcome.alreadyProcessed,
+  });
+}
+
+// A charge can refer back to its parent Checkout Session via the
+// payment_intent. We use the PI id to find the matching session via
+// Stripe's API, then look up the print_orders row by stripe_session_id.
+async function resolveSessionIdForCharge(
+  charge: Stripe.Charge
+): Promise<string | null> {
+  const paymentIntentId =
+    typeof charge.payment_intent === "string"
+      ? charge.payment_intent
+      : charge.payment_intent?.id ?? null;
+  if (!paymentIntentId) return null;
+  try {
+    const sessions = await stripe().checkout.sessions.list({
+      payment_intent: paymentIntentId,
+      limit: 1,
+    });
+    return sessions.data[0]?.id ?? null;
+  } catch (err) {
+    reportError(err, "stripe.webhook.session-lookup");
+    return null;
+  }
+}
+
+async function handleChargeRefunded(charge: Stripe.Charge) {
+  const sessionId = await resolveSessionIdForCharge(charge);
+  if (!sessionId) {
+    // No matching session — this charge isn't ours. Ack so Stripe
+    // stops retrying.
+    return NextResponse.json({
+      received: true,
+      ignored: "charge.refunded — no matching session",
+    });
+  }
+
+  const admin = supabaseAdmin();
+  const { data: order } = await admin
+    .from("print_orders")
+    .select("id, story_id, status")
+    .eq("stripe_session_id", sessionId)
+    .maybeSingle<{ id: string; story_id: string; status: string }>();
+
+  if (!order) {
+    return NextResponse.json({
+      received: true,
+      ignored: "charge.refunded — no matching order row",
+    });
+  }
+
+  const { error: updateErr } = await admin
+    .from("print_orders")
+    .update({ status: "refunded" })
+    .eq("id", order.id);
+  if (updateErr) {
+    reportError(updateErr, "stripe.webhook.refund-status-update");
+    return NextResponse.json(
+      { error: "Couldn't mark order refunded" },
+      { status: 503 }
+    );
+  }
+
+  // Revoke the digital unlock so the refunded purchaser loses online
+  // access. We do this unconditionally — if the refund was partial,
+  // the admin can manually re-enable from the orders page.
+  const { error: unlockErr } = await admin
+    .from("stories")
+    .update({ digital_unlocked: false })
+    .eq("id", order.story_id);
+  if (unlockErr) {
+    reportError(unlockErr, "stripe.webhook.refund-digital-revoke");
+  }
+
+  await admin.from("print_order_events").insert({
+    order_id: order.id,
+    status: "refunded",
+    note: `Stripe charge ${charge.id} refunded — digital_unlocked revoked.`,
+  });
+
+  return NextResponse.json({
+    received: true,
+    kind: "refund",
+    orderId: order.id,
+  });
+}
+
+async function handleDisputeCreated(dispute: Stripe.Dispute) {
+  const chargeId =
+    typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id;
+  if (!chargeId) {
+    return NextResponse.json({
+      received: true,
+      ignored: "dispute.created — no charge id",
+    });
+  }
+
+  let charge: Stripe.Charge;
+  try {
+    charge = await stripe().charges.retrieve(chargeId);
+  } catch (err) {
+    reportError(err, "stripe.webhook.dispute-charge-fetch");
+    return NextResponse.json({ error: "Temporary" }, { status: 503 });
+  }
+  const sessionId = await resolveSessionIdForCharge(charge);
+  if (!sessionId) {
+    return NextResponse.json({
+      received: true,
+      ignored: "dispute.created — no matching session",
+    });
+  }
+
+  const admin = supabaseAdmin();
+  const { data: order } = await admin
+    .from("print_orders")
+    .select("id, status")
+    .eq("stripe_session_id", sessionId)
+    .maybeSingle<{ id: string; status: string }>();
+
+  if (!order) {
+    return NextResponse.json({
+      received: true,
+      ignored: "dispute.created — no matching order row",
+    });
+  }
+
+  const { error: updateErr } = await admin
+    .from("print_orders")
+    .update({ status: "disputed" })
+    .eq("id", order.id);
+  if (updateErr) {
+    reportError(updateErr, "stripe.webhook.dispute-status-update");
+    return NextResponse.json(
+      { error: "Couldn't mark order disputed" },
+      { status: 503 }
+    );
+  }
+
+  await admin.from("print_order_events").insert({
+    order_id: order.id,
+    status: "disputed",
+    note: `Stripe dispute ${dispute.id} (${dispute.reason ?? "unknown reason"}) opened — fulfillment paused.`,
+  });
+
+  return NextResponse.json({
+    received: true,
+    kind: "dispute",
+    orderId: order.id,
+  });
+}
+
+async function handleSessionExpired(session: Stripe.Checkout.Session) {
+  const admin = supabaseAdmin();
+  const { data: order } = await admin
+    .from("print_orders")
+    .select("id, status")
+    .eq("stripe_session_id", session.id)
+    .maybeSingle<{ id: string; status: string }>();
+
+  if (!order) {
+    // No pre-created row for this session — just log and ack.
+    return NextResponse.json({
+      received: true,
+      ignored: "session.expired — no matching order row",
+    });
+  }
+
+  // Only flip to expired from a pre-fulfillment state; if the user
+  // somehow paid and we already advanced the order, leave it alone.
+  if (!["pending", "paid"].includes(order.status)) {
+    return NextResponse.json({
+      received: true,
+      ignored: `session.expired — order already in '${order.status}'`,
+    });
+  }
+
+  const { error: updateErr } = await admin
+    .from("print_orders")
+    .update({ status: "expired" })
+    .eq("id", order.id);
+  if (updateErr) {
+    reportError(updateErr, "stripe.webhook.expire-status-update");
+    return NextResponse.json(
+      { error: "Couldn't mark order expired" },
+      { status: 503 }
+    );
+  }
+
+  await admin.from("print_order_events").insert({
+    order_id: order.id,
+    status: "expired",
+    note: `Checkout session ${session.id} expired before payment.`,
+  });
+
+  return NextResponse.json({
+    received: true,
+    kind: "expired",
+    orderId: order.id,
   });
 }

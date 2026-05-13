@@ -197,6 +197,23 @@ async function createAdminOrder(args: {
 }): Promise<string> {
   const admin = supabaseAdmin();
 
+  // Guard: if the story has any existing order in a disputed or
+  // refunded state, refuse to create a new admin order. The admin
+  // should resolve the dispute / refund first before issuing a new
+  // freebie that could be mistaken for the disputed one.
+  const { data: blocking } = await admin
+    .from("print_orders")
+    .select("id, status")
+    .eq("story_id", args.storyId)
+    .in("status", ["disputed", "refunded"])
+    .limit(1)
+    .maybeSingle<{ id: string; status: string }>();
+  if (blocking) {
+    throw new Error(
+      `Refusing to create admin order — existing order ${blocking.id} is in '${blocking.status}' state.`
+    );
+  }
+
   // Pull the full story for PDF generation. We're already past the
   // assertOwnsStory check, so RLS is moot here — admin uses the
   // service-role client for build steps.

@@ -294,6 +294,19 @@ create policy "custom layouts delete by owner"
 create table if not exists public.print_orders (
   id uuid primary key default gen_random_uuid(),
   story_id uuid not null references public.stories(id) on delete cascade,
+  -- Known status values (open value space — no CHECK constraint):
+  --   pending     — row pre-created before Stripe Checkout completed
+  --   paid        — payment succeeded; awaiting fulfillment build
+  --   building    — fulfillment worker has claimed the row; building PDFs
+  --   received    — PDFs ready; sitting in admin queue for manual ship
+  --   in_progress — admin has placed the print order with the vendor
+  --   shipped     — admin marked the order as shipped (anonymized on
+  --                 account deletion; retained for tax / Stripe records)
+  --   delivered   — admin marked the order as delivered
+  --   failed      — PDF build or admin step failed; needs investigation
+  --   refunded    — Stripe charge.refunded webhook; digital unlock revoked
+  --   disputed    — Stripe charge.dispute.created webhook; fulfillment paused
+  --   expired     — Stripe checkout.session.expired webhook (pre-payment)
   status text not null default 'pending',
   amount_usd numeric(10, 2),
   paypal_capture_id text,
