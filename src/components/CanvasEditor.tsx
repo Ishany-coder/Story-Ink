@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1988,12 +1989,26 @@ export default function CanvasEditor({
                 }}
               >
                 {page.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={page.imageUrl}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover opacity-90"
-                  />
+                  page.imageUrl.startsWith("data:") ? (
+                    // Data URLs (mid-upload drafts) bypass next/image
+                    // — its loader requires a real URL. The persisted
+                    // Supabase URL goes through the optimized path
+                    // below once the upload finishes.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={page.imageUrl}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover opacity-90"
+                    />
+                  ) : (
+                    <Image
+                      src={page.imageUrl}
+                      alt=""
+                      fill
+                      sizes="48px"
+                      className="object-cover opacity-90"
+                    />
+                  )
                 ) : null}
                 {isDirtyPage && !isActive && (
                   <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-clay-500" />
@@ -3088,13 +3103,26 @@ function LibraryThumb({
       className="group relative aspect-square overflow-hidden rounded-xl border-2 border-cream-300 bg-cream-200 transition-all hover:border-moss-500 hover:shadow"
       title={label}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={label}
-        draggable={false}
-        className="h-full w-full object-cover"
-      />
+      {url.startsWith("data:") ? (
+        // Data URLs (in-flight uploads) skip next/image — its loader
+        // requires a real URL.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={label}
+          draggable={false}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <Image
+          src={url}
+          alt={label}
+          fill
+          sizes="128px"
+          draggable={false}
+          className="object-cover"
+        />
+      )}
       <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[9px] font-black uppercase tracking-wider text-cream-50">
         {label}
       </span>
@@ -3206,13 +3234,25 @@ function ImagePickerModal({
                     className="group relative aspect-square overflow-hidden rounded-xl border-2 border-cream-300 bg-cream-200 transition-all hover:border-moss-500 hover:shadow-md"
                     title={entry.label}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={entry.url}
-                      alt={entry.label}
-                      draggable={false}
-                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                    />
+                    {entry.url.startsWith("data:") ? (
+                      // Data URLs skip next/image's loader.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={entry.url}
+                        alt={entry.label}
+                        draggable={false}
+                        className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                      />
+                    ) : (
+                      <Image
+                        src={entry.url}
+                        alt={entry.label}
+                        fill
+                        sizes="(max-width: 640px) 33vw, 192px"
+                        draggable={false}
+                        className="object-cover transition-transform group-hover:scale-105"
+                      />
+                    )}
                     <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[10px] font-black uppercase tracking-wider text-cream-50">
                       {entry.label}
                     </span>
