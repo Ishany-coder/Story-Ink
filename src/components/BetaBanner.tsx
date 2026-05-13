@@ -1,10 +1,10 @@
 import { isBetaTesting } from "@/lib/beta-flag";
 
 // Small unobtrusive banner shown at the top of every page when the
-// BETA_TESTING / NEXT_PUBLIC_BETA_TESTING env flag is on. Renders
-// nothing in production. Sits in the document above the main content
-// (the navbar is fixed and has its own z-index, so this slot lives
-// directly in <main>'s flow).
+// NEXT_PUBLIC_BETA_TESTING env flag is on. Renders nothing in
+// production. Sits in the document above the main content (the navbar
+// is fixed and has its own z-index, so this slot lives directly in
+// <main>'s flow).
 
 export default function BetaBanner() {
   if (!isBetaTesting()) return null;

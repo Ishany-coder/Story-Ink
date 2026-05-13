@@ -134,7 +134,9 @@ export default function MobileMenu({
   const visible = TABS.filter((t) => {
     if (t.adminOnly && !isAdmin) return false;
     if (isAdmin && !flags[t.flag]) return false;
-    if (betaOn && t.flag === "ship") return false;
+    // Closed-beta hides the user-facing paid funnel (Ship + My orders)
+    // since those routes 404 when the flag is on.
+    if (betaOn && (t.flag === "ship" || t.flag === "myOrders")) return false;
     return true;
   });
 

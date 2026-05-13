@@ -102,12 +102,13 @@ export default function NavTabs({
   // Admin-only tabs are gated on isAdmin first. The SHOW_* flags
   // then apply to the admin's view *only* — regular users see every
   // non-admin-only tab regardless of how the env vars are set.
-  // The closed-beta flag additionally hides the "Ship" tab for
-  // everyone (the /ship route 404s when the flag is on).
+  // The closed-beta flag additionally hides the user-facing paid
+  // funnel ("Ship" + "My orders") for everyone — the corresponding
+  // routes 404 when the flag is on, so the tabs would point nowhere.
   const visible = TABS.filter((t) => {
     if (t.adminOnly && !isAdmin) return false;
     if (isAdmin && !flags[t.flag]) return false;
-    if (betaOn && t.flag === "ship") return false;
+    if (betaOn && (t.flag === "ship" || t.flag === "myOrders")) return false;
     return true;
   });
 
