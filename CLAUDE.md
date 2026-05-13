@@ -54,7 +54,7 @@ Storage bucket: `uploads` (public read, writes only via service role).
 - `src/lib/supabase-server.ts` exports `getSupabaseServer()` / `getCurrentUser()` / `requireUser()` / `assertOwnsStory()` for server components and route handlers that need to act *as the signed-in user* (so RLS scopes the query).
 - `src/lib/supabase-browser.ts` exports a singleton client component browser client.
 
-`src/middleware.ts` runs on every non-static path and calls `supabase.auth.getUser()` purely for its side effect of refreshing the session cookie. Don't remove that call.
+`src/proxy.ts` (Next.js 16's renamed "middleware" — same mechanism, new file/export name) runs on every non-static path and calls `supabase.auth.getUser()` purely for its side effect of refreshing the session cookie. Don't remove that call.
 
 ### Async generation pipeline (Inngest + jobs table)
 
