@@ -206,16 +206,23 @@ export async function POST(request: Request) {
   });
 }
 
-// A charge can refer back to its parent Checkout Session via the
-// payment_intent. We use the PI id to find the matching session via
-// Stripe's API, then look up the print_orders row by stripe_session_id.
+// Pull the payment_intent id off a Stripe charge. The PI may be
+// inlined as a string or expanded as an object depending on how the
+// event arrived.
+function chargePaymentIntentId(charge: Stripe.Charge): string | null {
+  return typeof charge.payment_intent === "string"
+    ? charge.payment_intent
+    : charge.payment_intent?.id ?? null;
+}
+
+// Older fallback path: look the session up via Stripe's API. Used
+// only when the print_orders row has no persisted payment_intent_id
+// (orders that pre-date that column). Returns the session id so the
+// caller can keep using the existing stripe_session_id index.
 async function resolveSessionIdForCharge(
   charge: Stripe.Charge
 ): Promise<string | null> {
-  const paymentIntentId =
-    typeof charge.payment_intent === "string"
-      ? charge.payment_intent
-      : charge.payment_intent?.id ?? null;
+  const paymentIntentId = chargePaymentIntentId(charge);
   if (!paymentIntentId) return null;
   try {
     const sessions = await stripe().checkout.sessions.list({
@@ -229,30 +236,46 @@ async function resolveSessionIdForCharge(
   }
 }
 
-async function handleChargeRefunded(charge: Stripe.Charge) {
-  const sessionId = await resolveSessionIdForCharge(charge);
-  if (!sessionId) {
-    // No matching session — this charge isn't ours. Ack so Stripe
-    // stops retrying.
-    return NextResponse.json({
-      received: true,
-      ignored: "charge.refunded — no matching session",
-    });
-  }
-
+// Find the print_orders row for a charge. Tries the persisted
+// payment_intent_id first (post-fix orders), then falls back to the
+// stripe_session_id resolution via Stripe's API (pre-fix orders).
+async function findOrderForCharge(
+  charge: Stripe.Charge
+): Promise<{ id: string; story_id: string | null; status: string } | null> {
   const admin = supabaseAdmin();
-  const { data: order } = await admin
+  const paymentIntentId = chargePaymentIntentId(charge);
+  if (paymentIntentId) {
+    const { data } = await admin
+      .from("print_orders")
+      .select("id, story_id, status")
+      .eq("payment_intent_id", paymentIntentId)
+      .maybeSingle<{ id: string; story_id: string | null; status: string }>();
+    if (data) return data;
+  }
+  // Legacy fallback for orders that pre-date the payment_intent_id
+  // column.
+  const sessionId = await resolveSessionIdForCharge(charge);
+  if (!sessionId) return null;
+  const { data } = await admin
     .from("print_orders")
     .select("id, story_id, status")
     .eq("stripe_session_id", sessionId)
     .maybeSingle<{ id: string; story_id: string | null; status: string }>();
+  return data ?? null;
+}
 
+async function handleChargeRefunded(charge: Stripe.Charge) {
+  const order = await findOrderForCharge(charge);
   if (!order) {
+    // No matching order — this charge isn't ours, or it pre-dates
+    // any persisted record. Ack so Stripe stops retrying.
     return NextResponse.json({
       received: true,
       ignored: "charge.refunded — no matching order row",
     });
   }
+
+  const admin = supabaseAdmin();
 
   const { error: updateErr } = await admin
     .from("print_orders")
@@ -311,27 +334,17 @@ async function handleDisputeCreated(dispute: Stripe.Dispute) {
     reportError(err, "stripe.webhook.dispute-charge-fetch");
     return NextResponse.json({ error: "Temporary" }, { status: 503 });
   }
-  const sessionId = await resolveSessionIdForCharge(charge);
-  if (!sessionId) {
-    return NextResponse.json({
-      received: true,
-      ignored: "dispute.created — no matching session",
-    });
-  }
-
-  const admin = supabaseAdmin();
-  const { data: order } = await admin
-    .from("print_orders")
-    .select("id, status")
-    .eq("stripe_session_id", sessionId)
-    .maybeSingle<{ id: string; status: string }>();
-
+  // Same dual-lookup as the refund path: payment_intent_id first,
+  // fall back to stripe_session_id for pre-fix orders.
+  const order = await findOrderForCharge(charge);
   if (!order) {
     return NextResponse.json({
       received: true,
       ignored: "dispute.created — no matching order row",
     });
   }
+
+  const admin = supabaseAdmin();
 
   const { error: updateErr } = await admin
     .from("print_orders")

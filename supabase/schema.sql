@@ -358,6 +358,18 @@ alter table public.print_orders alter column story_id drop not null;
 create unique index if not exists print_orders_stripe_session_id_idx
   on public.print_orders (stripe_session_id) where stripe_session_id is not null;
 
+-- Persisted Stripe payment_intent id. Captured during fulfillment
+-- (the PI is only assigned once Checkout completes) so refund and
+-- dispute webhooks can look up the order directly instead of going
+-- through `stripe.checkout.sessions.list({ payment_intent })`, which
+-- returns [] for older sessions and async-completed PIs. The session-
+-- list fallback is still wired in the webhook for orders that pre-
+-- date this column.
+alter table public.print_orders
+  add column if not exists payment_intent_id text;
+create index if not exists print_orders_payment_intent_id_idx
+  on public.print_orders (payment_intent_id);
+
 create index if not exists print_orders_story_id_idx on public.print_orders (story_id);
 create index if not exists print_orders_user_id_idx on public.print_orders (user_id);
 create index if not exists print_orders_created_at_idx on public.print_orders (created_at desc);

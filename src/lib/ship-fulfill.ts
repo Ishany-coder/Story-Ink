@@ -136,6 +136,18 @@ export async function fulfillFromSession(
       ? session.amount_total / 100
       : null;
 
+  // Stripe Checkout only assigns a PaymentIntent once the session
+  // completes; retrieveCheckoutSession() is called with
+  // expand:["payment_intent"] so `session.payment_intent` is either
+  // the expanded object or its string id (older API responses).
+  // Persisting it on the print_orders row lets the refund/dispute
+  // webhook look up the order directly without the fragile
+  // checkout.sessions.list({ payment_intent }) round-trip.
+  const paymentIntentId =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : session.payment_intent?.id ?? null;
+
   // Persist the address on the order so admin can see where to ship
   // without re-pulling from Stripe later. Sensitive PII so we keep
   // it redacted in logs.
@@ -147,6 +159,17 @@ export async function fulfillFromSession(
   let orderId: string;
   if (existing) {
     orderId = existing.id;
+    // Backfill payment_intent_id on a pre-existing row (e.g. one we
+    // pre-created at checkout time and now we have the PI after the
+    // session completed). Best-effort: if the update fails the
+    // webhook session-list fallback still kicks in.
+    if (paymentIntentId) {
+      await admin
+        .from("print_orders")
+        .update({ payment_intent_id: paymentIntentId })
+        .eq("id", orderId)
+        .is("payment_intent_id", null);
+    }
   } else {
     const { data: inserted, error: insertErr } = await admin
       .from("print_orders")
@@ -155,6 +178,7 @@ export async function fulfillFromSession(
         status: "paid",
         amount_usd: amountUsd,
         stripe_session_id: sessionId,
+        payment_intent_id: paymentIntentId,
         shipping_address: addressJson,
         quantity,
         user_id: (story as Story & { user_id?: string | null }).user_id ?? null,
