@@ -104,6 +104,9 @@ export default function RootLayout({
         <footer className="border-t border-cream-300 bg-cream-50 px-4 py-6 text-xs text-ink-500 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-6 gap-y-2">
             <span>&copy; {new Date().getFullYear()} StoryInk</span>
+            <Link href="/blog" className="hover:text-moss-700">
+              Blog
+            </Link>
             <Link href="/privacy" className="hover:text-moss-700">
               Privacy
             </Link>

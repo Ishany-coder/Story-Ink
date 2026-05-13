@@ -31,13 +31,22 @@ export function resend(): Resend {
 }
 
 // Default sender — pulled from EMAIL_FROM. Requires a Resend-verified
-// domain (see resend.com → Domains). Falls back to a clearly-fake
-// placeholder so a misconfigured boot fails loudly in the Resend
-// dashboard instead of silently sending from "no-reply@".
+// domain (see resend.com → Domains, and docs/email-deployment.md for
+// the full setup walkthrough).
+//
+// The fallback is deliberately a clearly-invalid address on the
+// example.invalid TLD (RFC 6761 reserves .invalid for exactly this
+// purpose — DNS resolvers must never return a record for it). Resend
+// rejects sends from unverified domains, so a misconfigured production
+// boot will fail loudly on the first email attempt with a clear
+// "unverified domain" error in the dashboard — rather than silently
+// sending from a real-looking but unowned address, which would pile
+// up bounces and damage the sender reputation of any real domain we
+// eventually use. If you see this fallback in a log, set EMAIL_FROM.
 function defaultFrom(): string {
   return (
     process.env.EMAIL_FROM?.trim() ||
-    "StoryInk <orders@storyink.com>"
+    "set EMAIL_FROM in your env <noreply@example.invalid>"
   );
 }
 

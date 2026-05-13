@@ -19,6 +19,7 @@ export interface NavFlags {
   stats: boolean;
   support: boolean;
   help: boolean;
+  blog: boolean;
 }
 
 function flag(name: string, defaultValue = true): boolean {
@@ -41,5 +42,6 @@ export function readNavFlags(): NavFlags {
     stats: flag("SHOW_STATS"),
     support: flag("SHOW_SUPPORT"),
     help: flag("SHOW_HELP"),
+    blog: flag("SHOW_BLOG"),
   };
 }

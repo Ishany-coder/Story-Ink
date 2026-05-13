@@ -44,6 +44,12 @@ const TABS: Tab[] = [
     flag: "read",
   },
   {
+    label: "Blog",
+    href: "/blog",
+    matches: (p) => p.startsWith("/blog"),
+    flag: "blog",
+  },
+  {
     label: "Studio",
     href: "/canvas",
     matches: (p) => p.startsWith("/canvas"),
