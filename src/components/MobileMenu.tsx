@@ -128,7 +128,7 @@ export default function MobileMenu({
         aria-controls="mobile-nav-panel"
         aria-label={effectiveOpen ? "Close menu" : "Open menu"}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-cream-300 bg-cream-50 text-ink-700 transition-colors hover:bg-cream-200"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-cream-300 bg-cream-50 text-ink-700 transition-colors hover:bg-cream-200"
       >
         {effectiveOpen ? (
           <X size={18} aria-hidden="true" />
