@@ -202,7 +202,7 @@ export default function ShipStoryPage({
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
       <div className="mb-6 flex items-center justify-between">
         <Link
           href={`/read/${story.id}`}
@@ -215,7 +215,7 @@ export default function ShipStoryPage({
         </span>
       </div>
 
-      <h1 className="mb-1 font-[family-name:var(--font-display)] text-3xl font-bold text-ink-900">
+      <h1 className="mb-1 font-[family-name:var(--font-display)] text-2xl font-bold text-ink-900 sm:text-3xl">
         Ship &quot;{story.title}&quot;
       </h1>
       <p className="text-sm font-bold text-ink-300">
@@ -223,7 +223,7 @@ export default function ShipStoryPage({
         shipped worldwide at cost.
       </p>
 
-      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.2fr]">
+      <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[1fr_1.2fr] sm:mt-8">
         <div className="rounded-3xl border-4 border-cream-300 bg-cream-50 p-4 shadow-sm">
           <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-cream-200 to-cream-100">
             {preview.cover ? (
@@ -427,7 +427,7 @@ function AddressForm({
           className={inputCls}
         />
       </Field>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Field label="City">
           <input
             type="text"
@@ -449,7 +449,7 @@ function AddressForm({
           />
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Field label="ZIP / Postcode">
           <input
             type="text"
