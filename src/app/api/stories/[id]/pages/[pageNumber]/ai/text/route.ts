@@ -57,6 +57,16 @@ export async function POST(
   const globalSystemPrompt = body.globalSystemPrompt
     ? String(body.globalSystemPrompt).slice(0, MAX_SYSTEM_PROMPT_LEN)
     : null;
+  // globalSystemPrompt is concatenated into every Gemini call by
+  // composeSystemPrompt. Gate it through the same filter so users
+  // can't bypass the userPrompt check by moving offending content
+  // into the localStorage-backed global prompt.
+  if (globalSystemPrompt && containsProfanity(globalSystemPrompt)) {
+    return NextResponse.json(
+      { error: PROFANITY_REJECTION_MESSAGE },
+      { status: 400 }
+    );
+  }
 
   const jobId = await createJob("assist.text", user.id);
   await inngest.send({

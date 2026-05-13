@@ -4,6 +4,10 @@ import { getCurrentUser } from "@/lib/supabase-server";
 import { isAllowedContentUrl } from "@/lib/http";
 import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 import {
+  containsProfanity,
+  PROFANITY_REJECTION_MESSAGE,
+} from "@/lib/profanity";
+import {
   PET_SPECIES,
   type CreatePetInput,
   type Pet,
@@ -168,18 +172,35 @@ export async function POST(request: Request) {
     );
   }
 
+  // Free-text fields that flow into Gemini (personality_notes, every
+  // quirk answer) or are printed into the keepsake book itself
+  // (dedication_text) all get the same profanity gate as the user-
+  // facing creation prompt.
+  const personalityNotes = sanitizeStr(body.personality_notes, 2000);
+  const dedicationText = sanitizeStr(body.dedication_text, 600);
+  if (
+    (personalityNotes && containsProfanity(personalityNotes)) ||
+    (dedicationText && containsProfanity(dedicationText)) ||
+    quirks.some((q) => containsProfanity(q.answer))
+  ) {
+    return NextResponse.json(
+      { error: PROFANITY_REJECTION_MESSAGE },
+      { status: 400 }
+    );
+  }
+
   const insert = {
     user_id: user.id,
     name,
     species: body.species,
     breed: sanitizeStr(body.breed, 80),
     age: sanitizeStr(body.age, 40),
-    personality_notes: sanitizeStr(body.personality_notes, 2000),
+    personality_notes: personalityNotes,
     mode: body.mode,
     passed_at: passedAt,
     photos,
     quirks,
-    dedication_text: sanitizeStr(body.dedication_text, 600),
+    dedication_text: dedicationText,
   };
 
   const { data, error } = await supabaseAdmin()
