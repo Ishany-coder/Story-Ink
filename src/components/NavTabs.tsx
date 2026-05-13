@@ -106,7 +106,7 @@ export default function NavTabs({
   });
 
   return (
-    <div className="hidden items-center gap-1 sm:flex">
+    <div className="hidden items-center gap-1 md:flex">
       {visible.map((tab) => {
         const active = tab.matches(pathname);
         return (
