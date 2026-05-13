@@ -1,12 +1,12 @@
-// Next.js middleware that runs before every request. Its only job is
-// to refresh the Supabase session cookie if it's about to expire so
-// users don't get unexpectedly signed out mid-session.
+// Next.js 16 Proxy (was "Middleware" in Next.js ≤15). Runs before every
+// request; its only job is to refresh the Supabase session cookie if it's
+// about to expire so users don't get unexpectedly signed out mid-session.
 //
 // We MUST call supabase.auth.getUser() here — it's what triggers the
 // SDK to refresh the cookie when needed.
 //
-// Defensive note: Next 16 + Turbopack will surface a *runtime* error
-// in middleware as a blanket 404 across every route (including
+// Defensive note: Next.js 16 + Turbopack will surface a *runtime* error
+// in proxy as a blanket 404 across every route (including
 // /api/inngest), making the app look completely broken. We catch
 // here so a malformed Supabase session cookie or a transient SDK
 // blip can't take the whole site down — the worst case becomes
@@ -16,7 +16,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { reportError } from "@/lib/sentry";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const response = NextResponse.next({
     request: { headers: request.headers },
   });
@@ -40,7 +40,7 @@ export async function middleware(request: NextRequest) {
 
     await supabase.auth.getUser();
   } catch (err) {
-    reportError(err, "middleware.auth-refresh");
+    reportError(err, "proxy.auth-refresh");
   }
 
   return response;
@@ -49,7 +49,7 @@ export async function middleware(request: NextRequest) {
 // Match every route except static assets and the Inngest dev-server
 // callback path. Inngest probes /api/inngest with PUT requests on a
 // tight loop in dev — running our auth refresh on those is wasted
-// work and can mask real middleware errors in the logs.
+// work and can mask real proxy errors in the logs.
 export const config = {
   matcher: [
     "/((?!_next/static|_next/image|favicon.ico|api/inngest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
