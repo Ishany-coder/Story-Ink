@@ -11,6 +11,7 @@
 
 import { inngest, EVENTS } from "./client";
 import { markDone, markFailed, markProgress, markRunning } from "@/lib/jobs";
+import { reportError } from "@/lib/sentry";
 import {
   assistRegenerateImage,
   assistRegenerateText,
@@ -48,6 +49,9 @@ async function onInngestFailure(
   error: unknown
 ): Promise<void> {
   const jobId = extractJobId(wrappedEvent);
+  // Inngest exhausted retries. Report to Sentry so we see it even
+  // though the user-facing surface is the jobs row.
+  reportError(error, "inngest.onFailure");
   if (jobId) await markFailed(jobId, error);
 }
 

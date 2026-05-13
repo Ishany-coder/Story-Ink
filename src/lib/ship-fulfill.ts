@@ -25,6 +25,7 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import { buildAndUploadPrintPdfs } from "@/lib/print-pdf";
 import { unpackAddressMetadata } from "@/lib/stripe";
+import { reportError } from "@/lib/sentry";
 import type { Pet, Story } from "@/lib/types";
 import type Stripe from "stripe";
 
@@ -113,6 +114,7 @@ export async function fulfillFromSession(
     .eq("id", storyId)
     .single<Story>();
   if (fetchErr || !story) {
+    reportError(fetchErr ?? new Error("Story not found"), "ship-fulfill.story-fetch");
     return { ok: false, status: 404, error: "Story not found" };
   }
 
@@ -167,7 +169,7 @@ export async function fulfillFromSession(
         };
       }
       if (!retry) {
-        console.error("[ship-fulfill] insert failed:", insertErr);
+        reportError(insertErr, "ship-fulfill.insert");
         return {
           ok: false,
           status: 500,
@@ -194,7 +196,7 @@ export async function fulfillFromSession(
     .maybeSingle<{ id: string }>();
 
   if (claimErr) {
-    console.error("[ship-fulfill] claim failed:", claimErr);
+    reportError(claimErr, "ship-fulfill.claim");
     return {
       ok: false,
       status: 500,
@@ -255,7 +257,7 @@ export async function fulfillFromSession(
     interiorUrl = built.interiorUrl;
     coverUrl = built.coverUrl;
   } catch (err) {
-    console.error("[ship-fulfill] pdf build failed:", err);
+    reportError(err, "ship-fulfill.pdf-build");
     await admin
       .from("print_orders")
       .update({ status: "failed" })

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Nunito, Playfair_Display } from "next/font/google";
 import Navbar from "@/components/Navbar";
 import BetaBanner from "@/components/BetaBanner";
+import SentryInit from "@/components/SentryInit";
 import { GOOGLE_FONTS_HREF } from "@/lib/fonts";
 import "./globals.css";
 
@@ -56,6 +57,7 @@ export default function RootLayout({
         <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
       </head>
       <body className="min-h-full bg-cream-100 font-[family-name:var(--font-nunito)] text-ink-700 antialiased">
+        <SentryInit />
         <Navbar />
         <main className="pt-16">
           <BetaBanner />

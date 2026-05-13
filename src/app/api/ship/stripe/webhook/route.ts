@@ -5,6 +5,7 @@ import {
 } from "@/lib/stripe";
 import { fulfillFromSession } from "@/lib/ship-fulfill";
 import { supabaseAdmin } from "@/lib/supabase";
+import { reportError } from "@/lib/sentry";
 import type Stripe from "stripe";
 
 // Authoritative Stripe webhook. Configure it in the Stripe dashboard
@@ -31,8 +32,9 @@ export async function POST(request: Request) {
 
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
-    console.error(
-      "[stripe/webhook] STRIPE_WEBHOOK_SECRET is not set — refusing delivery"
+    reportError(
+      new Error("STRIPE_WEBHOOK_SECRET not configured"),
+      "stripe.webhook.no-secret"
     );
     return NextResponse.json(
       { error: "Webhook secret not configured" },
@@ -71,10 +73,7 @@ export async function POST(request: Request) {
   try {
     session = await retrieveCheckoutSession(sessionPartial.id);
   } catch (err) {
-    console.error(
-      "[stripe/webhook] failed to fetch expanded session; will retry:",
-      err
-    );
+    reportError(err, "stripe.webhook.retrieve-session");
     // 5xx => Stripe retries. Transient network errors shouldn't drop
     // the order on the floor.
     return NextResponse.json({ error: "Temporary" }, { status: 503 });
@@ -112,7 +111,7 @@ export async function POST(request: Request) {
       .eq("id", storyId)
       .maybeSingle<{ user_id: string | null }>();
     if (storyErr) {
-      console.error("[stripe/webhook] story lookup failed:", storyErr);
+      reportError(storyErr, "stripe.webhook.story-lookup");
       return NextResponse.json(
         { error: "Couldn't validate story owner" },
         { status: 503 }
@@ -148,7 +147,7 @@ export async function POST(request: Request) {
       .update({ digital_unlocked: true })
       .eq("id", storyId);
     if (updateErr) {
-      console.error("[stripe/webhook] digital unlock failed:", updateErr);
+      reportError(updateErr, "stripe.webhook.digital-unlock");
       return NextResponse.json(
         { error: "Couldn't unlock digital story" },
         { status: 503 }
@@ -164,10 +163,9 @@ export async function POST(request: Request) {
     // 200 so we don't spam retries on orders that will never recover;
     // they're already logged and flagged on the print_orders row.
     const retryable = outcome.status >= 500 && outcome.status !== 501;
-    console.error(
-      "[stripe/webhook] fulfill failed:",
-      outcome.status,
-      outcome.error
+    reportError(
+      new Error(`fulfill failed: ${outcome.status} ${outcome.error}`),
+      "stripe.webhook.fulfill"
     );
     if (retryable) {
       return NextResponse.json(
