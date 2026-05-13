@@ -11,11 +11,17 @@ export const maxDuration = 30;
 // guard so a stray fetch in dev tools can't nuke the account.
 //
 // Order matters:
-//   1. Anonymize shipped print_orders (tax + Stripe records must
-//      survive the deletion under retention rules; we keep the row
-//      but strip the personal data — shipping_address and user_id).
-//   2. Delete the rest of the print_orders rows that are still
-//      pre-fulfillment (no tax/legal retention need).
+//   1. Anonymize print_orders that have crossed the payment line.
+//      Per schema.sql's print_orders.status enum, that's every status
+//      after "pending" — paid, building, received, in_progress,
+//      shipped, delivered, refunded, disputed. Money changed hands
+//      so the row needs to survive under tax + Stripe reconciliation
+//      retention, but personal data (shipping_address, user_id,
+//      story_id) is scrubbed. Pre-payment rows (pending, expired,
+//      failed pre-paid, cancelled) get hard-deleted in step 2 since
+//      there's no retention obligation on them.
+//   2. Delete the remaining print_orders rows (pending / expired /
+//      cancelled / pre-payment failed). No retention need.
 //   3. Delete stories and pets (their FK cascades take care of
 //      jobs, custom_layouts, support_threads, etc., per schema.sql).
 //   4. Delete the auth user — Supabase auth.admin.deleteUser will
@@ -43,33 +49,52 @@ export async function DELETE(request: Request) {
 
   const admin = supabaseAdmin();
 
-  // Shipped orders are anonymized rather than hard-deleted. We need to
-  // retain a record of the transaction (tax reporting, Stripe dispute
-  // history, year-end accounting) but the user has the right to have
-  // their personal data scrubbed from it. Stripe still holds its own
-  // record under the original Stripe session id.
+  // Anonymize every post-payment order. We need to retain a record of
+  // the transaction (tax reporting, Stripe dispute history, year-end
+  // accounting) but the user has the right to have their personal data
+  // scrubbed from it. Stripe still holds its own record under the
+  // original Stripe session id.
+  //
+  // The status set mirrors print_orders.status' "money changed hands"
+  // half — anything from paid onward. Refunded and disputed orders
+  // are explicitly included because their financial records (refund
+  // history, dispute outcomes) are exactly what retention is for.
   //
   // IMPORTANT: we also null out story_id BEFORE deleting the stories
   // below. The print_orders → stories FK is ON DELETE SET NULL (see
   // schema.sql) — but we do the explicit null here too, both as belt-
   // and-suspenders against a future schema regression and so the
   // intent is obvious to anyone reading this code.
+  const RETAINED_STATUSES = [
+    "paid",
+    "building",
+    "received",
+    "in_progress",
+    "shipped",
+    "delivered",
+    "refunded",
+    "disputed",
+  ];
   const { error: anonErr } = await admin
     .from("print_orders")
     .update({ shipping_address: null, user_id: null, story_id: null })
     .eq("user_id", user.id)
-    .eq("status", "shipped");
+    .in("status", RETAINED_STATUSES);
   if (anonErr) {
-    console.error("[account/delete] anonymize shipped orders failed:", anonErr);
+    console.error(
+      "[account/delete] anonymize retained orders failed:",
+      anonErr
+    );
     return NextResponse.json(
-      { error: "Failed to anonymize shipped orders" },
+      { error: "Failed to anonymize retained orders" },
       { status: 500 }
     );
   }
 
-  // Hard-delete any remaining print_orders (queued, paid, building,
-  // received, refunded, expired, disputed). These haven't crossed the
-  // fulfillment line yet, so there's no retention obligation.
+  // Hard-delete the remaining pre-payment print_orders (pending,
+  // expired, cancelled, etc.). The anonymize pass above already
+  // detached the post-payment ones; this filter on user_id will only
+  // see what's left.
   const { error: poErr } = await admin
     .from("print_orders")
     .delete()

@@ -80,7 +80,7 @@ export default function AccountDeleteModal({ open, onConfirm, onCancel }: Props)
             Delete your account
           </h2>
           <p className="mt-1 text-xs text-ink-500">
-            This permanently deletes your stories, pets, and unshipped orders.
+            This permanently deletes your stories, pets, and pre-payment orders.
           </p>
         </header>
 
@@ -90,10 +90,17 @@ export default function AccountDeleteModal({ open, onConfirm, onCancel }: Props)
           </p>
           <ul className="ml-5 mt-2 list-disc space-y-1.5">
             <li>Delete all your pets and stories.</li>
-            <li>Delete any orders that haven&rsquo;t shipped yet.</li>
             <li>
-              Anonymize shipped order records (we keep them for tax and
-              Stripe reconciliation but strip your address and id).
+              Delete any pre-payment orders (cart-style rows that never
+              completed checkout).
+            </li>
+            <li>
+              Keep an anonymized record of every order you actually paid
+              for — paid, in fulfillment, shipped, delivered, refunded, or
+              disputed — so we can complete outstanding shipments and meet
+              our tax and Stripe reconciliation obligations. Your address
+              and account id are stripped from those rows; only the
+              transaction itself remains.
             </li>
             <li>Delete your sign-in account.</li>
           </ul>
