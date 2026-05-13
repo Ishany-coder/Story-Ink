@@ -13,7 +13,6 @@
 // Better to occasionally serve a malicious request than block a real one
 // when the database hiccups.
 
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
@@ -67,9 +66,12 @@ export async function enforceRateLimit(
 
 // Centralized per-route limits. Tune these as we learn real usage.
 //
-// All limits are PER USER (or per-IP fallback) unless otherwise noted.
-// They're chosen so a legitimate creator can comfortably iterate but
-// a scripted attacker hits the wall before burning meaningful quota.
+// All limits are PER USER. Every rate-limited route runs after a
+// getCurrentUser() / 401 gate, so there is no anonymous code path
+// that needs an IP-based bucket. If a public POST surface is added
+// later (anon support form, public share endpoint, etc.) the IP
+// fallback helper can come back — kept out of the tree for now so
+// nobody copy-pastes dead code as a model.
 export const LIMITS = {
   // Full-story generation is the single most expensive endpoint
   // (1 text call + N image calls). 10/hour gives a creator room to
@@ -103,21 +105,6 @@ export const LIMITS = {
 // Convenience builder so call sites don't string-concat keys ad hoc.
 export function userKey(scope: keyof typeof LIMITS, userId: string): string {
   return `${scope}:${userId}`;
-}
-
-// IP-key fallback used when no userId is available (unauthenticated
-// flows or pre-auth probes). We SHA256 the client IP so the rate-limit
-// key isn't a raw IP string sitting in the database — partial defense
-// in depth in case the rate_limits table is ever exposed. Reads the
-// first hop of x-forwarded-for, since deployments behind Vercel /
-// Cloudflare put the real client in the leftmost position. Falls back
-// to "unknown" so a request without a forwarded header still rate-
-// limits as a coherent bucket rather than blowing past every cap.
-export function ipKey(scope: keyof typeof LIMITS, request: Request): string {
-  const raw = request.headers.get("x-forwarded-for") || "";
-  const ip = raw.split(",")[0]?.trim() || "unknown";
-  const hash = createHash("sha256").update(ip).digest("hex").slice(0, 24);
-  return `${scope}:ip:${hash}`;
 }
 
 // Gemini daily ceiling — every text / image call increments a single
