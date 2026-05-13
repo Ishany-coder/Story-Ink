@@ -805,6 +805,15 @@ export default function CanvasEditor({
       if (editingTextId) return;
       if (inField) return;
 
+      // Selection-aware keys (arrows / Delete / Backspace / Escape /
+      // Tab) only engage when focus is actually on the canvas. The
+      // previous version listened on `window` unconditionally, which
+      // meant Tabbing into a side panel or clicking out of the canvas
+      // still hijacked Tab/arrows and broke keyboard nav across the
+      // whole Studio. Gate on activeElement === canvas so the canvas
+      // owns these keys only while it's focused.
+      if (document.activeElement !== canvasRef.current) return;
+
       if (e.key === "Escape" && selectedId) {
         e.preventDefault();
         setSelectedId(null);
@@ -843,18 +852,23 @@ export default function CanvasEditor({
       }
 
       // Tab cycles to the next layer in visual order (top to bottom).
+      // After selecting we re-focus the canvas so subsequent arrows /
+      // Delete / Backspace land on it (a side-panel button could have
+      // briefly taken focus before the canvas swallowed Tab).
       if (e.key === "Tab") {
         if (!layers.length) return;
         e.preventDefault();
         const ordered = [...layers].sort((a, b) => a.y - b.y || a.x - b.x);
         if (!selectedId) {
           setSelectedId(ordered[e.shiftKey ? ordered.length - 1 : 0].id);
+          canvasRef.current?.focus();
           return;
         }
         const idx = ordered.findIndex((l) => l.id === selectedId);
         const nextIdx =
           (idx + (e.shiftKey ? -1 : 1) + ordered.length) % ordered.length;
         setSelectedId(ordered[nextIdx].id);
+        canvasRef.current?.focus();
         return;
       }
     }
