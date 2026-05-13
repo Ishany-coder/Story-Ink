@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { supabaseAdmin } from "@/lib/supabase";
 import { isBetaTesting } from "@/lib/beta-flag";
+import { POSTS } from "@/content/blog";
 
 // Next.js 16 sitemap. App Router picks this up automatically and serves
 // it at /sitemap.xml. Keep it dynamic — the public-stories list grows
@@ -66,7 +67,23 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.3,
     },
+    {
+      url: `${baseUrl}/blog`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.6,
+    },
   ];
+
+  // Per-post entries. Pulled from the compile-time post registry so
+  // adding a new post to src/content/blog automatically surfaces it
+  // here on the next build.
+  const blogEntries: MetadataRoute.Sitemap = POSTS.map((post) => ({
+    url: `${baseUrl}/blog/${post.slug}`,
+    lastModified: new Date(`${post.publishedAt}T00:00:00Z`),
+    changeFrequency: "monthly" as const,
+    priority: 0.5,
+  }));
 
   // Public storybooks. Best-effort: if the admin client isn't
   // configured (e.g. someone running a static build without secrets)
@@ -90,5 +107,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.warn("[sitemap] couldn't load public stories:", err);
   }
 
-  return [...staticEntries, ...publicEntries];
+  return [...staticEntries, ...blogEntries, ...publicEntries];
 }
