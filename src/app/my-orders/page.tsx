@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { isBetaTesting } from "@/lib/beta-flag";
 import { StatusBadge } from "../orders/page";
 import CancelOrderButton from "@/components/CancelOrderButton";
 
@@ -45,6 +46,11 @@ interface EventRow {
 }
 
 export default async function MyOrdersPage() {
+  // Closed-beta kill switch — hardcover ordering is paused during
+  // beta, so the user-facing tracker has nothing to show. 404 to
+  // match the rest of the paid-funnel surfaces (/ship, the checkout
+  // APIs).
+  if (isBetaTesting()) notFound();
   const user = await getCurrentUser();
   if (!user) redirect("/login?next=/my-orders");
 

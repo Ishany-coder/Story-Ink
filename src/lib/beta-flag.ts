@@ -1,13 +1,23 @@
 // Closed-beta kill switch for the hardcover / paid surfaces.
 //
-// When the flag is on the app should:
-//   - 404 the `/ship/[id]` page and the Stripe checkout API
-//   - hide every "Order hardcover" / "Print this book" / "$XX.XX" CTA
-//     in the UI
-//   - show a small banner explaining hardcover orders are paused
+// When the flag is on the app:
+//   - 404s `/ship`, `/ship/[id]`, and the Stripe checkout APIs
+//   - 404s `/api/digital/checkout`
+//   - 404s `/my-orders` (no user orders to show while ordering is paused)
+//   - hides every "Order hardcover" / "Print this book" / "$XX.XX"
+//     CTA in the UI
+//   - hides the "Ship" and "My orders" nav tabs
+//   - auto-grants full reader access (treats `isBetaTesting()` as
+//     equivalent to `digital_unlocked` in `src/app/read/[id]/page.tsx`)
+//   - empties the sitemap and disallows all in robots.txt
+//   - shows a small banner explaining hardcover orders are paused
+//
+// `/orders` (the admin queue) and `/admin/*` remain admin-gated by
+// `isAdminUser` and are unaffected by the flag — admins keep visibility.
 //
 // Story generation, reading, and the Studio all keep working — beta
-// testers exercise everything *except* the paid checkout funnel.
+// testers exercise everything *except* the paid checkout funnel, and
+// they get every story unlocked for free.
 //
 // The flag is read from two env vars so the same value can be checked
 // on the server and in a client component without prop-drilling:
