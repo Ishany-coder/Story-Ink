@@ -19,6 +19,7 @@ import {
   generatePageImage,
   generateStoryText,
   GeminiRateLimitError,
+  GeminiSafetyBlockedError,
   regeneratePageText,
   type AssistTarget,
 } from "@/lib/gemini";
@@ -44,6 +45,33 @@ function extractJobId(wrappedEvent: unknown): string | undefined {
   return (wrappedEvent as WrappedFailureEvent)?.data?.event?.data?.jobId;
 }
 
+// Inngest wraps thrown errors so by the time we get to onFailure the
+// original class identity is sometimes lost — we recognize a safety
+// block by name + message instead. The error.name survives the wrap
+// in current Inngest versions; the message check is a backstop for
+// anything that re-serializes through JSON.
+function isSafetyBlockError(err: unknown): boolean {
+  if (err instanceof GeminiSafetyBlockedError) return true;
+  if (err && typeof err === "object") {
+    const e = err as { name?: unknown; message?: unknown };
+    if (e.name === "GeminiSafetyBlockedError") return true;
+    if (
+      typeof e.message === "string" &&
+      e.message.includes("safety filter")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// User-facing copy for a safety block. Single source of truth so we
+// don't drift between the thrown error and what the polling client
+// reads from jobs.error. Echoes GeminiSafetyBlockedError's default
+// message verbatim.
+const SAFETY_BLOCK_USER_MESSAGE =
+  "Your prompt was blocked by the safety filter. Please try a gentler wording — for example, avoid graphic injuries or distressing content.";
+
 async function onInngestFailure(
   wrappedEvent: unknown,
   error: unknown
@@ -52,7 +80,16 @@ async function onInngestFailure(
   // Inngest exhausted retries. Report to Sentry so we see it even
   // though the user-facing surface is the jobs row.
   reportError(error, "inngest.onFailure");
-  if (jobId) await markFailed(jobId, error);
+  if (!jobId) return;
+  // Rewrite a safety-block error into the canonical user-facing
+  // string before persisting to the jobs row. Without this, an
+  // Inngest-wrapped error message ("Function exhausted retries: ...")
+  // would leak into the UI.
+  if (isSafetyBlockError(error)) {
+    await markFailed(jobId, new Error(SAFETY_BLOCK_USER_MESSAGE));
+    return;
+  }
+  await markFailed(jobId, error);
 }
 
 function composeSystemPrompt(
