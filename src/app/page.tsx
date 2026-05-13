@@ -52,7 +52,7 @@ export default async function Home() {
   const dashboardMode = stories.length >= DASHBOARD_THRESHOLD;
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 pb-16 pt-12">
+    <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:px-8 pb-12 pt-8 sm:pb-16 sm:pt-12">
       {dashboardMode ? (
         <DashboardHeader />
       ) : (
@@ -144,7 +144,7 @@ function DashboardHeader() {
         <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
           The fine art of pet storytelling
         </span>
-        <h1 className="mt-2 font-[family-name:var(--font-display)] text-4xl font-semibold tracking-tight text-ink-900 sm:text-5xl">
+        <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-ink-900 sm:text-5xl">
           Your library
         </h1>
         <p className="mt-1 text-sm text-ink-500">
