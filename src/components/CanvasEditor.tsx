@@ -1336,11 +1336,19 @@ export default function CanvasEditor({
   }, [saving, dirtyPageCount]);
 
   return (
-    // The Studio is height-constrained to the viewport (minus the
-    // fixed 64px Navbar) so the side panels can scroll internally
-    // without pushing the canvas down. Per-panel scroll containers
-    // below have `overflow-y-auto`.
-    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-[1440px] flex-col gap-3 overflow-hidden px-6 py-3">
+    <>
+      {/* Below md (phones): the Studio needs more screen than is
+          available. Surface a clear notice + a fallback CTA to the
+          read view, rather than rendering an unusable 3-column
+          editor inside a 375px viewport. */}
+      <StudioMobileNotice storyId={story.id} />
+
+      {/* The Studio is height-constrained to the viewport (minus the
+          fixed 64px Navbar) so the side panels can scroll internally
+          without pushing the canvas down. Per-panel scroll containers
+          below have `overflow-y-auto`. Hidden below md; tablet uses
+          a narrower 3-col grid; desktop uses the original spec. */}
+      <div className="mx-auto hidden h-[calc(100vh-4rem)] max-w-[1440px] flex-col gap-3 overflow-hidden px-4 py-3 md:flex lg:px-6">
       {/* Story header — breadcrumb, title, meta on the left; history +
           save controls on the right. Sized to feel like a chapter
           opener, not a toolbar. */}
@@ -1422,7 +1430,7 @@ export default function CanvasEditor({
           actually engage (otherwise flex children default to their
           content height and the page grows instead of the panel
           scrolling). */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-[18px] lg:grid-cols-[290px_minmax(0,1fr)_334px]">
+      <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_280px] gap-3 md:gap-[14px] lg:grid-cols-[290px_minmax(0,1fr)_334px] lg:gap-[18px]">
         {/* Left: tools sidebar */}
         <aside className="flex flex-col overflow-hidden rounded-[10px] border border-linen-200 bg-cream-50 p-4">
           <div className="mb-3 flex flex-wrap items-center gap-1">
@@ -2045,7 +2053,7 @@ export default function CanvasEditor({
         <div className="fixed bottom-5 right-5 z-30">
           {aiDockOpen ? (
             <div
-              className="flex max-h-[520px] w-[360px] flex-col overflow-hidden rounded-2xl bg-paper"
+              className="flex max-h-[520px] w-[300px] flex-col overflow-hidden rounded-2xl bg-paper lg:w-[360px]"
               style={{
                 boxShadow:
                   "0 18px 40px rgba(30,20,10,.18), 0 0 0 1px var(--color-linen-200)",
@@ -2109,6 +2117,7 @@ export default function CanvasEditor({
         />
       )}
     </div>
+    </>
   );
 }
 
@@ -3798,6 +3807,36 @@ function FontPicker({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Sub-md (phones) the Studio is unusable — the 3-column workspace
+// can't render meaningfully in 343px of horizontal space. Show a
+// centered notice card with a fallback CTA to the read view.
+// Hidden at md+ so the editor takes over.
+function StudioMobileNotice({ storyId }: { storyId: string }) {
+  return (
+    <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md flex-col items-center justify-center gap-4 px-4 py-10 text-center md:hidden">
+      <div className="w-full rounded-3xl border border-linen-200 bg-cream-50 p-6 shadow-sm">
+        <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-sage-700">
+          Studio
+        </span>
+        <h1 className="mt-2 font-[family-name:var(--font-display)] text-2xl font-semibold leading-snug tracking-tight text-bark-900">
+          The Studio needs a larger screen.
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed text-stone-500">
+          Open this story on a tablet (iPad) or desktop to edit
+          pages. You can still read your story on any device.
+        </p>
+        <Link
+          href={`/read/${storyId}`}
+          className="mt-5 inline-flex items-center justify-center rounded-full bg-sage-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-sage-900"
+          style={{ background: "var(--color-bark-900)" }}
+        >
+          Read the story
+        </Link>
+      </div>
     </div>
   );
 }
