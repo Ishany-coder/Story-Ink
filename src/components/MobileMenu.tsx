@@ -113,6 +113,18 @@ export default function MobileMenu({
     };
   }, [effectiveOpen]);
 
+  // Esc closes the sheet. Mirrors <LegalConsentModal>. Only wired when
+  // the sheet is open so we don't sit on a global keydown listener
+  // every page render. Tap-outside + hamburger toggle still work.
+  useEffect(() => {
+    if (!effectiveOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenedAtPath(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [effectiveOpen]);
+
   const visible = TABS.filter((t) => {
     if (t.adminOnly && !isAdmin) return false;
     if (isAdmin && !flags[t.flag]) return false;
