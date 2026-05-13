@@ -293,6 +293,13 @@ create policy "custom layouts delete by owner"
 
 create table if not exists public.print_orders (
   id uuid primary key default gen_random_uuid(),
+  -- story_id starts NOT NULL at insert time; the FK is flipped to
+  -- ON DELETE SET NULL below so that retained / anonymized order rows
+  -- (e.g. shipped books that survive an account deletion for tax /
+  -- Stripe reconciliation) keep their non-PII columns even after the
+  -- underlying story is hard-deleted. On a brand-new DB the FK is
+  -- created here as ON DELETE CASCADE; the idempotent ALTER beneath
+  -- this CREATE flips it to SET NULL on every re-run.
   story_id uuid not null references public.stories(id) on delete cascade,
   -- Known status values (open value space — no CHECK constraint):
   --   pending     — row pre-created before Stripe Checkout completed
@@ -334,6 +341,19 @@ alter table public.print_orders
   -- (see MAX_QUANTITY in /api/ship/stripe/checkout). Default 1 keeps
   -- legacy rows valid.
   add column if not exists quantity int not null default 1;
+
+-- Flip story_id FK to ON DELETE SET NULL and drop NOT NULL so that
+-- retained / anonymized order rows survive a story delete. The /api/
+-- account DELETE handler relies on this: it nulls out story_id on
+-- shipped orders before deleting the user's stories so the historical
+-- tax / Stripe records aren't cascade-wiped. Idempotent — safe to re-
+-- run on fresh and existing deployments.
+alter table public.print_orders
+  drop constraint if exists print_orders_story_id_fkey;
+alter table public.print_orders
+  add constraint print_orders_story_id_fkey
+  foreign key (story_id) references public.stories(id) on delete set null;
+alter table public.print_orders alter column story_id drop not null;
 
 create unique index if not exists print_orders_stripe_session_id_idx
   on public.print_orders (stripe_session_id) where stripe_session_id is not null;

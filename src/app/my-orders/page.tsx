@@ -24,7 +24,9 @@ interface OrderRow {
   status: string;
   amount_usd: number | null;
   created_at: string;
-  story_id: string;
+  // Null on retained / anonymized rows whose underlying story was
+  // hard-deleted (see FK → ON DELETE SET NULL in schema.sql).
+  story_id: string | null;
   quantity: number | null;
 }
 
@@ -70,7 +72,9 @@ export default async function MyOrdersPage() {
   }
 
   const list = orders ?? [];
-  const storyIds = Array.from(new Set(list.map((o) => o.story_id)));
+  const storyIds = Array.from(
+    new Set(list.map((o) => o.story_id).filter((v): v is string => !!v))
+  );
   const orderIds = list.map((o) => o.id);
 
   const [storiesRes, eventsRes] = await Promise.all([
@@ -134,7 +138,9 @@ export default async function MyOrdersPage() {
       ) : (
         <div className="space-y-4">
           {list.map((order) => {
-            const story = storyById.get(order.story_id) ?? null;
+            const story = order.story_id
+              ? storyById.get(order.story_id) ?? null
+              : null;
             const events = eventsByOrder.get(order.id) ?? [];
             return (
               <OrderCard

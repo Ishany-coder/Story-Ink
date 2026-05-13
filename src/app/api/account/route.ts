@@ -48,9 +48,15 @@ export async function DELETE(request: Request) {
   // history, year-end accounting) but the user has the right to have
   // their personal data scrubbed from it. Stripe still holds its own
   // record under the original Stripe session id.
+  //
+  // IMPORTANT: we also null out story_id BEFORE deleting the stories
+  // below. The print_orders → stories FK is ON DELETE SET NULL (see
+  // schema.sql) — but we do the explicit null here too, both as belt-
+  // and-suspenders against a future schema regression and so the
+  // intent is obvious to anyone reading this code.
   const { error: anonErr } = await admin
     .from("print_orders")
-    .update({ shipping_address: null, user_id: null })
+    .update({ shipping_address: null, user_id: null, story_id: null })
     .eq("user_id", user.id)
     .eq("status", "shipped");
   if (anonErr) {

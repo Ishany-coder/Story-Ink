@@ -245,7 +245,7 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
     .from("print_orders")
     .select("id, story_id, status")
     .eq("stripe_session_id", sessionId)
-    .maybeSingle<{ id: string; story_id: string; status: string }>();
+    .maybeSingle<{ id: string; story_id: string | null; status: string }>();
 
   if (!order) {
     return NextResponse.json({
@@ -269,12 +269,16 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   // Revoke the digital unlock so the refunded purchaser loses online
   // access. We do this unconditionally — if the refund was partial,
   // the admin can manually re-enable from the orders page.
-  const { error: unlockErr } = await admin
-    .from("stories")
-    .update({ digital_unlocked: false })
-    .eq("id", order.story_id);
-  if (unlockErr) {
-    reportError(unlockErr, "stripe.webhook.refund-digital-revoke");
+  // Skip if story_id was cleared (e.g. account deletion already
+  // hard-deleted the story; FK is ON DELETE SET NULL).
+  if (order.story_id) {
+    const { error: unlockErr } = await admin
+      .from("stories")
+      .update({ digital_unlocked: false })
+      .eq("id", order.story_id);
+    if (unlockErr) {
+      reportError(unlockErr, "stripe.webhook.refund-digital-revoke");
+    }
   }
 
   await admin.from("print_order_events").insert({

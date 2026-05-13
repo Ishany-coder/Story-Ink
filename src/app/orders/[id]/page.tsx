@@ -17,7 +17,9 @@ interface OrderRow {
   amount_usd: number | null;
   stripe_session_id: string | null;
   created_at: string;
-  story_id: string;
+  // Null on retained / anonymized rows whose underlying story was
+  // hard-deleted (see FK → ON DELETE SET NULL in schema.sql).
+  story_id: string | null;
   user_id: string | null;
   shipping_address: string | null;
   interior_pdf_url: string | null;
@@ -53,17 +55,27 @@ export default async function OrderDetailPage({
   if (error || !order) notFound();
 
   const [storyRes, eventsRes, customerEmail] = await Promise.all([
-    admin
-      .from("stories")
-      .select("id, title, page_count, cover_image, kind")
-      .eq("id", order.story_id)
-      .maybeSingle<{
-        id: string;
-        title: string;
-        page_count: number;
-        cover_image: string | null;
-        kind: string | null;
-      }>(),
+    order.story_id
+      ? admin
+          .from("stories")
+          .select("id, title, page_count, cover_image, kind")
+          .eq("id", order.story_id)
+          .maybeSingle<{
+            id: string;
+            title: string;
+            page_count: number;
+            cover_image: string | null;
+            kind: string | null;
+          }>()
+      : Promise.resolve({
+          data: null as {
+            id: string;
+            title: string;
+            page_count: number;
+            cover_image: string | null;
+            kind: string | null;
+          } | null,
+        }),
     admin
       .from("print_order_events")
       .select("id, status, note, created_at, actor_id")
@@ -151,14 +163,20 @@ export default async function OrderDetailPage({
                   {story?.page_count ?? "?"} pages
                   {story?.kind === "pet" ? " · pet story" : ""}
                 </div>
-                <div>
-                  <Link
-                    href={`/read/${order.story_id}`}
-                    className="text-xs font-medium text-moss-700 hover:text-ink-900"
-                  >
-                    View the storybook →
-                  </Link>
-                </div>
+                {order.story_id ? (
+                  <div>
+                    <Link
+                      href={`/read/${order.story_id}`}
+                      className="text-xs font-medium text-moss-700 hover:text-ink-900"
+                    >
+                      View the storybook →
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="text-xs text-ink-300">
+                    Underlying story was deleted (record retained).
+                  </div>
+                )}
               </div>
             </div>
           </section>
@@ -214,20 +232,50 @@ export default async function OrderDetailPage({
               Blurb, etc.) to fulfill the order. Each download rebuilds
               the PDF — always Lulu-spec, always the latest pages.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <a
-                href={`/api/admin/stories/${order.story_id}/export-pdf?type=interior`}
-                className="rounded-full bg-moss-700 px-4 py-2 text-xs font-semibold text-cream-50 transition-colors hover:bg-moss-900"
-              >
-                Interior PDF ↓
-              </a>
-              <a
-                href={`/api/admin/stories/${order.story_id}/export-pdf?type=cover`}
-                className="rounded-full border border-cream-300 bg-cream-50 px-4 py-2 text-xs font-semibold text-ink-700 hover:border-moss-500 hover:bg-cream-100"
-              >
-                Cover PDF ↓
-              </a>
-            </div>
+            {order.story_id ? (
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`/api/admin/stories/${order.story_id}/export-pdf?type=interior`}
+                  className="rounded-full bg-moss-700 px-4 py-2 text-xs font-semibold text-cream-50 transition-colors hover:bg-moss-900"
+                >
+                  Interior PDF ↓
+                </a>
+                <a
+                  href={`/api/admin/stories/${order.story_id}/export-pdf?type=cover`}
+                  className="rounded-full border border-cream-300 bg-cream-50 px-4 py-2 text-xs font-semibold text-ink-700 hover:border-moss-500 hover:bg-cream-100"
+                >
+                  Cover PDF ↓
+                </a>
+              </div>
+            ) : (
+              <p className="text-xs text-ink-300">
+                Source story no longer exists — rebuild unavailable. Use the
+                pre-built PDFs cached on this row if needed:
+                {order.interior_pdf_url ? (
+                  <>
+                    {" "}
+                    <a
+                      href={order.interior_pdf_url}
+                      className="font-medium text-moss-700 hover:text-ink-900"
+                    >
+                      interior
+                    </a>
+                  </>
+                ) : null}
+                {order.cover_pdf_url ? (
+                  <>
+                    {" · "}
+                    <a
+                      href={order.cover_pdf_url}
+                      className="font-medium text-moss-700 hover:text-ink-900"
+                    >
+                      cover
+                    </a>
+                  </>
+                ) : null}
+                .
+              </p>
+            )}
           </section>
 
           {/* Audit log */}

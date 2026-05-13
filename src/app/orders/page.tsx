@@ -25,7 +25,9 @@ interface OrderRow {
   amount_usd: number | null;
   stripe_session_id: string | null;
   created_at: string;
-  story_id: string;
+  // Null on retained / anonymized rows whose underlying story was
+  // hard-deleted (see FK → ON DELETE SET NULL in schema.sql).
+  story_id: string | null;
   user_id: string | null;
   interior_pdf_url: string | null;
   quantity: number | null;
@@ -80,7 +82,13 @@ export default async function OrdersPage({
   }
 
   // Resolve story titles + customer emails in parallel.
-  const storyIds = Array.from(new Set((orders ?? []).map((o) => o.story_id)));
+  const storyIds = Array.from(
+    new Set(
+      (orders ?? [])
+        .map((o) => o.story_id)
+        .filter((v): v is string => !!v)
+    )
+  );
   const userIds = Array.from(
     new Set(
       (orders ?? [])
@@ -158,7 +166,7 @@ export default async function OrdersPage({
                     {o.user_id ? emailsByUserId.get(o.user_id) ?? "—" : "—"}
                   </td>
                   <td className="px-4 py-3 text-ink-900">
-                    {storyTitle.get(o.story_id) ?? "—"}
+                    {o.story_id ? storyTitle.get(o.story_id) ?? "—" : "—"}
                     {o.quantity && o.quantity > 1 ? (
                       <span className="ml-2 rounded-full bg-cream-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-700">
                         × {o.quantity}
