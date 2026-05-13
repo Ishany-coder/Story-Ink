@@ -6,6 +6,7 @@ import SlideReader from "@/components/SlideReader";
 import AdminExportPdfButton from "@/components/AdminExportPdfButton";
 import DigitalUpsell from "@/components/DigitalUpsell";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
+import { isBetaTesting } from "@/lib/beta-flag";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -102,11 +103,16 @@ export default async function ReadStoryPage({
   //   - admin
   //   - story is public (is_public=true)
   //   - digital tier unlocked (paid OR backfilled grandfather row)
+  //   - closed-beta flag on (the paywall surface is paused so beta
+  //     testers can read every story they own without paying)
   // If none of those hold and the viewer is the owner, show the
   // upsell. If they're not the owner, RLS already hid the row above
   // and we never reach this point.
   const fullAccess =
-    admin || story.digital_unlocked === true || story.is_public === true;
+    admin ||
+    story.digital_unlocked === true ||
+    story.is_public === true ||
+    isBetaTesting();
   const isOwner = !!user && !!ownerUserId && ownerUserId === user.id;
 
   if (!fullAccess && isOwner) {

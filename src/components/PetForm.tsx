@@ -410,7 +410,11 @@ export default function PetForm({ initial = null }: Props) {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={url}
-                    alt="reference"
+                    alt={
+                      name.trim()
+                        ? `Reference photo of ${name.trim()}`
+                        : "Pet reference photo"
+                    }
                     className="h-full w-full object-cover"
                   />
                   <button

@@ -3,6 +3,7 @@ import { retrieveCheckoutSession } from "@/lib/stripe";
 import { fulfillFromSession } from "@/lib/ship-fulfill";
 import { fetchStoryOwnership, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 
 // Opportunistic confirm endpoint hit by /ship/[id]/success?session_id=...
 //
@@ -34,6 +35,11 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.checkout,
+    key: userKey("checkout", user.id),
+  });
+  if (limited) return limited;
 
   const body = (await request.json().catch(() => ({}))) as Body;
   const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";

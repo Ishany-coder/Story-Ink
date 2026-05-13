@@ -11,6 +11,7 @@
 
 import { inngest, EVENTS } from "./client";
 import { markDone, markFailed, markProgress, markRunning } from "@/lib/jobs";
+import { reportError } from "@/lib/sentry";
 import {
   assistRegenerateImage,
   assistRegenerateText,
@@ -18,6 +19,7 @@ import {
   generatePageImage,
   generateStoryText,
   GeminiRateLimitError,
+  GeminiSafetyBlockedError,
   regeneratePageText,
   type AssistTarget,
 } from "@/lib/gemini";
@@ -43,12 +45,51 @@ function extractJobId(wrappedEvent: unknown): string | undefined {
   return (wrappedEvent as WrappedFailureEvent)?.data?.event?.data?.jobId;
 }
 
+// Inngest wraps thrown errors so by the time we get to onFailure the
+// original class identity is sometimes lost — we recognize a safety
+// block by name + message instead. The error.name survives the wrap
+// in current Inngest versions; the message check is a backstop for
+// anything that re-serializes through JSON.
+function isSafetyBlockError(err: unknown): boolean {
+  if (err instanceof GeminiSafetyBlockedError) return true;
+  if (err && typeof err === "object") {
+    const e = err as { name?: unknown; message?: unknown };
+    if (e.name === "GeminiSafetyBlockedError") return true;
+    if (
+      typeof e.message === "string" &&
+      e.message.includes("safety filter")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// User-facing copy for a safety block. Single source of truth so we
+// don't drift between the thrown error and what the polling client
+// reads from jobs.error. Echoes GeminiSafetyBlockedError's default
+// message verbatim.
+const SAFETY_BLOCK_USER_MESSAGE =
+  "Your prompt was blocked by the safety filter. Please try a gentler wording — for example, avoid graphic injuries or distressing content.";
+
 async function onInngestFailure(
   wrappedEvent: unknown,
   error: unknown
 ): Promise<void> {
   const jobId = extractJobId(wrappedEvent);
-  if (jobId) await markFailed(jobId, error);
+  // Inngest exhausted retries. Report to Sentry so we see it even
+  // though the user-facing surface is the jobs row.
+  reportError(error, "inngest.onFailure");
+  if (!jobId) return;
+  // Rewrite a safety-block error into the canonical user-facing
+  // string before persisting to the jobs row. Without this, an
+  // Inngest-wrapped error message ("Function exhausted retries: ...")
+  // would leak into the UI.
+  if (isSafetyBlockError(error)) {
+    await markFailed(jobId, new Error(SAFETY_BLOCK_USER_MESSAGE));
+    return;
+  }
+  await markFailed(jobId, error);
 }
 
 function composeSystemPrompt(
@@ -578,10 +619,116 @@ export const assistInferFn = inngest.createFunction(
   }
 );
 
+// --------------------------------------------------------------------------
+// nightly-cleanup — daily housekeeping cron.
+//
+// Runs at 04:00 UTC every day. Three independent step.run blocks so
+// each piece of work retries on its own and a transient failure in
+// one doesn't block the others.
+//
+// Tasks:
+//   1. Delete done / failed `jobs` rows older than 30 days. The jobs
+//      table is essentially a transient queue; old rows just bloat
+//      the table and slow down /api/jobs/[id] lookups.
+//   2. Mark `print_orders` rows stuck in 'paid' or 'pending' for
+//      more than 48h *with no stripe_session_id* as 'expired'. These
+//      are orders the user abandoned or where Stripe didn't fire the
+//      webhook in time — the admin needs to see them, so we never
+//      delete, just status-transition.
+//   3. (TODO) Storage orphan sweep — walk `uploads` bucket and delete
+//      blobs that no story / pet row references. Skipped for now: no
+//      cheap way to enumerate referenced URLs (they're embedded in
+//      stories.pages JSONB + cover_image + pets.photos JSONB), and
+//      a naive sweep risks deleting in-flight uploads. Revisit when
+//      we have a content-addressed naming scheme.
+// --------------------------------------------------------------------------
+
+interface DeletedJobsRow {
+  id: string;
+}
+interface ExpiredOrderRow {
+  id: string;
+}
+
+export const nightlyCleanupFn = inngest.createFunction(
+  {
+    id: "nightly-cleanup",
+    name: "Nightly cleanup",
+    triggers: [{ cron: "0 4 * * *" }],
+  },
+  async ({ step }) => {
+    // 1. Old terminal jobs.
+    const jobsDeleted = await step.run("delete-old-jobs", async () => {
+      const cutoff = new Date(
+        Date.now() - 30 * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const { data, error } = await supabaseAdmin()
+        .from("jobs")
+        .delete()
+        .in("status", ["done", "failed"])
+        .lt("updated_at", cutoff)
+        .select("id")
+        .returns<DeletedJobsRow[]>();
+      if (error) {
+        console.error("[nightly-cleanup] delete-old-jobs failed:", error);
+        return 0;
+      }
+      return data?.length ?? 0;
+    });
+
+    // 2. Stuck pre-fulfillment print_orders. We only touch rows that
+    // never got a stripe_session_id assigned — anything with a
+    // session id has gone through (or is going through) the Stripe
+    // webhook pipeline, and we don't want to second-guess that.
+    const ordersExpired = await step.run(
+      "expire-stuck-print-orders",
+      async () => {
+        const cutoff = new Date(
+          Date.now() - 48 * 60 * 60 * 1000
+        ).toISOString();
+        const { data, error } = await supabaseAdmin()
+          .from("print_orders")
+          .update({ status: "expired" })
+          .in("status", ["paid", "pending"])
+          .is("stripe_session_id", null)
+          .lt("created_at", cutoff)
+          .select("id")
+          .returns<ExpiredOrderRow[]>();
+        if (error) {
+          console.error(
+            "[nightly-cleanup] expire-stuck-print-orders failed:",
+            error
+          );
+          return 0;
+        }
+        const n = data?.length ?? 0;
+        if (n > 0) {
+          // Audit log so the admin queue surfaces the transition.
+          await supabaseAdmin()
+            .from("print_order_events")
+            .insert(
+              (data ?? []).map((r) => ({
+                order_id: r.id,
+                status: "expired",
+                note: "Auto-expired by nightly cleanup (>48h with no Stripe session).",
+              }))
+            );
+        }
+        return n;
+      }
+    );
+
+    // 3. Storage orphan sweep — TODO (see header comment).
+
+    return { jobsDeleted, ordersExpired };
+  }
+);
+
 export const allFunctions = [
   generateStoryFn,
   regenTextFn,
   assistTextFn,
   assistImageFn,
   assistInferFn,
+  nightlyCleanupFn,
 ];

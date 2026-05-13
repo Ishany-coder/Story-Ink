@@ -1,6 +1,9 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { fetchWithTimeout, isAllowedContentUrl, withTimeout } from "@/lib/http";
 import { getImageStyle, type ImageStyleId } from "@/lib/image-styles";
+import { assertGeminiGlobalCap } from "@/lib/rate-limit";
+
+export { GeminiDailyCapExceededError } from "@/lib/rate-limit";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -103,12 +106,15 @@ ${
 
   const generate = async (reprompt: boolean) =>
     withGeminiRetry(
-      () =>
-        withTimeout(
+      async () => {
+        const r = await withTimeout(
           model.generateContent(buildPrompt(reprompt)),
           GEMINI_TEXT_TIMEOUT_MS,
           "generateStoryText"
-        ),
+        );
+        assertSafeFinish(r, "generateStoryText");
+        return r;
+      },
       { label: "generateStoryText" }
     );
 
@@ -164,8 +170,8 @@ export async function regeneratePageText(
     .join("\n");
 
   const result = await withGeminiRetry(
-    () =>
-      withTimeout(
+    async () => {
+      const r = await withTimeout(
         model.generateContent(
           `You are revising one page of a children's storybook titled "${storyTitle}". Rewrite only page ${targetPageNumber} in a fresh way — a different turn of phrase, a new sensory detail — while keeping the plot beat, characters, and tone consistent with the surrounding pages. Keep it to 2-4 whimsical sentences suitable for illustration.
 
@@ -176,7 +182,10 @@ ${context}`
         ),
         GEMINI_TEXT_TIMEOUT_MS,
         "regeneratePageText"
-      ),
+      );
+      assertSafeFinish(r, "regeneratePageText");
+      return r;
+    },
     { label: "regeneratePageText" }
   );
 
@@ -305,8 +314,8 @@ export async function generatePageImage(
     parts.push({ text: intro });
 
     const result = await withGeminiRetry(
-      () =>
-        withTimeout(
+      async () => {
+        const r = await withTimeout(
           model.generateContent({
             contents: [{ role: "user", parts }],
             generationConfig: {
@@ -318,7 +327,10 @@ export async function generatePageImage(
           }),
           GEMINI_IMAGE_TIMEOUT_MS,
           "generatePageImage"
-        ),
+        );
+        assertSafeFinish(r, "generatePageImage");
+        return r;
+      },
       { label: "generatePageImage" }
     );
 
@@ -337,6 +349,12 @@ export async function generatePageImage(
     );
     return generatePlaceholder(pageText);
   } catch (err) {
+    // Re-throw safety blocks so the Inngest function's onFailure
+    // handler can map them to a user-facing "rewrite your prompt"
+    // message. The placeholder image fallback is only appropriate
+    // for transient infra failures — a content block is the user's
+    // fault and we want them to know.
+    if (err instanceof GeminiSafetyBlockedError) throw err;
     console.error("[gemini] image generation failed:", err);
     return generatePlaceholder(pageText);
   }
@@ -393,6 +411,84 @@ export class GeminiRateLimitError extends Error {
   }
 }
 
+// Thrown when Gemini's safety filter rejects the prompt or its own
+// response (finishReason: SAFETY / RECITATION / BLOCKLIST /
+// PROHIBITED_CONTENT / SPII / etc.). These are deterministic at the
+// content level — retrying with identical input will fail identically
+// — so the Inngest onFailure handler maps them to a user-facing
+// "rewrite your prompt" message rather than burning retries.
+export class GeminiSafetyBlockedError extends Error {
+  // Raw reason string from Gemini for debugging (SAFETY / RECITATION /
+  // BLOCKLIST / etc.). Surfaced in logs but never in the user message.
+  reason: string;
+  // Optional context label (which call site tripped it) so logs are
+  // easy to grep — "generateStoryText", "generatePageImage", etc.
+  label: string;
+  constructor(reason: string, label: string) {
+    super(
+      "Your prompt was blocked by the safety filter. Please try a gentler wording — for example, avoid graphic injuries or distressing content."
+    );
+    this.name = "GeminiSafetyBlockedError";
+    this.reason = reason;
+    this.label = label;
+  }
+}
+
+// Set of finishReason strings we treat as a hard "content was blocked,
+// don't retry" signal. STOP is normal completion. MAX_TOKENS is a
+// length cutoff — not a safety block, retrying with a higher limit
+// could help, but it's not what we're handling here. Anything in this
+// set raises a GeminiSafetyBlockedError that bubbles out of any retry
+// loop.
+const SAFETY_FINISH_REASONS = new Set([
+  "SAFETY",
+  "RECITATION",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII", // sensitive PII filter
+  "IMAGE_SAFETY",
+  "LANGUAGE",
+]);
+
+// Inspect a Gemini response and throw if its finishReason indicates a
+// safety / policy block. Called immediately after each
+// `model.generateContent()` resolves — before we read .text() or .parts
+// — so we fail fast with a typed error instead of bubbling a confusing
+// "no text" / "no inlineData" downstream.
+//
+// The SDK shape is { response: { candidates?: [{ finishReason?: string }] } }
+// and we accept a loose `unknown` here because the typed
+// GenerateContentResult only narrows `response` to have `text()` —
+// `candidates` is on the underlying generated content. Keeping the
+// signature `unknown` avoids a TS-2339 cascade for callers that use
+// the SDK's wrapped type.
+function assertSafeFinish(result: unknown, label: string): void {
+  const candidates = (
+    result as {
+      response?: {
+        candidates?: Array<{ finishReason?: string }>;
+        promptFeedback?: { blockReason?: string };
+      };
+    }
+  )?.response?.candidates;
+  const first = candidates?.[0];
+  const reason = first?.finishReason;
+  if (reason && reason !== "STOP" && SAFETY_FINISH_REASONS.has(reason)) {
+    throw new GeminiSafetyBlockedError(reason, label);
+  }
+  // Some failures show up as a prompt-level block (no candidates at
+  // all, just a `promptFeedback.blockReason`). Treat those as the
+  // same class of failure.
+  const promptBlock = (
+    result as {
+      response?: { promptFeedback?: { blockReason?: string } };
+    }
+  )?.response?.promptFeedback?.blockReason;
+  if (!first && promptBlock) {
+    throw new GeminiSafetyBlockedError(promptBlock, label);
+  }
+}
+
 function is429(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const maybe = err as { status?: number; message?: string };
@@ -404,6 +500,14 @@ async function withGeminiRetry<T>(
   fn: () => Promise<T>,
   opts: { label: string; maxAttempts?: number } = { label: "gemini" }
 ): Promise<T> {
+  // Global daily ceiling. Every Gemini call (text or image) routes
+  // through here, so this is the single chokepoint where we count
+  // calls toward GEMINI_DAILY_CAP. Once exceeded, this throws
+  // GeminiDailyCapExceededError before we burn a network round-trip.
+  // Routes can map that error to a 503 "Service paused for the day,
+  // try again tomorrow." response.
+  await assertGeminiGlobalCap();
+
   const maxAttempts = opts.maxAttempts ?? 3;
   const delays = [2000, 5000];
   let lastErr: unknown;
@@ -412,6 +516,10 @@ async function withGeminiRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
+      // Safety / policy blocks are deterministic on the input — they
+      // will fail identically on every retry. Bail immediately and
+      // let the route surface a "please rewrite your prompt" message.
+      if (err instanceof GeminiSafetyBlockedError) throw err;
       if (!is429(err) || attempt === maxAttempts - 1) break;
       const wait = delays[attempt] ?? 5000;
       console.warn(
@@ -528,12 +636,15 @@ ${context}`,
     : [textPart];
 
   const result = await withGeminiRetry(
-    () =>
-      withTimeout(
+    async () => {
+      const r = await withTimeout(
         model.generateContent({ contents: [{ role: "user", parts }] }),
         GEMINI_TEXT_TIMEOUT_MS,
         "assistRegenerateText"
-      ),
+      );
+      assertSafeFinish(r, "assistRegenerateText");
+      return r;
+    },
     { label: "assistRegenerateText" }
   );
 
@@ -590,8 +701,8 @@ export async function assistRegenerateImage(
     : [{ text: intro }];
 
   const result = await withGeminiRetry(
-    () =>
-      withTimeout(
+    async () => {
+      const r = await withTimeout(
         model.generateContent({
           contents: [{ role: "user", parts }],
           generationConfig: {
@@ -601,7 +712,10 @@ export async function assistRegenerateImage(
         }),
         GEMINI_IMAGE_TIMEOUT_MS,
         "assistRegenerateImage"
-      ),
+      );
+      assertSafeFinish(r, "assistRegenerateImage");
+      return r;
+    },
     { label: "assistRegenerateImage" }
   );
 
@@ -693,12 +807,15 @@ Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "
 
   try {
     const result = await withGeminiRetry(
-      () =>
-        withTimeout(
+      async () => {
+        const r = await withTimeout(
           model.generateContent({ contents: [{ role: "user", parts }] }),
           GEMINI_TEXT_TIMEOUT_MS,
           "classifyAssistIntent"
-        ),
+        );
+        assertSafeFinish(r, "classifyAssistIntent");
+        return r;
+      },
       { label: "classifyAssistIntent" }
     );
     const raw = result.response.text();
@@ -716,6 +833,10 @@ Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "
     // Rate limit: re-throw so the route can choose to fall back to "both"
     // without a classifier rather than trying more Gemini calls on top.
     if (err instanceof GeminiRateLimitError) throw err;
+    // Safety block: re-throw so the route surfaces the typed error
+    // and the user sees "rewrite your prompt" instead of silently
+    // re-firing both downstream Gemini calls that would also block.
+    if (err instanceof GeminiSafetyBlockedError) throw err;
     // Parse failures and other transient errors: fall back to the safe
     // default of regenerating both text and image.
     console.error("[gemini] classifyAssistIntent failed:", err);

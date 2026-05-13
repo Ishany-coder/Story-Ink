@@ -14,6 +14,7 @@
 
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { reportError } from "@/lib/sentry";
 
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({
@@ -39,7 +40,7 @@ export async function middleware(request: NextRequest) {
 
     await supabase.auth.getUser();
   } catch (err) {
-    console.error("[middleware] auth refresh failed:", err);
+    reportError(err, "middleware.auth-refresh");
   }
 
   return response;

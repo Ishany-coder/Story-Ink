@@ -4,7 +4,9 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
+import { isBetaTesting } from "@/lib/beta-flag";
 import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 
 // Digital tier checkout. Unlocks online reading + PDF download for the
 // owner's own story. No print pipeline, no shipping address, no Lulu
@@ -21,10 +23,20 @@ interface Body {
 }
 
 export async function POST(request: Request) {
+  // Closed-beta kill switch — every payment surface 404s. Beta
+  // readers get full access automatically (see src/app/read/[id]).
+  if (isBetaTesting()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.checkout,
+    key: userKey("checkout", user.id),
+  });
+  if (limited) return limited;
   const body = (await request.json().catch(() => ({}))) as Body;
   const storyId = typeof body.storyId === "string" ? body.storyId : "";
   if (!storyId) {

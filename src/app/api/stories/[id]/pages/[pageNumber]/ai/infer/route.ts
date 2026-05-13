@@ -3,6 +3,10 @@ import { createJob } from "@/lib/jobs";
 import { inngest } from "@/inngest/client";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
+import {
+  containsProfanity,
+  PROFANITY_REJECTION_MESSAGE,
+} from "@/lib/profanity";
 import type { AssistTarget } from "@/lib/gemini";
 
 export const maxDuration = 10;
@@ -55,9 +59,25 @@ export async function POST(
   if (!userPrompt) {
     return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
   }
+  if (containsProfanity(userPrompt)) {
+    return NextResponse.json(
+      { error: PROFANITY_REJECTION_MESSAGE },
+      { status: 400 }
+    );
+  }
   const globalSystemPrompt = body.globalSystemPrompt
     ? String(body.globalSystemPrompt).slice(0, MAX_SYSTEM_PROMPT_LEN)
     : null;
+  // globalSystemPrompt is concatenated into every Gemini call by
+  // composeSystemPrompt. Gate it through the same filter so users
+  // can't bypass the userPrompt check by moving offending content
+  // into the localStorage-backed global prompt.
+  if (globalSystemPrompt && containsProfanity(globalSystemPrompt)) {
+    return NextResponse.json(
+      { error: PROFANITY_REJECTION_MESSAGE },
+      { status: 400 }
+    );
+  }
 
   const jobId = await createJob("assist.infer", user.id);
   await inngest.send({

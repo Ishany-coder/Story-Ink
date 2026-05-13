@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Story } from "@/lib/types";
@@ -224,13 +225,17 @@ export default function ShipStoryPage({
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-3xl border-4 border-cream-300 bg-cream-50 p-4 shadow-sm">
-          <div className="aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-cream-200 to-cream-100">
+          <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-gradient-to-br from-cream-200 to-cream-100">
             {preview.cover ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <Image
                 src={preview.cover}
-                alt={story.title}
-                className="h-full w-full object-cover"
+                alt={`Cover of "${story.title}"`}
+                fill
+                sizes="(max-width: 1024px) 100vw, 512px"
+                className="object-cover"
+                // Cover is the headline element of the ship page —
+                // first thing the buyer sees, prioritize the fetch.
+                priority
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-sm font-bold text-ink-300">

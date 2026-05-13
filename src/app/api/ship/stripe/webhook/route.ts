@@ -2,16 +2,22 @@ import { NextResponse } from "next/server";
 import {
   constructWebhookEvent,
   retrieveCheckoutSession,
+  stripe,
 } from "@/lib/stripe";
 import { fulfillFromSession } from "@/lib/ship-fulfill";
 import { supabaseAdmin } from "@/lib/supabase";
+import { reportError } from "@/lib/sentry";
 import type Stripe from "stripe";
 
 // Authoritative Stripe webhook. Configure it in the Stripe dashboard
 // against this URL (e.g. https://yourapp.com/api/ship/stripe/webhook)
-// with the event type `checkout.session.completed`. Stripe signs every
-// delivery with STRIPE_WEBHOOK_SECRET — we verify here and refuse
-// unsigned or tampered traffic.
+// with these event types subscribed:
+//   - checkout.session.completed     → fulfillment (PDFs, mark received)
+//   - checkout.session.expired       → mark print_orders.status = "expired"
+//   - charge.refunded                → mark "refunded", revoke digital unlock
+//   - charge.dispute.created         → mark "disputed", admin investigates
+// Stripe signs every delivery with STRIPE_WEBHOOK_SECRET — we verify
+// here and refuse unsigned or tampered traffic.
 //
 // On success we hand off to `fulfillFromSession`, which is idempotent
 // on stripe_session_id. Stripe retries failed deliveries with backoff;
@@ -31,8 +37,9 @@ export async function POST(request: Request) {
 
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
-    console.error(
-      "[stripe/webhook] STRIPE_WEBHOOK_SECRET is not set — refusing delivery"
+    reportError(
+      new Error("STRIPE_WEBHOOK_SECRET not configured"),
+      "stripe.webhook.no-secret"
     );
     return NextResponse.json(
       { error: "Webhook secret not configured" },
@@ -56,8 +63,17 @@ export async function POST(request: Request) {
     );
   }
 
-  // We only act on paid checkout sessions. Other event types ack with
-  // 200 so Stripe stops delivering them (we can widen the list later).
+  // Route on event type. Anything we don't recognize is ack'd with 200
+  // so Stripe stops re-delivering it.
+  if (event.type === "charge.refunded") {
+    return handleChargeRefunded(event.data.object as Stripe.Charge);
+  }
+  if (event.type === "charge.dispute.created") {
+    return handleDisputeCreated(event.data.object as Stripe.Dispute);
+  }
+  if (event.type === "checkout.session.expired") {
+    return handleSessionExpired(event.data.object as Stripe.Checkout.Session);
+  }
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true, ignored: event.type });
   }
@@ -71,10 +87,7 @@ export async function POST(request: Request) {
   try {
     session = await retrieveCheckoutSession(sessionPartial.id);
   } catch (err) {
-    console.error(
-      "[stripe/webhook] failed to fetch expanded session; will retry:",
-      err
-    );
+    reportError(err, "stripe.webhook.retrieve-session");
     // 5xx => Stripe retries. Transient network errors shouldn't drop
     // the order on the floor.
     return NextResponse.json({ error: "Temporary" }, { status: 503 });
@@ -112,7 +125,7 @@ export async function POST(request: Request) {
       .eq("id", storyId)
       .maybeSingle<{ user_id: string | null }>();
     if (storyErr) {
-      console.error("[stripe/webhook] story lookup failed:", storyErr);
+      reportError(storyErr, "stripe.webhook.story-lookup");
       return NextResponse.json(
         { error: "Couldn't validate story owner" },
         { status: 503 }
@@ -148,7 +161,7 @@ export async function POST(request: Request) {
       .update({ digital_unlocked: true })
       .eq("id", storyId);
     if (updateErr) {
-      console.error("[stripe/webhook] digital unlock failed:", updateErr);
+      reportError(updateErr, "stripe.webhook.digital-unlock");
       return NextResponse.json(
         { error: "Couldn't unlock digital story" },
         { status: 503 }
@@ -164,10 +177,9 @@ export async function POST(request: Request) {
     // 200 so we don't spam retries on orders that will never recover;
     // they're already logged and flagged on the print_orders row.
     const retryable = outcome.status >= 500 && outcome.status !== 501;
-    console.error(
-      "[stripe/webhook] fulfill failed:",
-      outcome.status,
-      outcome.error
+    reportError(
+      new Error(`fulfill failed: ${outcome.status} ${outcome.error}`),
+      "stripe.webhook.fulfill"
     );
     if (retryable) {
       return NextResponse.json(
@@ -191,5 +203,220 @@ export async function POST(request: Request) {
     orderId: outcome.orderId,
     status: outcome.status,
     alreadyProcessed: outcome.alreadyProcessed,
+  });
+}
+
+// Pull the payment_intent id off a Stripe charge. The PI may be
+// inlined as a string or expanded as an object depending on how the
+// event arrived.
+function chargePaymentIntentId(charge: Stripe.Charge): string | null {
+  return typeof charge.payment_intent === "string"
+    ? charge.payment_intent
+    : charge.payment_intent?.id ?? null;
+}
+
+// Older fallback path: look the session up via Stripe's API. Used
+// only when the print_orders row has no persisted payment_intent_id
+// (orders that pre-date that column). Returns the session id so the
+// caller can keep using the existing stripe_session_id index.
+async function resolveSessionIdForCharge(
+  charge: Stripe.Charge
+): Promise<string | null> {
+  const paymentIntentId = chargePaymentIntentId(charge);
+  if (!paymentIntentId) return null;
+  try {
+    const sessions = await stripe().checkout.sessions.list({
+      payment_intent: paymentIntentId,
+      limit: 1,
+    });
+    return sessions.data[0]?.id ?? null;
+  } catch (err) {
+    reportError(err, "stripe.webhook.session-lookup");
+    return null;
+  }
+}
+
+// Find the print_orders row for a charge. Tries the persisted
+// payment_intent_id first (post-fix orders), then falls back to the
+// stripe_session_id resolution via Stripe's API (pre-fix orders).
+async function findOrderForCharge(
+  charge: Stripe.Charge
+): Promise<{ id: string; story_id: string | null; status: string } | null> {
+  const admin = supabaseAdmin();
+  const paymentIntentId = chargePaymentIntentId(charge);
+  if (paymentIntentId) {
+    const { data } = await admin
+      .from("print_orders")
+      .select("id, story_id, status")
+      .eq("payment_intent_id", paymentIntentId)
+      .maybeSingle<{ id: string; story_id: string | null; status: string }>();
+    if (data) return data;
+  }
+  // Legacy fallback for orders that pre-date the payment_intent_id
+  // column.
+  const sessionId = await resolveSessionIdForCharge(charge);
+  if (!sessionId) return null;
+  const { data } = await admin
+    .from("print_orders")
+    .select("id, story_id, status")
+    .eq("stripe_session_id", sessionId)
+    .maybeSingle<{ id: string; story_id: string | null; status: string }>();
+  return data ?? null;
+}
+
+async function handleChargeRefunded(charge: Stripe.Charge) {
+  const order = await findOrderForCharge(charge);
+  if (!order) {
+    // No matching order — this charge isn't ours, or it pre-dates
+    // any persisted record. Ack so Stripe stops retrying.
+    return NextResponse.json({
+      received: true,
+      ignored: "charge.refunded — no matching order row",
+    });
+  }
+
+  const admin = supabaseAdmin();
+
+  const { error: updateErr } = await admin
+    .from("print_orders")
+    .update({ status: "refunded" })
+    .eq("id", order.id);
+  if (updateErr) {
+    reportError(updateErr, "stripe.webhook.refund-status-update");
+    return NextResponse.json(
+      { error: "Couldn't mark order refunded" },
+      { status: 503 }
+    );
+  }
+
+  // Revoke the digital unlock so the refunded purchaser loses online
+  // access. We do this unconditionally — if the refund was partial,
+  // the admin can manually re-enable from the orders page.
+  // Skip if story_id was cleared (e.g. account deletion already
+  // hard-deleted the story; FK is ON DELETE SET NULL).
+  if (order.story_id) {
+    const { error: unlockErr } = await admin
+      .from("stories")
+      .update({ digital_unlocked: false })
+      .eq("id", order.story_id);
+    if (unlockErr) {
+      reportError(unlockErr, "stripe.webhook.refund-digital-revoke");
+    }
+  }
+
+  await admin.from("print_order_events").insert({
+    order_id: order.id,
+    status: "refunded",
+    note: `Stripe charge ${charge.id} refunded — digital_unlocked revoked.`,
+  });
+
+  return NextResponse.json({
+    received: true,
+    kind: "refund",
+    orderId: order.id,
+  });
+}
+
+async function handleDisputeCreated(dispute: Stripe.Dispute) {
+  const chargeId =
+    typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id;
+  if (!chargeId) {
+    return NextResponse.json({
+      received: true,
+      ignored: "dispute.created — no charge id",
+    });
+  }
+
+  let charge: Stripe.Charge;
+  try {
+    charge = await stripe().charges.retrieve(chargeId);
+  } catch (err) {
+    reportError(err, "stripe.webhook.dispute-charge-fetch");
+    return NextResponse.json({ error: "Temporary" }, { status: 503 });
+  }
+  // Same dual-lookup as the refund path: payment_intent_id first,
+  // fall back to stripe_session_id for pre-fix orders.
+  const order = await findOrderForCharge(charge);
+  if (!order) {
+    return NextResponse.json({
+      received: true,
+      ignored: "dispute.created — no matching order row",
+    });
+  }
+
+  const admin = supabaseAdmin();
+
+  const { error: updateErr } = await admin
+    .from("print_orders")
+    .update({ status: "disputed" })
+    .eq("id", order.id);
+  if (updateErr) {
+    reportError(updateErr, "stripe.webhook.dispute-status-update");
+    return NextResponse.json(
+      { error: "Couldn't mark order disputed" },
+      { status: 503 }
+    );
+  }
+
+  await admin.from("print_order_events").insert({
+    order_id: order.id,
+    status: "disputed",
+    note: `Stripe dispute ${dispute.id} (${dispute.reason ?? "unknown reason"}) opened — fulfillment paused.`,
+  });
+
+  return NextResponse.json({
+    received: true,
+    kind: "dispute",
+    orderId: order.id,
+  });
+}
+
+async function handleSessionExpired(session: Stripe.Checkout.Session) {
+  const admin = supabaseAdmin();
+  const { data: order } = await admin
+    .from("print_orders")
+    .select("id, status")
+    .eq("stripe_session_id", session.id)
+    .maybeSingle<{ id: string; status: string }>();
+
+  if (!order) {
+    // No pre-created row for this session — just log and ack.
+    return NextResponse.json({
+      received: true,
+      ignored: "session.expired — no matching order row",
+    });
+  }
+
+  // Only flip to expired from a pre-fulfillment state; if the user
+  // somehow paid and we already advanced the order, leave it alone.
+  if (!["pending", "paid"].includes(order.status)) {
+    return NextResponse.json({
+      received: true,
+      ignored: `session.expired — order already in '${order.status}'`,
+    });
+  }
+
+  const { error: updateErr } = await admin
+    .from("print_orders")
+    .update({ status: "expired" })
+    .eq("id", order.id);
+  if (updateErr) {
+    reportError(updateErr, "stripe.webhook.expire-status-update");
+    return NextResponse.json(
+      { error: "Couldn't mark order expired" },
+      { status: 503 }
+    );
+  }
+
+  await admin.from("print_order_events").insert({
+    order_id: order.id,
+    status: "expired",
+    note: `Checkout session ${session.id} expired before payment.`,
+  });
+
+  return NextResponse.json({
+    received: true,
+    kind: "expired",
+    orderId: order.id,
   });
 }

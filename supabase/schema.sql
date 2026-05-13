@@ -293,7 +293,27 @@ create policy "custom layouts delete by owner"
 
 create table if not exists public.print_orders (
   id uuid primary key default gen_random_uuid(),
+  -- story_id starts NOT NULL at insert time; the FK is flipped to
+  -- ON DELETE SET NULL below so that retained / anonymized order rows
+  -- (e.g. shipped books that survive an account deletion for tax /
+  -- Stripe reconciliation) keep their non-PII columns even after the
+  -- underlying story is hard-deleted. On a brand-new DB the FK is
+  -- created here as ON DELETE CASCADE; the idempotent ALTER beneath
+  -- this CREATE flips it to SET NULL on every re-run.
   story_id uuid not null references public.stories(id) on delete cascade,
+  -- Known status values (open value space — no CHECK constraint):
+  --   pending     — row pre-created before Stripe Checkout completed
+  --   paid        — payment succeeded; awaiting fulfillment build
+  --   building    — fulfillment worker has claimed the row; building PDFs
+  --   received    — PDFs ready; sitting in admin queue for manual ship
+  --   in_progress — admin has placed the print order with the vendor
+  --   shipped     — admin marked the order as shipped (anonymized on
+  --                 account deletion; retained for tax / Stripe records)
+  --   delivered   — admin marked the order as delivered
+  --   failed      — PDF build or admin step failed; needs investigation
+  --   refunded    — Stripe charge.refunded webhook; digital unlock revoked
+  --   disputed    — Stripe charge.dispute.created webhook; fulfillment paused
+  --   expired     — Stripe checkout.session.expired webhook (pre-payment)
   status text not null default 'pending',
   amount_usd numeric(10, 2),
   paypal_capture_id text,
@@ -322,8 +342,33 @@ alter table public.print_orders
   -- legacy rows valid.
   add column if not exists quantity int not null default 1;
 
+-- Flip story_id FK to ON DELETE SET NULL and drop NOT NULL so that
+-- retained / anonymized order rows survive a story delete. The /api/
+-- account DELETE handler relies on this: it nulls out story_id on
+-- shipped orders before deleting the user's stories so the historical
+-- tax / Stripe records aren't cascade-wiped. Idempotent — safe to re-
+-- run on fresh and existing deployments.
+alter table public.print_orders
+  drop constraint if exists print_orders_story_id_fkey;
+alter table public.print_orders
+  add constraint print_orders_story_id_fkey
+  foreign key (story_id) references public.stories(id) on delete set null;
+alter table public.print_orders alter column story_id drop not null;
+
 create unique index if not exists print_orders_stripe_session_id_idx
   on public.print_orders (stripe_session_id) where stripe_session_id is not null;
+
+-- Persisted Stripe payment_intent id. Captured during fulfillment
+-- (the PI is only assigned once Checkout completes) so refund and
+-- dispute webhooks can look up the order directly instead of going
+-- through `stripe.checkout.sessions.list({ payment_intent })`, which
+-- returns [] for older sessions and async-completed PIs. The session-
+-- list fallback is still wired in the webhook for orders that pre-
+-- date this column.
+alter table public.print_orders
+  add column if not exists payment_intent_id text;
+create index if not exists print_orders_payment_intent_id_idx
+  on public.print_orders (payment_intent_id);
 
 create index if not exists print_orders_story_id_idx on public.print_orders (story_id);
 create index if not exists print_orders_user_id_idx on public.print_orders (user_id);

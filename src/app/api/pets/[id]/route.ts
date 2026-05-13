@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getCurrentUser } from "@/lib/supabase-server";
 import {
+  containsProfanity,
+  PROFANITY_REJECTION_MESSAGE,
+} from "@/lib/profanity";
+import {
   PET_SPECIES,
   type Pet,
   type PetMode,
@@ -146,10 +150,19 @@ export async function PATCH(request: Request, ctx: Ctx) {
     patch.age = body.age === null ? null : sanitizeStr(body.age, 40);
   }
   if (body.personality_notes !== undefined) {
-    patch.personality_notes =
+    const v =
       body.personality_notes === null
         ? null
         : sanitizeStr(body.personality_notes, 2000);
+    // personality_notes is seeded into the Gemini system prompt on
+    // every pet-story generation — same filter as user prompts.
+    if (v && containsProfanity(v)) {
+      return NextResponse.json(
+        { error: PROFANITY_REJECTION_MESSAGE },
+        { status: 400 }
+      );
+    }
+    patch.personality_notes = v;
   }
 
   // Mode + passed_at interact: switching to memorial requires a date,
@@ -208,10 +221,20 @@ export async function PATCH(request: Request, ctx: Ctx) {
   }
 
   if (body.dedication_text !== undefined) {
-    patch.dedication_text =
+    const v =
       body.dedication_text === null
         ? null
         : sanitizeStr(body.dedication_text, 600);
+    // dedication_text is rendered onto the printed dedication page
+    // for memorial books. Same filter as everything user-supplied
+    // that ships out the door.
+    if (v && containsProfanity(v)) {
+      return NextResponse.json(
+        { error: PROFANITY_REJECTION_MESSAGE },
+        { status: 400 }
+      );
+    }
+    patch.dedication_text = v;
   }
 
   if (body.quirks !== undefined) {
@@ -219,6 +242,14 @@ export async function PATCH(request: Request, ctx: Ctx) {
     if (quirks === null) {
       return NextResponse.json(
         { error: `Invalid quirks payload (max ${MAX_QUIRKS} entries).` },
+        { status: 400 }
+      );
+    }
+    // Quirk answers are rendered into the Gemini system prompt
+    // verbatim (see pet-prompt.ts) — gate them.
+    if (quirks.some((q) => containsProfanity(q.answer))) {
+      return NextResponse.json(
+        { error: PROFANITY_REJECTION_MESSAGE },
         { status: 400 }
       );
     }

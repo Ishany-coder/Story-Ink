@@ -3,9 +3,11 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { createCheckoutSession } from "@/lib/stripe";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
+import { isBetaTesting } from "@/lib/beta-flag";
 import { priceHardcoverUsd } from "@/lib/pricing";
 import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
 import { isShippingAddress, type ShippingAddress } from "@/lib/shipping";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 import type { Story, StoryPage } from "@/lib/types";
 
 // Creates a Stripe Checkout Session. The client redirects to the returned
@@ -45,10 +47,20 @@ function parseQuantity(raw: unknown): number {
 }
 
 export async function POST(request: Request) {
+  // Closed-beta kill switch — match /ship/[id]'s notFound() behavior
+  // so the API surface disappears in lockstep with the UI.
+  if (isBetaTesting()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.checkout,
+    key: userKey("checkout", user.id),
+  });
+  if (limited) return limited;
   const body = (await request.json().catch(() => ({}))) as Body;
   const storyId = typeof body.storyId === "string" ? body.storyId : "";
   if (!storyId) {
@@ -190,6 +202,23 @@ async function createAdminOrder(args: {
   reason: "admin" | "bypass_stripe_env";
 }): Promise<string> {
   const admin = supabaseAdmin();
+
+  // Guard: if the story has any existing order in a disputed or
+  // refunded state, refuse to create a new admin order. The admin
+  // should resolve the dispute / refund first before issuing a new
+  // freebie that could be mistaken for the disputed one.
+  const { data: blocking } = await admin
+    .from("print_orders")
+    .select("id, status")
+    .eq("story_id", args.storyId)
+    .in("status", ["disputed", "refunded"])
+    .limit(1)
+    .maybeSingle<{ id: string; status: string }>();
+  if (blocking) {
+    throw new Error(
+      `Refusing to create admin order — existing order ${blocking.id} is in '${blocking.status}' state.`
+    );
+  }
 
   // Pull the full story for PDF generation. We're already past the
   // assertOwnsStory check, so RLS is moot here — admin uses the

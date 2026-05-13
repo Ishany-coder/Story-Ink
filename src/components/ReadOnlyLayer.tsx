@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   CANVAS_SIZE,
   type ImageLayer,
@@ -50,16 +51,42 @@ export default function ReadOnlyLayer({ layer }: { layer: Layer }) {
 
   const im = layer as ImageLayer;
   const fit = im.source === "layout" ? "cover" : "contain";
+  // Layout-placed images are decorative scaffolding (template artwork);
+  // user-placed images are content the reader actually wants screen
+  // readers to announce. Keep layout images empty-alt so they're
+  // skipped, but expose a meaningful default for user images.
+  const altText = im.source === "layout" ? "" : "Illustration";
+  // Data URLs (mid-upload drafts) bypass next/image — its loader
+  // requires a real URL. Once persisted to Supabase Storage we get
+  // the optimized pipeline + responsive sizes automatically.
+  const isDataUrl = im.src.startsWith("data:");
+  if (isDataUrl) {
+    return (
+      <div style={style}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={im.src}
+          alt={altText}
+          draggable={false}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: fit,
+            userSelect: "none",
+          }}
+        />
+      </div>
+    );
+  }
   return (
-    <div style={style}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+    <div style={{ ...style, overflow: "hidden" }}>
+      <Image
         src={im.src}
-        alt=""
+        alt={altText}
+        fill
+        sizes="(max-width: 768px) 100vw, 768px"
         draggable={false}
         style={{
-          width: "100%",
-          height: "100%",
           objectFit: fit,
           userSelect: "none",
         }}

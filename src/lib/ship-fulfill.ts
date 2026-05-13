@@ -25,6 +25,9 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import { buildAndUploadPrintPdfs } from "@/lib/print-pdf";
 import { unpackAddressMetadata } from "@/lib/stripe";
+import { reportError } from "@/lib/sentry";
+import { sendEmail } from "@/lib/email";
+import { orderConfirmation } from "@/lib/email-templates/order-confirmation";
 import type { Pet, Story } from "@/lib/types";
 import type Stripe from "stripe";
 
@@ -104,6 +107,19 @@ export async function fulfillFromSession(
     };
   }
 
+  // Refuse to advance a refunded / disputed / expired order. These are
+  // terminal-ish states set by the Stripe webhook (charge.refunded,
+  // charge.dispute.created, checkout.session.expired) and we must not
+  // build PDFs or move the order toward fulfillment under any of them.
+  if (existing && ["refunded", "disputed", "expired"].includes(existing.status)) {
+    return {
+      ok: false,
+      status: 409,
+      error: `Order is in '${existing.status}' state — refusing to advance to fulfillment.`,
+      orderId: existing.id,
+    };
+  }
+
   // Fetch the full story for PDF generation. Use the admin client so
   // we bypass RLS — the webhook path has no user session, and the
   // confirm path has already verified ownership before getting here.
@@ -113,6 +129,7 @@ export async function fulfillFromSession(
     .eq("id", storyId)
     .single<Story>();
   if (fetchErr || !story) {
+    reportError(fetchErr ?? new Error("Story not found"), "ship-fulfill.story-fetch");
     return { ok: false, status: 404, error: "Story not found" };
   }
 
@@ -120,6 +137,18 @@ export async function fulfillFromSession(
     typeof session.amount_total === "number"
       ? session.amount_total / 100
       : null;
+
+  // Stripe Checkout only assigns a PaymentIntent once the session
+  // completes; retrieveCheckoutSession() is called with
+  // expand:["payment_intent"] so `session.payment_intent` is either
+  // the expanded object or its string id (older API responses).
+  // Persisting it on the print_orders row lets the refund/dispute
+  // webhook look up the order directly without the fragile
+  // checkout.sessions.list({ payment_intent }) round-trip.
+  const paymentIntentId =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : session.payment_intent?.id ?? null;
 
   // Persist the address on the order so admin can see where to ship
   // without re-pulling from Stripe later. Sensitive PII so we keep
@@ -132,6 +161,17 @@ export async function fulfillFromSession(
   let orderId: string;
   if (existing) {
     orderId = existing.id;
+    // Backfill payment_intent_id on a pre-existing row (e.g. one we
+    // pre-created at checkout time and now we have the PI after the
+    // session completed). Best-effort: if the update fails the
+    // webhook session-list fallback still kicks in.
+    if (paymentIntentId) {
+      await admin
+        .from("print_orders")
+        .update({ payment_intent_id: paymentIntentId })
+        .eq("id", orderId)
+        .is("payment_intent_id", null);
+    }
   } else {
     const { data: inserted, error: insertErr } = await admin
       .from("print_orders")
@@ -140,6 +180,7 @@ export async function fulfillFromSession(
         status: "paid",
         amount_usd: amountUsd,
         stripe_session_id: sessionId,
+        payment_intent_id: paymentIntentId,
         shipping_address: addressJson,
         quantity,
         user_id: (story as Story & { user_id?: string | null }).user_id ?? null,
@@ -167,7 +208,7 @@ export async function fulfillFromSession(
         };
       }
       if (!retry) {
-        console.error("[ship-fulfill] insert failed:", insertErr);
+        reportError(insertErr, "ship-fulfill.insert");
         return {
           ok: false,
           status: 500,
@@ -194,7 +235,7 @@ export async function fulfillFromSession(
     .maybeSingle<{ id: string }>();
 
   if (claimErr) {
-    console.error("[ship-fulfill] claim failed:", claimErr);
+    reportError(claimErr, "ship-fulfill.claim");
     return {
       ok: false,
       status: 500,
@@ -255,7 +296,7 @@ export async function fulfillFromSession(
     interiorUrl = built.interiorUrl;
     coverUrl = built.coverUrl;
   } catch (err) {
-    console.error("[ship-fulfill] pdf build failed:", err);
+    reportError(err, "ship-fulfill.pdf-build");
     await admin
       .from("print_orders")
       .update({ status: "failed" })
@@ -295,10 +336,57 @@ export async function fulfillFromSession(
     .update({ digital_unlocked: true })
     .eq("id", storyId);
 
+  // Fire the customer-facing order confirmation email. Failures here
+  // don't roll back fulfillment — `sendEmail` swallows + reports its
+  // own errors, and the admin queue is still the source of truth.
+  // The companion "shipped" email is fired from
+  // /api/orders/[id]/status when the admin advances the order to
+  // 'shipped'.
+  await sendOrderConfirmationEmail({
+    userId: (story as Story & { user_id?: string | null }).user_id ?? null,
+    storyTitle: story.title,
+    orderId,
+    pageCount: story.page_count ?? 0,
+    amountUsd: amountUsd ?? 0,
+  });
+
   return {
     ok: true,
     orderId,
     status: "received",
     alreadyProcessed: false,
   };
+}
+
+// Look up the buyer's email via the Supabase auth admin API and send
+// the order confirmation. Best-effort: any failure is logged through
+// `reportError` (inside sendEmail) but never throws — fulfillment has
+// already advanced past the point where it could be rolled back.
+async function sendOrderConfirmationEmail(args: {
+  userId: string | null;
+  storyTitle: string;
+  orderId: string;
+  pageCount: number;
+  amountUsd: number;
+}): Promise<void> {
+  if (!args.userId) return;
+  try {
+    const admin = supabaseAdmin();
+    const { data, error } = await admin.auth.admin.getUserById(args.userId);
+    if (error || !data.user?.email) return;
+    const tpl = orderConfirmation({
+      storyTitle: args.storyTitle,
+      orderId: args.orderId,
+      pageCount: args.pageCount,
+      amountUsd: args.amountUsd,
+    });
+    await sendEmail({
+      to: data.user.email,
+      subject: tpl.subject,
+      html: tpl.html,
+      text: tpl.text,
+    });
+  } catch (err) {
+    reportError(err, "ship-fulfill.send-order-confirmation");
+  }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Lock } from "lucide-react";
 import type { Story } from "@/lib/types";
@@ -68,12 +69,20 @@ export default function DigitalUpsell({
             className="relative overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-sm"
           >
             {page.imageUrl ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={page.imageUrl}
-                alt={`Page ${page.pageNumber}`}
-                className="aspect-square w-full object-cover"
-              />
+              <div className="relative aspect-square w-full">
+                <Image
+                  src={page.imageUrl}
+                  alt={`Illustration for page ${page.pageNumber}${
+                    page.text ? `: ${page.text.slice(0, 80)}` : ""
+                  }`}
+                  fill
+                  sizes="(max-width: 768px) 100vw, 768px"
+                  className="object-cover"
+                  // Page 1 is the above-the-fold cover for an unauth
+                  // visitor landing on a paid preview — prioritize it.
+                  priority={i === 0}
+                />
+              </div>
             ) : (
               <div className="aspect-square w-full bg-cream-200" />
             )}

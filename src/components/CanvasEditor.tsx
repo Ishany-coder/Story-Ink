@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -426,7 +427,12 @@ export default function CanvasEditor({
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const currentPage = story.pages[pageIdx];
-  const layers: Layer[] = currentPage?.overlays ?? [];
+  // Memoized so the deps of the keyboard-nav useEffect below don't
+  // churn on every render (?? produces a fresh empty array each pass).
+  const layers: Layer[] = useMemo(
+    () => currentPage?.overlays ?? [],
+    [currentPage]
+  );
   const selectedLayer = layers.find((l) => l.id === selectedId) ?? null;
   const currentLayoutId = currentPage?.layoutId ?? DEFAULT_LAYOUT_ID;
 
@@ -760,8 +766,18 @@ export default function CanvasEditor({
     layoutScope,
   ]);
 
-  // Delete key removes selected (when not editing text inline).
-  // Cmd/Ctrl+Z = undo, Cmd/Ctrl+Shift+Z (or Cmd+Y) = redo.
+  // Studio keyboard nav.
+  //
+  // Bindings (active when not editing a text overlay inline and not
+  // typing in a form field):
+  //   - Arrow keys           → nudge the selected layer 1px (10px with Shift).
+  //   - Delete / Backspace   → remove the selected layer.
+  //   - Escape               → deselect.
+  //   - Tab                  → cycle to the next layer (visual order).
+  //   - Cmd/Ctrl+Z / Y       → undo / redo (already wired below).
+  //
+  // Drag-and-drop keyboard alternatives (e.g. moving a layer between
+  // pages via the keyboard) are not yet wired — followup.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       // Undo / redo. Skip when the focus is in an input/textarea so
@@ -788,15 +804,88 @@ export default function CanvasEditor({
       }
 
       if (editingTextId) return;
+      if (inField) return;
+
+      // Selection-aware keys (arrows / Delete / Backspace / Escape /
+      // Tab) only engage when focus is actually on the canvas. The
+      // previous version listened on `window` unconditionally, which
+      // meant Tabbing into a side panel or clicking out of the canvas
+      // still hijacked Tab/arrows and broke keyboard nav across the
+      // whole Studio. Gate on activeElement === canvas so the canvas
+      // owns these keys only while it's focused.
+      if (document.activeElement !== canvasRef.current) return;
+
+      if (e.key === "Escape" && selectedId) {
+        e.preventDefault();
+        setSelectedId(null);
+        return;
+      }
+
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
-        if (inField) return;
         e.preventDefault();
         deleteLayer(selectedId);
+        return;
+      }
+
+      // Arrow-key nudge. 1px default, 10px with Shift. Logical
+      // coordinates — see CANVAS_SIZE.
+      if (
+        selectedId &&
+        (e.key === "ArrowUp" ||
+          e.key === "ArrowDown" ||
+          e.key === "ArrowLeft" ||
+          e.key === "ArrowRight")
+      ) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx =
+          e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy =
+          e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        if (!currentPage) return;
+        snapshotPages();
+        updatePageLayers(currentPage.pageNumber, (ls) =>
+          ls.map((l) =>
+            l.id === selectedId ? { ...l, x: l.x + dx, y: l.y + dy } : l
+          )
+        );
+        return;
+      }
+
+      // Tab cycles to the next layer in visual order (top to bottom).
+      // After selecting we re-focus the canvas so subsequent arrows /
+      // Delete / Backspace land on it (a side-panel button could have
+      // briefly taken focus before the canvas swallowed Tab).
+      if (e.key === "Tab") {
+        if (!layers.length) return;
+        e.preventDefault();
+        const ordered = [...layers].sort((a, b) => a.y - b.y || a.x - b.x);
+        if (!selectedId) {
+          setSelectedId(ordered[e.shiftKey ? ordered.length - 1 : 0].id);
+          canvasRef.current?.focus();
+          return;
+        }
+        const idx = ordered.findIndex((l) => l.id === selectedId);
+        const nextIdx =
+          (idx + (e.shiftKey ? -1 : 1) + ordered.length) % ordered.length;
+        setSelectedId(ordered[nextIdx].id);
+        canvasRef.current?.focus();
+        return;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, deleteLayer, editingTextId, handleUndo, handleRedo]);
+  }, [
+    selectedId,
+    deleteLayer,
+    editingTextId,
+    handleUndo,
+    handleRedo,
+    layers,
+    currentPage,
+    snapshotPages,
+    updatePageLayers,
+  ]);
 
   // ---- Drag / resize / rotate ---------------------------------------------
 
@@ -1627,11 +1716,17 @@ export default function CanvasEditor({
           )}
           <div
             ref={canvasRef}
+            // tabIndex makes the canvas keyboard-focusable so screen-
+            // reader / keyboard users have a reachable surface. The
+            // focus-visible ring is the affordance — same moss-700
+            // tint the rest of the studio uses for selection.
+            tabIndex={0}
+            aria-label="Story page canvas"
             // `max-w` AND `max-h` cap on both axes so the square always
             // fits in whatever the smaller dimension is. `min(...)` so
             // it doesn't have to grow to fill — keeps the page centered
             // in the column with breathing room.
-            className="relative aspect-square shrink overflow-hidden rounded-[4px] bg-paper"
+            className="relative aspect-square shrink overflow-hidden rounded-[4px] bg-paper focus:outline-none focus-visible:ring-2 focus-visible:ring-moss-700 focus-visible:ring-offset-2"
             style={{
               width: "min(100%, 640px)",
               height: "min(100%, 640px)",
@@ -1894,12 +1989,26 @@ export default function CanvasEditor({
                 }}
               >
                 {page.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={page.imageUrl}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover opacity-90"
-                  />
+                  page.imageUrl.startsWith("data:") ? (
+                    // Data URLs (mid-upload drafts) bypass next/image
+                    // — its loader requires a real URL. The persisted
+                    // Supabase URL goes through the optimized path
+                    // below once the upload finishes.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={page.imageUrl}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover opacity-90"
+                    />
+                  ) : (
+                    <Image
+                      src={page.imageUrl}
+                      alt=""
+                      fill
+                      sizes="48px"
+                      className="object-cover opacity-90"
+                    />
+                  )
                 ) : null}
                 {isDirtyPage && !isActive && (
                   <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-clay-500" />
@@ -2994,13 +3103,26 @@ function LibraryThumb({
       className="group relative aspect-square overflow-hidden rounded-xl border-2 border-cream-300 bg-cream-200 transition-all hover:border-moss-500 hover:shadow"
       title={label}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={label}
-        draggable={false}
-        className="h-full w-full object-cover"
-      />
+      {url.startsWith("data:") ? (
+        // Data URLs (in-flight uploads) skip next/image — its loader
+        // requires a real URL.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={label}
+          draggable={false}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <Image
+          src={url}
+          alt={label}
+          fill
+          sizes="128px"
+          draggable={false}
+          className="object-cover"
+        />
+      )}
       <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[9px] font-black uppercase tracking-wider text-cream-50">
         {label}
       </span>
@@ -3112,13 +3234,25 @@ function ImagePickerModal({
                     className="group relative aspect-square overflow-hidden rounded-xl border-2 border-cream-300 bg-cream-200 transition-all hover:border-moss-500 hover:shadow-md"
                     title={entry.label}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={entry.url}
-                      alt={entry.label}
-                      draggable={false}
-                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                    />
+                    {entry.url.startsWith("data:") ? (
+                      // Data URLs skip next/image's loader.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={entry.url}
+                        alt={entry.label}
+                        draggable={false}
+                        className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                      />
+                    ) : (
+                      <Image
+                        src={entry.url}
+                        alt={entry.label}
+                        fill
+                        sizes="(max-width: 640px) 33vw, 192px"
+                        draggable={false}
+                        className="object-cover transition-transform group-hover:scale-105"
+                      />
+                    )}
                     <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-left text-[10px] font-black uppercase tracking-wider text-cream-50">
                       {entry.label}
                     </span>

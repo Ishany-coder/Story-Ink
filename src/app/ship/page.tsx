@@ -1,4 +1,6 @@
+import { notFound } from "next/navigation";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { isBetaTesting } from "@/lib/beta-flag";
 import StoryLinkCard from "@/components/StoryLinkCard";
 import Link from "next/link";
 
@@ -9,6 +11,9 @@ export const revalidate = 0;
 // Stripe Checkout button.
 
 export default async function ShipIndexPage() {
+  // Closed-beta kill switch — match /ship/[id]'s notFound() behavior
+  // so the whole hardcover route tree disappears for beta testers.
+  if (isBetaTesting()) notFound();
   const user = await getCurrentUser();
   if (!user) {
     return (

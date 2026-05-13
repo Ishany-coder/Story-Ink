@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getCurrentUser } from "@/lib/supabase-server";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 
 // User-side: post a new message into their own support thread.
 // Creates the thread on first message if it doesn't exist yet.
@@ -22,6 +23,11 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.support,
+    key: userKey("support", user.id),
+  });
+  if (limited) return limited;
 
   const json = (await request.json().catch(() => ({}))) as Body;
   const rawBody = typeof json.body === "string" ? json.body.trim() : "";

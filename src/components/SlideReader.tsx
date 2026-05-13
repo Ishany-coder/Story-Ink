@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { type Story } from "@/lib/types";
 import { resolveDisplayLayers } from "@/lib/layouts";
+import { isBetaTesting } from "@/lib/beta-flag";
 import ReadOnlyLayer from "./ReadOnlyLayer";
 
 export default function SlideReader({ story }: { story: Story }) {
@@ -63,13 +64,16 @@ export default function SlideReader({ story }: { story: Story }) {
           {story.title}
         </h2>
         <div className="flex items-center gap-2">
-          <Link
-            href={`/ship/${story.id}`}
-            className="rounded-full bg-moss-700 px-3 py-1 text-xs font-black uppercase tracking-wider text-cream-50 shadow-sm transition-all hover:scale-[1.04]"
-            title="Order a physical copy"
-          >
-            Ship book
-          </Link>
+          {/* Closed-beta kill switch — hide the hardcover CTA. */}
+          {!isBetaTesting() && (
+            <Link
+              href={`/ship/${story.id}`}
+              className="rounded-full bg-moss-700 px-3 py-1 text-xs font-black uppercase tracking-wider text-cream-50 shadow-sm transition-all hover:scale-[1.04]"
+              title="Order a physical copy"
+            >
+              Ship book
+            </Link>
+          )}
           <span className="rounded-full bg-moss-100 px-3 py-1 text-sm font-black text-moss-700">
             {currentPage + 1} / {pages.length}
           </span>

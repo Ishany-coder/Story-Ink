@@ -289,6 +289,17 @@ export default function HomeCreate({ pets }: Props) {
               </span>
             </div>
           )}
+          {pageCount >= PRINT_MIN_PAGES && pageCount % 4 !== 0 && (
+            <div className="flex items-start gap-2 border-t border-cream-200 bg-amber-50/60 px-5 py-2 text-[11px] font-medium text-amber-900">
+              <span aria-hidden="true">ⓘ</span>
+              <span>
+                Printed books are bound in signatures of 4 pages — picking a
+                count not divisible by 4 adds 1&ndash;3 blank pages at the
+                back. Pick a multiple of 4 (24, 28, 32, 36, &hellip;) to avoid
+                this.
+              </span>
+            </div>
+          )}
         </div>
 
         <StylePicker value={imageStyle} onChange={setImageStyle} />

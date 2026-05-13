@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LAST_UPDATED, SUPPORT_EMAIL } from "@/lib/legal";
 
 // PLACEHOLDER terms of service. Replace the body of this page with the
 // real legal text reviewed by counsel before launching to live users.
@@ -24,7 +25,7 @@ export default function TermsPage() {
         Terms of Service
       </h1>
       <p className="mt-2 text-xs uppercase tracking-wider text-ink-500">
-        Last updated: <em>[fill in date]</em>
+        Last updated: {LAST_UPDATED}
       </p>
 
       <div className="mt-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
@@ -80,14 +81,50 @@ export default function TermsPage() {
           <p>
             Hardcover books are printed on demand. Once production starts
             we can&rsquo;t cancel. If a book arrives damaged or
-            incorrect, contact <em>[your support email]</em> within 30
-            days and we&rsquo;ll make it right.
+            incorrect, contact{" "}
+            <a
+              href={`mailto:${SUPPORT_EMAIL}`}
+              className="text-moss-700 underline hover:text-moss-900"
+            >
+              {SUPPORT_EMAIL}
+            </a>{" "}
+            within 30 days and we&rsquo;ll make it right.
           </p>
         </div>
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            5. Acceptable use
+            5. Refund policy
+          </h2>
+          <ul className="mt-2 ml-5 list-disc space-y-1">
+            <li>
+              Outline: when a refund is available before production
+              starts (window between Checkout and PDF build kicking off
+              in fulfillment).
+            </li>
+            <li>
+              Outline: defective / damaged / lost-in-transit replacement
+              path and timeframe.
+            </li>
+            <li>
+              Outline: refund mechanics — refund posts to the original
+              Stripe charge; digital unlock is revoked alongside any
+              refund of the hardcover order.
+            </li>
+            <li>
+              Outline: chargeback / dispute handling and our right to
+              suspend service during an active dispute.
+            </li>
+            <li>
+              Outline: non-refundable items (e.g., already-shipped
+              hardcovers absent a defect).
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+            6. Acceptable use
           </h2>
           <p>
             Don&rsquo;t use the service to generate content that depicts
@@ -98,7 +135,7 @@ export default function TermsPage() {
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            6. Changes and termination
+            7. Changes and termination
           </h2>
           <p>
             We may update these terms occasionally; material changes will
@@ -109,10 +146,17 @@ export default function TermsPage() {
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            7. Contact
+            8. Contact
           </h2>
           <p>
-            Questions: <em>[your contact email]</em>.
+            Questions:{" "}
+            <a
+              href={`mailto:${SUPPORT_EMAIL}`}
+              className="text-moss-700 underline hover:text-moss-900"
+            >
+              {SUPPORT_EMAIL}
+            </a>
+            .
           </p>
         </div>
       </section>

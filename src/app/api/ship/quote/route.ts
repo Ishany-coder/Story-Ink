@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { priceHardcoverUsd } from "@/lib/pricing";
 import { isShippingAddress } from "@/lib/shipping";
+import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
 import type { Story, StoryPage } from "@/lib/types";
 
 // Returns the customer-facing price for a hardcover of this story at
@@ -36,6 +37,11 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   }
+  const limited = await enforceRateLimit({
+    ...LIMITS.checkout,
+    key: userKey("checkout", user.id),
+  });
+  if (limited) return limited;
   const body = (await request.json().catch(() => ({}))) as Body;
   const storyId = typeof body.storyId === "string" ? body.storyId : "";
   if (!storyId) {
