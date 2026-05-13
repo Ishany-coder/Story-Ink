@@ -36,6 +36,7 @@ There is no test runner configured.
 - `GEMINI_API_KEY`
 - `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY` — production only; dev mode is auto-detected via `NODE_ENV`
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+- `RESEND_API_KEY`, `EMAIL_FROM` — transactional email. `EMAIL_FROM` must be a Resend-verified domain. Full deployment walkthrough (DNS, SPF/DKIM/DMARC, smoke test) lives in `docs/email-deployment.md`. Until set, the default address is a deliberately invalid placeholder so a misconfigured boot fails loudly on the first send rather than silently dropping mail.
 - `ALLOWED_IMAGE_HOSTS` — optional comma-separated extension to the SSRF allowlist (`isAllowedContentUrl`)
 
 ## Database
