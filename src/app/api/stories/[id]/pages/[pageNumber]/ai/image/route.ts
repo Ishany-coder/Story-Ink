@@ -3,6 +3,10 @@ import { createJob } from "@/lib/jobs";
 import { inngest } from "@/inngest/client";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
+import {
+  containsProfanity,
+  PROFANITY_REJECTION_MESSAGE,
+} from "@/lib/profanity";
 
 export const maxDuration = 10;
 
@@ -41,6 +45,12 @@ export async function POST(
   const userPrompt = body.prompt?.trim().slice(0, MAX_PROMPT_LEN);
   if (!userPrompt) {
     return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
+  }
+  if (containsProfanity(userPrompt)) {
+    return NextResponse.json(
+      { error: PROFANITY_REJECTION_MESSAGE },
+      { status: 400 }
+    );
   }
   const globalSystemPrompt = body.globalSystemPrompt
     ? String(body.globalSystemPrompt).slice(0, MAX_SYSTEM_PROMPT_LEN)

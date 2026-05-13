@@ -5,6 +5,10 @@ import { inngest } from "@/inngest/client";
 import { getCurrentUser } from "@/lib/supabase-server";
 import { DEFAULT_IMAGE_STYLE, isImageStyleId } from "@/lib/image-styles";
 import { enforceRateLimit, LIMITS, userKey } from "@/lib/rate-limit";
+import {
+  containsProfanity,
+  PROFANITY_REJECTION_MESSAGE,
+} from "@/lib/profanity";
 
 // Kicks off the Inngest `story/generate.requested` function. Returns a
 // jobId immediately — the client polls /api/jobs/[id] until status is
@@ -49,6 +53,12 @@ export async function POST(request: NextRequest) {
     if (!body.prompt || body.prompt.trim().length === 0) {
       return NextResponse.json(
         { error: "Prompt is required" },
+        { status: 400 }
+      );
+    }
+    if (containsProfanity(body.prompt)) {
+      return NextResponse.json(
+        { error: PROFANITY_REJECTION_MESSAGE },
         { status: 400 }
       );
     }

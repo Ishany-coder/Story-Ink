@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
+import {
+  containsProfanity,
+  PROFANITY_REJECTION_MESSAGE,
+} from "@/lib/profanity";
 
 export const maxDuration = 15;
 
@@ -24,6 +28,16 @@ export async function PUT(
   const trimmed =
     typeof body.systemPrompt === "string" ? body.systemPrompt.trim() : null;
   const value = trimmed ? trimmed : null;
+
+  // The per-story system prompt is concatenated with every Gemini call
+  // (composeSystemPrompt in src/lib/ai-prompts) — gate it through the
+  // same profanity filter as the freeform user prompts.
+  if (value && containsProfanity(value)) {
+    return NextResponse.json(
+      { error: PROFANITY_REJECTION_MESSAGE },
+      { status: 400 }
+    );
+  }
 
   const { error } = await supabaseAdmin()
     .from("stories")
