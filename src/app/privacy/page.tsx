@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LAST_UPDATED, SUPPORT_EMAIL } from "@/lib/legal";
 
 // PLACEHOLDER privacy policy. Replace the body of this page with the
 // real legal text reviewed by counsel before launching to live users.
@@ -25,7 +26,7 @@ export default function PrivacyPage() {
         Privacy Policy
       </h1>
       <p className="mt-2 text-xs uppercase tracking-wider text-ink-500">
-        Last updated: <em>[fill in date]</em>
+        Last updated: {LAST_UPDATED}
       </p>
 
       <div className="mt-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
@@ -93,21 +94,90 @@ export default function PrivacyPage() {
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            4. Your rights and choices
+            4. Gemini AI processing
           </h2>
-          <p>
-            You can delete your stories and pets from the app at any time.
-            You can request a full export or deletion of your account data
-            by emailing <em>[your support address]</em>.
-          </p>
+          <ul className="mt-2 ml-5 list-disc space-y-1">
+            <li>
+              Outline: which Gemini model(s) we call, what payload we
+              send (prompt text, pet reference photos, previously
+              generated illustrations for character continuity).
+            </li>
+            <li>
+              Outline: Google&rsquo;s data-use commitments for the API
+              tier we&rsquo;re on (training opt-out, retention window).
+              Counsel must verify against Google&rsquo;s current terms
+              before publishing.
+            </li>
+            <li>
+              Outline: how long we retain prompts and generated
+              artifacts on our side, and how a user requests deletion.
+            </li>
+          </ul>
         </div>
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            5. Contact
+            5. Stripe and payment data
+          </h2>
+          <ul className="mt-2 ml-5 list-disc space-y-1">
+            <li>
+              Outline: card data is collected and processed by Stripe;
+              we never see it. We only store a Stripe session/charge id
+              and the shipping address you provide at checkout.
+            </li>
+            <li>
+              Outline: what metadata we attach to a Stripe Checkout
+              session (story id, address blob) and why.
+            </li>
+            <li>
+              Outline: Stripe&rsquo;s role as a processor under
+              GDPR/CCPA and link to Stripe&rsquo;s privacy notice.
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+            6. Your rights and choices (GDPR / CCPA)
+          </h2>
+          <ul className="mt-2 ml-5 list-disc space-y-1">
+            <li>
+              Outline: right of access — how to request a copy of your
+              data (the /account page exposes a self-serve export).
+            </li>
+            <li>Outline: right to rectification.</li>
+            <li>
+              Outline: right to erasure — how to delete your account
+              (self-serve from /account) and what is retained for legal
+              / tax reasons (shipped order records, anonymized).
+            </li>
+            <li>Outline: right to restriction and objection.</li>
+            <li>Outline: right to data portability (the export above).</li>
+            <li>
+              Outline: CCPA-specific disclosures — categories of personal
+              information collected, sold (we don&rsquo;t sell), shared,
+              and the right to opt-out / right to know.
+            </li>
+            <li>
+              Outline: contact path for data-subject requests and the
+              statutory response window.
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+            7. Contact
           </h2>
           <p>
-            Questions: <em>[your contact email]</em>.
+            Questions:{" "}
+            <a
+              href={`mailto:${SUPPORT_EMAIL}`}
+              className="text-moss-700 underline hover:text-moss-900"
+            >
+              {SUPPORT_EMAIL}
+            </a>
+            .
           </p>
         </div>
       </section>
