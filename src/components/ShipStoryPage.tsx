@@ -229,7 +229,7 @@ export default function ShipStoryPage({
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={preview.cover}
-                alt={story.title}
+                alt={`Cover of "${story.title}"`}
                 className="h-full w-full object-cover"
               />
             ) : (

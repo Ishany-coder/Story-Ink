@@ -50,12 +50,17 @@ export default function ReadOnlyLayer({ layer }: { layer: Layer }) {
 
   const im = layer as ImageLayer;
   const fit = im.source === "layout" ? "cover" : "contain";
+  // Layout-placed images are decorative scaffolding (template artwork);
+  // user-placed images are content the reader actually wants screen
+  // readers to announce. Keep layout images empty-alt so they're
+  // skipped, but expose a meaningful default for user images.
+  const altText = im.source === "layout" ? "" : "Illustration";
   return (
     <div style={style}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={im.src}
-        alt=""
+        alt={altText}
         draggable={false}
         style={{
           width: "100%",

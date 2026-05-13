@@ -71,7 +71,9 @@ export default function DigitalUpsell({
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 src={page.imageUrl}
-                alt={`Page ${page.pageNumber}`}
+                alt={`Illustration for page ${page.pageNumber}${
+                  page.text ? `: ${page.text.slice(0, 80)}` : ""
+                }`}
                 className="aspect-square w-full object-cover"
               />
             ) : (

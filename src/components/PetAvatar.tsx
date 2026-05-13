@@ -53,7 +53,7 @@ export default function PetAvatar({ pet, size = 40, className = "" }: Props) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={photo}
-          alt={pet.name}
+          alt={`Photo of ${pet.name}`}
           className="h-full w-full object-cover"
         />
       </div>

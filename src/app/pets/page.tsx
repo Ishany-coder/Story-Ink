@@ -96,7 +96,7 @@ function PetCard({ pet }: { pet: Pet }) {
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
             src={cover}
-            alt={pet.name}
+            alt={`Photo of ${pet.name}`}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           />
         ) : (
