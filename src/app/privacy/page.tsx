@@ -52,9 +52,10 @@ export default function PrivacyPage() {
           </h2>
           <ul className="mt-2 ml-5 list-disc space-y-1">
             <li>
-              <strong>Account info.</strong> Your email address and any
-              profile data your sign-in provider (Google, etc.) returns
-              to us during OAuth.
+              <strong>Account info.</strong> Your email address and
+              password. Authentication is handled by Supabase Auth —
+              passwords are hashed by Supabase before storage; we never
+              see, log, or store the plaintext.
             </li>
             <li>
               <strong>Pet info.</strong> Names, photos, traits, quirks,
