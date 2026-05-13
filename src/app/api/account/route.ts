@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getCurrentUser } from "@/lib/supabase-server";
+import { sendEmail } from "@/lib/email";
+import { accountDeleted } from "@/lib/email-templates/account-deleted";
+import { reportError } from "@/lib/sentry";
 
 export const maxDuration = 30;
 
@@ -129,6 +132,24 @@ export async function DELETE(request: Request) {
       { error: "Failed to delete pets" },
       { status: 500 }
     );
+  }
+
+  // Send the deletion confirmation email BEFORE we hard-delete the
+  // auth user — once `deleteUser` succeeds the email is no longer
+  // resolvable, and we'd rather over-send than miss the receipt.
+  // Failures here are reported but never block deletion.
+  if (user.email) {
+    try {
+      const tpl = accountDeleted({ email: user.email });
+      await sendEmail({
+        to: user.email,
+        subject: tpl.subject,
+        html: tpl.html,
+        text: tpl.text,
+      });
+    } catch (err) {
+      reportError(err, "account.delete.send-confirmation");
+    }
   }
 
   // Finally remove the auth user. Any remaining rows in tables that

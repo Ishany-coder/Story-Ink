@@ -26,6 +26,8 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { buildAndUploadPrintPdfs } from "@/lib/print-pdf";
 import { unpackAddressMetadata } from "@/lib/stripe";
 import { reportError } from "@/lib/sentry";
+import { sendEmail } from "@/lib/email";
+import { orderConfirmation } from "@/lib/email-templates/order-confirmation";
 import type { Pet, Story } from "@/lib/types";
 import type Stripe from "stripe";
 
@@ -334,10 +336,56 @@ export async function fulfillFromSession(
     .update({ digital_unlocked: true })
     .eq("id", storyId);
 
+  // Fire the customer-facing order confirmation email. Failures here
+  // don't roll back fulfillment — `sendEmail` swallows + reports its
+  // own errors, and the admin queue is still the source of truth.
+  // TODO: wire the "shipped" notification from the admin orders page
+  //       once a real shipping carrier + tracking URL is in place.
+  await sendOrderConfirmationEmail({
+    userId: (story as Story & { user_id?: string | null }).user_id ?? null,
+    storyTitle: story.title,
+    orderId,
+    pageCount: story.page_count ?? 0,
+    amountUsd: amountUsd ?? 0,
+  });
+
   return {
     ok: true,
     orderId,
     status: "received",
     alreadyProcessed: false,
   };
+}
+
+// Look up the buyer's email via the Supabase auth admin API and send
+// the order confirmation. Best-effort: any failure is logged through
+// `reportError` (inside sendEmail) but never throws — fulfillment has
+// already advanced past the point where it could be rolled back.
+async function sendOrderConfirmationEmail(args: {
+  userId: string | null;
+  storyTitle: string;
+  orderId: string;
+  pageCount: number;
+  amountUsd: number;
+}): Promise<void> {
+  if (!args.userId) return;
+  try {
+    const admin = supabaseAdmin();
+    const { data, error } = await admin.auth.admin.getUserById(args.userId);
+    if (error || !data.user?.email) return;
+    const tpl = orderConfirmation({
+      storyTitle: args.storyTitle,
+      orderId: args.orderId,
+      pageCount: args.pageCount,
+      amountUsd: args.amountUsd,
+    });
+    await sendEmail({
+      to: data.user.email,
+      subject: tpl.subject,
+      html: tpl.html,
+      text: tpl.text,
+    });
+  } catch (err) {
+    reportError(err, "ship-fulfill.send-order-confirmation");
+  }
 }
