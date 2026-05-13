@@ -22,7 +22,7 @@ export default function PrivacyPage() {
         &larr; Back home
       </Link>
 
-      <h1 className="mt-4 font-[family-name:var(--font-display)] text-4xl font-semibold tracking-tight text-ink-900">
+      <h1 className="mt-4 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl">
         Privacy Policy
       </h1>
       <p className="mt-2 text-xs uppercase tracking-wider text-ink-500">

@@ -23,7 +23,7 @@ export default async function AccountPage() {
         &larr; Back home
       </Link>
 
-      <h1 className="mt-4 font-[family-name:var(--font-display)] text-4xl font-semibold tracking-tight text-ink-900">
+      <h1 className="mt-4 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl">
         Account
       </h1>
       <p className="mt-2 text-sm text-ink-500">
