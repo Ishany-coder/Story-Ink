@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
+import { isBetaTesting } from "@/lib/beta-flag";
 import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
 
 // Digital tier checkout. Unlocks online reading + PDF download for the
@@ -21,6 +22,11 @@ interface Body {
 }
 
 export async function POST(request: Request) {
+  // Closed-beta kill switch — every payment surface 404s. Beta
+  // readers get full access automatically (see src/app/read/[id]).
+  if (isBetaTesting()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });

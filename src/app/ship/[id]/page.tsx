@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
+import { isBetaTesting } from "@/lib/beta-flag";
 import ShipStoryPage from "@/components/ShipStoryPage";
 import type { Story } from "@/lib/types";
 
@@ -12,6 +13,8 @@ export default async function ShipStory({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  // Closed-beta kill switch — hide the hardcover funnel entirely.
+  if (isBetaTesting()) notFound();
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?next=/ship/${id}`);

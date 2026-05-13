@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { createCheckoutSession } from "@/lib/stripe";
 import { assertOwnsStory, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
+import { isBetaTesting } from "@/lib/beta-flag";
 import { priceHardcoverUsd } from "@/lib/pricing";
 import { assertNoBypassInProd, assertStripeKeyMatchesEnv } from "@/lib/env-guard";
 import { isShippingAddress, type ShippingAddress } from "@/lib/shipping";
@@ -45,6 +46,11 @@ function parseQuantity(raw: unknown): number {
 }
 
 export async function POST(request: Request) {
+  // Closed-beta kill switch — match /ship/[id]'s notFound() behavior
+  // so the API surface disappears in lockstep with the UI.
+  if (isBetaTesting()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "Sign in required" }, { status: 401 });

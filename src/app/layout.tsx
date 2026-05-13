@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Nunito, Playfair_Display } from "next/font/google";
 import Navbar from "@/components/Navbar";
+import BetaBanner from "@/components/BetaBanner";
 import { GOOGLE_FONTS_HREF } from "@/lib/fonts";
 import "./globals.css";
 
@@ -55,7 +56,10 @@ export default function RootLayout({
       </head>
       <body className="min-h-full bg-cream-100 font-[family-name:var(--font-nunito)] text-ink-700 antialiased">
         <Navbar />
-        <main className="pt-16">{children}</main>
+        <main className="pt-16">
+          <BetaBanner />
+          {children}
+        </main>
       </body>
     </html>
   );
