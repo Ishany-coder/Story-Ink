@@ -619,10 +619,116 @@ export const assistInferFn = inngest.createFunction(
   }
 );
 
+// --------------------------------------------------------------------------
+// nightly-cleanup — daily housekeeping cron.
+//
+// Runs at 04:00 UTC every day. Three independent step.run blocks so
+// each piece of work retries on its own and a transient failure in
+// one doesn't block the others.
+//
+// Tasks:
+//   1. Delete done / failed `jobs` rows older than 30 days. The jobs
+//      table is essentially a transient queue; old rows just bloat
+//      the table and slow down /api/jobs/[id] lookups.
+//   2. Mark `print_orders` rows stuck in 'paid' or 'pending' for
+//      more than 48h *with no stripe_session_id* as 'expired'. These
+//      are orders the user abandoned or where Stripe didn't fire the
+//      webhook in time — the admin needs to see them, so we never
+//      delete, just status-transition.
+//   3. (TODO) Storage orphan sweep — walk `uploads` bucket and delete
+//      blobs that no story / pet row references. Skipped for now: no
+//      cheap way to enumerate referenced URLs (they're embedded in
+//      stories.pages JSONB + cover_image + pets.photos JSONB), and
+//      a naive sweep risks deleting in-flight uploads. Revisit when
+//      we have a content-addressed naming scheme.
+// --------------------------------------------------------------------------
+
+interface DeletedJobsRow {
+  id: string;
+}
+interface ExpiredOrderRow {
+  id: string;
+}
+
+export const nightlyCleanupFn = inngest.createFunction(
+  {
+    id: "nightly-cleanup",
+    name: "Nightly cleanup",
+    triggers: [{ cron: "0 4 * * *" }],
+  },
+  async ({ step }) => {
+    // 1. Old terminal jobs.
+    const jobsDeleted = await step.run("delete-old-jobs", async () => {
+      const cutoff = new Date(
+        Date.now() - 30 * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const { data, error } = await supabaseAdmin()
+        .from("jobs")
+        .delete()
+        .in("status", ["done", "failed"])
+        .lt("updated_at", cutoff)
+        .select("id")
+        .returns<DeletedJobsRow[]>();
+      if (error) {
+        console.error("[nightly-cleanup] delete-old-jobs failed:", error);
+        return 0;
+      }
+      return data?.length ?? 0;
+    });
+
+    // 2. Stuck pre-fulfillment print_orders. We only touch rows that
+    // never got a stripe_session_id assigned — anything with a
+    // session id has gone through (or is going through) the Stripe
+    // webhook pipeline, and we don't want to second-guess that.
+    const ordersExpired = await step.run(
+      "expire-stuck-print-orders",
+      async () => {
+        const cutoff = new Date(
+          Date.now() - 48 * 60 * 60 * 1000
+        ).toISOString();
+        const { data, error } = await supabaseAdmin()
+          .from("print_orders")
+          .update({ status: "expired" })
+          .in("status", ["paid", "pending"])
+          .is("stripe_session_id", null)
+          .lt("created_at", cutoff)
+          .select("id")
+          .returns<ExpiredOrderRow[]>();
+        if (error) {
+          console.error(
+            "[nightly-cleanup] expire-stuck-print-orders failed:",
+            error
+          );
+          return 0;
+        }
+        const n = data?.length ?? 0;
+        if (n > 0) {
+          // Audit log so the admin queue surfaces the transition.
+          await supabaseAdmin()
+            .from("print_order_events")
+            .insert(
+              (data ?? []).map((r) => ({
+                order_id: r.id,
+                status: "expired",
+                note: "Auto-expired by nightly cleanup (>48h with no Stripe session).",
+              }))
+            );
+        }
+        return n;
+      }
+    );
+
+    // 3. Storage orphan sweep — TODO (see header comment).
+
+    return { jobsDeleted, ordersExpired };
+  }
+);
+
 export const allFunctions = [
   generateStoryFn,
   regenTextFn,
   assistTextFn,
   assistImageFn,
   assistInferFn,
+  nightlyCleanupFn,
 ];
