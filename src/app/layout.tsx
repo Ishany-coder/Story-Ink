@@ -4,6 +4,8 @@ import { Nunito, Playfair_Display } from "next/font/google";
 import Navbar from "@/components/Navbar";
 import BetaBanner from "@/components/BetaBanner";
 import SentryInit from "@/components/SentryInit";
+import CookieConsent from "@/components/CookieConsent";
+import CookieSettingsLink from "@/components/CookieSettingsLink";
 import { GOOGLE_FONTS_HREF } from "@/lib/fonts";
 import "./globals.css";
 
@@ -75,8 +77,10 @@ export default function RootLayout({
             <Link href="/help" className="hover:text-moss-700">
               Help
             </Link>
+            <CookieSettingsLink />
           </div>
         </footer>
+        <CookieConsent />
       </body>
     </html>
   );
