@@ -173,8 +173,23 @@ export default function PetForm({ initial = null }: Props) {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(errBody.error || "Save failed");
       }
-      router.push("/pets");
-      router.refresh();
+      if (editing) {
+        router.push("/pets");
+        router.refresh();
+      } else {
+        // First-run UX: drop the user back into the create funnel they
+        // came from instead of the /pets dashboard. /create reads
+        // `?petId=…` to pre-select the freshly created pet so the
+        // user can skip the picker entirely.
+        const created = (await res.json().catch(() => null)) as
+          | { pet?: { id?: string } }
+          | null;
+        const newPetId = created?.pet?.id;
+        router.push(
+          newPetId ? `/create?petId=${encodeURIComponent(newPetId)}` : "/create",
+        );
+        router.refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
       setPending(false);

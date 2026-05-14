@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import GeneratingOverlay from "./GeneratingOverlay";
 import LegalConsentModal, { readStoredConsent } from "./LegalConsentModal";
@@ -36,10 +36,23 @@ interface Props {
 // emoji or runaway animations.
 export default function HomeCreate({ pets }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // If we landed here from PetForm's post-create redirect
+  // (`/create?petId=…`), preselect that pet. Falls back to the
+  // newest pet (pets are already ordered by created_at desc on the
+  // server). Guard against a stale id pointing at a deleted pet by
+  // checking the lookup table.
+  const requestedPetId = searchParams?.get("petId") ?? null;
+  const initialPetId = useMemo(() => {
+    if (requestedPetId && pets.some((p) => p.id === requestedPetId)) {
+      return requestedPetId;
+    }
+    return pets[0]?.id ?? null;
+  }, [pets, requestedPetId]);
   const [kind, setKind] = useState<"pet" | "generic">(
     pets.length > 0 ? "pet" : "generic"
   );
-  const [petId, setPetId] = useState<string | null>(pets[0]?.id ?? null);
+  const [petId, setPetId] = useState<string | null>(initialPetId);
   const [prompt, setPrompt] = useState("");
   const [pageCount, setPageCount] = useState(MIN_PAGES);
   const [customMode, setCustomMode] = useState(false);
