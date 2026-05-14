@@ -51,9 +51,11 @@ export default function HomeCreate({ pets }: Props) {
     }
     return pets[0]?.id ?? null;
   }, [pets, requestedPetId]);
-  const [kind, setKind] = useState<"pet" | "generic">(
-    pets.length > 0 ? "pet" : "generic"
-  );
+  // Default to pet mode in both cases. With zero pets we still show
+  // the empty PetPicker (which carries the "Add a pet to get started"
+  // CTA) and surface Generic as a small text-link escape hatch below
+  // it — that way the primary funnel for new users is the pet path.
+  const [kind, setKind] = useState<"pet" | "generic">("pet");
   const [petId, setPetId] = useState<string | null>(initialPetId);
   const [prompt, setPrompt] = useState("");
   const [pageCount, setPageCount] = useState(MIN_PAGES);
@@ -97,7 +99,11 @@ export default function HomeCreate({ pets }: Props) {
 
   useEffect(() => {
     if (state.kind === "done") {
-      router.push(`/read/${state.result.storyId}`);
+      // ?fresh=1 triggers a one-time tip strip in the reader telling
+      // a first-time user about the Studio (and, outside beta, the
+      // hardcover keepsake CTA). SlideReader reads + dismisses it
+      // entirely in component state — no localStorage.
+      router.push(`/read/${state.result.storyId}?fresh=1`);
     } else if (state.kind === "failed") {
       setError(state.error);
       setGenerating(false);
@@ -212,32 +218,45 @@ export default function HomeCreate({ pets }: Props) {
       )}
 
       <form onSubmit={handleSubmit} className="w-full space-y-6">
-        {/* Mode toggle */}
-        <div className="mx-auto flex w-fit rounded-full border border-cream-300 bg-cream-50 p-1">
-          <ModeToggleButton
-            active={kind === "pet"}
-            onClick={() => {
-              if (pets.length === 0) {
-                router.push("/pets/new");
-              } else {
-                setKind("pet");
-              }
-            }}
-            label="Pet story"
-          />
-          <ModeToggleButton
-            active={kind === "generic"}
-            onClick={() => setKind("generic")}
-            label="Generic story"
-          />
-        </div>
+        {/* Mode toggle. Hidden entirely when the user has no pets —
+            with zero pets the primary funnel should be "add a pet";
+            we offer Generic as a small text link below the empty
+            picker instead so the toggle isn't a coin-flip a first-time
+            visitor has to make before doing anything else. */}
+        {pets.length > 0 && (
+          <div className="mx-auto flex w-fit rounded-full border border-cream-300 bg-cream-50 p-1">
+            <ModeToggleButton
+              active={kind === "pet"}
+              onClick={() => setKind("pet")}
+              label="Pet story"
+            />
+            <ModeToggleButton
+              active={kind === "generic"}
+              onClick={() => setKind("generic")}
+              label="Generic story"
+            />
+          </div>
+        )}
 
         {kind === "pet" && (
-          <PetPicker
-            pets={pets}
-            selectedId={petId}
-            onSelect={setPetId}
-          />
+          <>
+            <PetPicker
+              pets={pets}
+              selectedId={petId}
+              onSelect={setPetId}
+            />
+            {pets.length === 0 && (
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => setKind("generic")}
+                  className="text-xs font-medium text-ink-500 underline decoration-cream-400 underline-offset-2 transition-colors hover:text-moss-700 hover:decoration-moss-300"
+                >
+                  Just want to test the AI? Try a generic story →
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         {kind === "pet" && selectedPet && (
