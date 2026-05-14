@@ -6,7 +6,9 @@ import Link from "next/link";
 import GeneratingOverlay from "./GeneratingOverlay";
 import LegalConsentModal, { readStoredConsent } from "./LegalConsentModal";
 import PetAvatar from "./PetAvatar";
+import { isBetaTesting } from "@/lib/beta-flag";
 import { useJobPolling } from "@/lib/useJobPolling";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 import { startersForMode } from "@/lib/story-starters";
 import {
   DEFAULT_IMAGE_STYLE,
@@ -70,6 +72,16 @@ export default function HomeCreate({ pets }: Props) {
   // that triggers a lint rule (and an extra render) for no benefit;
   // the user only cares about the gate when they're about to submit.
   const [consentModalOpen, setConsentModalOpen] = useState(false);
+
+  // Mobile awareness banner. Tells phone users up front that they can
+  // create and read on their device but the Studio (page editor)
+  // needs a tablet/desktop. Dismissible per-mount; we don't persist
+  // because a) it's a small one-liner and b) the surface is the very
+  // first thing a new user sees, so re-showing it on a fresh visit is
+  // fine.
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const [mobileNoticeDismissed, setMobileNoticeDismissed] = useState(false);
+  const betaOn = isBetaTesting();
 
   const { state, start } = useJobPolling<{ storyId: string }>();
 
@@ -178,6 +190,26 @@ export default function HomeCreate({ pets }: Props) {
         onCancel={() => setConsentModalOpen(false)}
       />
 
+
+      {!isDesktop && !mobileNoticeDismissed && (
+        <div className="mx-auto mb-4 flex w-full max-w-xl items-start gap-3 rounded-2xl border border-cream-300 bg-cream-50 px-4 py-3 text-xs leading-5 text-ink-700 shadow-[0_1px_2px_rgba(14,26,43,0.04)]">
+          <span aria-hidden="true" className="mt-0.5 text-moss-700">
+            ⓘ
+          </span>
+          <span className="flex-1">
+            You can create and read stories on your phone. The page
+            editor (Studio) needs a tablet or desktop.
+          </span>
+          <button
+            type="button"
+            onClick={() => setMobileNoticeDismissed(true)}
+            aria-label="Dismiss"
+            className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-ink-500 hover:bg-cream-100 hover:text-ink-900"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="w-full space-y-6">
         {/* Mode toggle */}
@@ -329,6 +361,16 @@ export default function HomeCreate({ pets }: Props) {
           >
             Create my story
           </button>
+
+          {/* Pricing disclosure below the CTA. Hidden entirely during
+              closed beta — reading is auto-unlocked and hardcover is
+              paused, so quoting either price would be misleading. */}
+          {!betaOn && (
+            <p className="text-center text-xs text-ink-500">
+              Read online or download for $9.99. Hardcover keepsakes from
+              $34.99.
+            </p>
+          )}
 
           {error && (
             <p className="text-center text-sm text-rose-600">{error}</p>
