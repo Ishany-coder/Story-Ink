@@ -2,7 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   CANVAS_SIZE,
   type CustomLayout,
@@ -444,6 +451,28 @@ function CanvasEditorDesktop({
   const [pickingLayerId, setPickingLayerId] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Drag-via-ref. The pipeline used to be:
+  //   pointerdown → setDrag(...) → setStory(every pointermove)
+  // which re-rendered the entire 240/280-col Studio (every LayerView,
+  // every layout thumb, the images library, etc.) at 60 Hz. CPU spikes
+  // hard once a story has more than a handful of pages.
+  //
+  // Now: pointerdown still flips the `drag` state to subscribe the
+  // window-level pointermove/up listeners and to show the "I'm dragging"
+  // cursor, but the moving x/y/w/h/rot values live in `dragLiveRef` and
+  // are applied directly to the moved layer's outer DOM node via inline
+  // styles (transform for move/rotate, left/top/width/height for
+  // resize). React state only updates once on pointerup, which
+  // collapses the drag back into a single render and one undo step.
+  // This is the Figma/Canva pattern.
+  const dragLiveRef = useRef<{
+    finalX: number;
+    finalY: number;
+    finalW: number;
+    finalH: number;
+    finalRot: number;
+  } | null>(null);
 
   const currentPage = story.pages[pageIdx];
   // Memoized so the deps of the keyboard-nav useEffect below don't
@@ -908,80 +937,153 @@ function CanvasEditorDesktop({
 
   // ---- Drag / resize / rotate ---------------------------------------------
 
+  // The drag handlers are stable identities (memoized) so React.memo on
+  // LayerView holds — wrapping per-layer arrows around `layer` would
+  // re-create every callback every render and break memoization. We
+  // look up the live layer through `layersRef` at the moment of
+  // pointerdown so the captured logical origin is always current.
+  const layersRef = useRef<Layer[]>(layers);
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
+
   function clientToCanvasScale(): number {
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect || rect.width === 0) return 1;
     return CANVAS_SIZE / rect.width;
   }
 
-  function startMove(e: React.PointerEvent, layer: Layer) {
-    e.stopPropagation();
-    setSelectedId(layer.id);
-    // Snapshot pre-drag state so the entire drag is one undo step.
-    snapshotPages();
-    setDrag({
-      kind: "move",
-      layerId: layer.id,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: layer.x,
-      origY: layer.y,
-    });
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  }
+  const startMove = useCallback(
+    (e: React.PointerEvent, layerId: string) => {
+      const layer = layersRef.current.find((l) => l.id === layerId);
+      if (!layer) return;
+      e.stopPropagation();
+      setSelectedId(layer.id);
+      // Snapshot pre-drag state so the entire drag is one undo step.
+      snapshotPages();
+      setDrag({
+        kind: "move",
+        layerId: layer.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: layer.x,
+        origY: layer.y,
+      });
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    },
+    [snapshotPages]
+  );
 
-  function startResize(
-    e: React.PointerEvent,
-    layer: Layer,
-    edge: ResizeEdge
-  ) {
-    e.stopPropagation();
-    snapshotPages();
-    setDrag({
-      kind: "resize",
-      edge,
-      layerId: layer.id,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: layer.x,
-      origY: layer.y,
-      origW: layer.width,
-      origH: layer.height,
-    });
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  }
+  const startResize = useCallback(
+    (e: React.PointerEvent, layerId: string, edge: ResizeEdge) => {
+      const layer = layersRef.current.find((l) => l.id === layerId);
+      if (!layer) return;
+      e.stopPropagation();
+      snapshotPages();
+      setDrag({
+        kind: "resize",
+        edge,
+        layerId: layer.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: layer.x,
+        origY: layer.y,
+        origW: layer.width,
+        origH: layer.height,
+      });
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    },
+    [snapshotPages]
+  );
 
-  function startRotate(e: React.PointerEvent, layer: Layer) {
-    e.stopPropagation();
-    snapshotPages();
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const scale = CANVAS_SIZE / rect.width;
-    const cxClient = rect.left + (layer.x + layer.width / 2) / scale;
-    const cyClient = rect.top + (layer.y + layer.height / 2) / scale;
-    const startAngle = Math.atan2(e.clientY - cyClient, e.clientX - cxClient);
-    setDrag({
-      kind: "rotate",
-      layerId: layer.id,
-      cx: cxClient,
-      cy: cyClient,
-      startAngle,
-      origRot: layer.rotation,
-    });
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-  }
+  const startRotate = useCallback(
+    (e: React.PointerEvent, layerId: string) => {
+      const layer = layersRef.current.find((l) => l.id === layerId);
+      if (!layer) return;
+      e.stopPropagation();
+      snapshotPages();
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const scale = CANVAS_SIZE / rect.width;
+      const cxClient = rect.left + (layer.x + layer.width / 2) / scale;
+      const cyClient = rect.top + (layer.y + layer.height / 2) / scale;
+      const startAngle = Math.atan2(
+        e.clientY - cyClient,
+        e.clientX - cxClient
+      );
+      setDrag({
+        kind: "rotate",
+        layerId: layer.id,
+        cx: cxClient,
+        cy: cyClient,
+        startAngle,
+        origRot: layer.rotation,
+      });
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    },
+    [snapshotPages]
+  );
 
   useEffect(() => {
     if (!drag) return;
+    // Locate the moving layer's outer DOM node by data-layer-id. Cheaper
+    // than a per-render registration plumb-through, and the canvas is
+    // always mounted while a drag is in flight so the query is stable
+    // for the duration of the effect.
+    const node = canvasRef.current?.querySelector(
+      `[data-layer-id="${drag.layerId}"]`
+    ) as HTMLElement | null;
+    // Original layer at drag-start. Captured so we can compute the
+    // final logical x/y/w/h/rot for the React commit on pointerup
+    // without re-reading state mid-drag.
+    const origLayer = layers.find((l) => l.id === drag.layerId) ?? null;
+    if (!origLayer) return;
+
+    // Live values seeded with the original — pointermove updates these;
+    // pointerup reads them once and commits to React state.
+    dragLiveRef.current = {
+      finalX: origLayer.x,
+      finalY: origLayer.y,
+      finalW: origLayer.width,
+      finalH: origLayer.height,
+      finalRot: origLayer.rotation,
+    };
+
+    function applyDomStyle(opts: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      rotation: number;
+    }) {
+      if (!node) return;
+      // Override the React-rendered percentage `left/top/width/height`
+      // with raw percentages computed from the live drag values. We
+      // keep using percentages (not pixels) so the layer stays
+      // proportional to the canvas no matter the viewport scale.
+      node.style.left = `${(opts.x / CANVAS_SIZE) * 100}%`;
+      node.style.top = `${(opts.y / CANVAS_SIZE) * 100}%`;
+      node.style.width = `${(opts.width / CANVAS_SIZE) * 100}%`;
+      node.style.height = `${(opts.height / CANVAS_SIZE) * 100}%`;
+      node.style.transform = `rotate(${opts.rotation}deg)`;
+    }
+
     function onMove(e: PointerEvent) {
       if (!drag) return;
+      const live = dragLiveRef.current;
+      if (!live || !origLayer) return;
       if (drag.kind === "move") {
         const scale = clientToCanvasScale();
         const dx = (e.clientX - drag.startX) * scale;
         const dy = (e.clientY - drag.startY) * scale;
-        updateLayer(drag.layerId, {
-          x: drag.origX + dx,
-          y: drag.origY + dy,
+        live.finalX = drag.origX + dx;
+        live.finalY = drag.origY + dy;
+        applyDomStyle({
+          x: live.finalX,
+          y: live.finalY,
+          width: origLayer.width,
+          height: origLayer.height,
+          rotation: origLayer.rotation,
         });
       } else if (drag.kind === "resize") {
         const scale = clientToCanvasScale();
@@ -1018,21 +1120,49 @@ function CanvasEditorDesktop({
           newY = drag.origY + drag.origH - newH;
         }
 
-        updateLayer(drag.layerId, {
+        live.finalX = newX;
+        live.finalY = newY;
+        live.finalW = newW;
+        live.finalH = newH;
+        applyDomStyle({
           x: newX,
           y: newY,
           width: newW,
           height: newH,
+          rotation: origLayer.rotation,
         });
       } else if (drag.kind === "rotate") {
         const angle = Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx);
         const delta = ((angle - drag.startAngle) * 180) / Math.PI;
-        updateLayer(drag.layerId, {
-          rotation: drag.origRot + delta,
+        live.finalRot = drag.origRot + delta;
+        applyDomStyle({
+          x: origLayer.x,
+          y: origLayer.y,
+          width: origLayer.width,
+          height: origLayer.height,
+          rotation: live.finalRot,
         });
       }
     }
     function onUp() {
+      // Single React commit of the final position. Snapshot was already
+      // captured at pointerdown so this whole drag is one undo step.
+      const live = dragLiveRef.current;
+      if (live && drag && origLayer) {
+        if (drag.kind === "move") {
+          updateLayer(drag.layerId, { x: live.finalX, y: live.finalY });
+        } else if (drag.kind === "resize") {
+          updateLayer(drag.layerId, {
+            x: live.finalX,
+            y: live.finalY,
+            width: live.finalW,
+            height: live.finalH,
+          });
+        } else if (drag.kind === "rotate") {
+          updateLayer(drag.layerId, { rotation: live.finalRot });
+        }
+      }
+      dragLiveRef.current = null;
       setDrag(null);
     }
     window.addEventListener("pointermove", onMove);
@@ -1156,7 +1286,7 @@ function CanvasEditorDesktop({
 
   // ---- Sidebar actions ----------------------------------------------------
 
-  async function uploadFile(file: File): Promise<string> {
+  const uploadFile = useCallback(async (file: File): Promise<string> => {
     const fd = new FormData();
     fd.append("file", file);
     const res = await fetch("/api/upload", { method: "POST", body: fd });
@@ -1166,53 +1296,59 @@ function CanvasEditorDesktop({
     }
     const { url } = (await res.json()) as { url: string };
     return url;
-  }
+  }, []);
 
   // Persist the uploaded URL on stories.library_images so it survives layer
   // deletion. Mirrors the server response into local state. Non-fatal: if
   // the persist fails (table/column missing), the image still appears in
   // the sidebar for the current session via the optimistic update below.
-  async function persistToLibrary(url: string) {
-    setStory((prev) => {
-      const existing = prev.library_images ?? [];
-      if (existing.includes(url)) return prev;
-      return { ...prev, library_images: [...existing, url] };
-    });
-    try {
-      const res = await fetch(`/api/stories/${story.id}/library`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+  const persistToLibrary = useCallback(
+    async (url: string) => {
+      setStory((prev) => {
+        const existing = prev.library_images ?? [];
+        if (existing.includes(url)) return prev;
+        return { ...prev, library_images: [...existing, url] };
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Library save failed");
+      try {
+        const res = await fetch(`/api/stories/${story.id}/library`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Library save failed");
+        }
+        const { libraryImages } = (await res.json()) as {
+          libraryImages: string[];
+        };
+        setStory((prev) => ({ ...prev, library_images: libraryImages }));
+      } catch (err) {
+        console.error("[library] persist failed:", err);
+        setSaveError(
+          err instanceof Error
+            ? err.message
+            : "Couldn't save upload to library"
+        );
       }
-      const { libraryImages } = (await res.json()) as {
-        libraryImages: string[];
-      };
-      setStory((prev) => ({ ...prev, library_images: libraryImages }));
-    } catch (err) {
-      console.error("[library] persist failed:", err);
-      setSaveError(
-        err instanceof Error
-          ? err.message
-          : "Couldn't save upload to library"
-      );
-    }
-  }
+    },
+    [story.id]
+  );
 
   // Images tab upload: add to library only. The user drags or clicks a
   // thumbnail to actually place it on the page — upload should not move
   // the user off their current composition.
-  async function handleUpload(file: File) {
-    try {
-      const url = await uploadFile(file);
-      await persistToLibrary(url);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Upload failed");
-    }
-  }
+  const handleUpload = useCallback(
+    async (file: File) => {
+      try {
+        const url = await uploadFile(file);
+        await persistToLibrary(url);
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : "Upload failed");
+      }
+    },
+    [uploadFile, persistToLibrary]
+  );
 
   const resolvePick = useCallback(
     (url: string) => {
@@ -1221,6 +1357,70 @@ function CanvasEditorDesktop({
       setPickingLayerId(null);
     },
     [pickingLayerId, updateLayer]
+  );
+
+  // Stable per-layer handlers forwarded into <LayerView>. These need
+  // referential stability across renders (not per-layer arrow closures)
+  // so React.memo on LayerView can short-circuit — otherwise every
+  // pointermove that re-renders the parent rebuilds N arrows and
+  // remounts handlers on every LayerView. Each takes the target
+  // layerId explicitly; per-layer arrows on the LayerView body itself
+  // only re-create when that LayerView re-renders.
+  const handleLayerPointerDown = useCallback(
+    (e: React.PointerEvent, layerId: string) => startMove(e, layerId),
+    [startMove]
+  );
+  const handleLayerStartResize = useCallback(
+    (e: React.PointerEvent, layerId: string, edge: ResizeEdge) =>
+      startResize(e, layerId, edge),
+    [startResize]
+  );
+  const handleLayerStartRotate = useCallback(
+    (e: React.PointerEvent, layerId: string) => startRotate(e, layerId),
+    [startRotate]
+  );
+  const handleLayerChangeText = useCallback(
+    (layerId: string, text: string) => updateLayer(layerId, { text }),
+    [updateLayer]
+  );
+  const handleLayerDoubleClickText = useCallback(
+    (layerId: string) => {
+      // Snapshot once at edit start so the whole typing session is a
+      // single undo step.
+      snapshotPages();
+      setEditingTextId(layerId);
+    },
+    [snapshotPages]
+  );
+  const handleLayerBlurText = useCallback(() => setEditingTextId(null), []);
+  const handleLayerImageDrop = useCallback(
+    (layerId: string, src: string) => updateLayer(layerId, { src }),
+    [updateLayer]
+  );
+  const handleLayerChooseImage = useCallback(
+    (layerId: string) => setPickingLayerId(layerId),
+    []
+  );
+
+  // Stable handlers for the sidebar panels. Without these every parent
+  // render rebuilds the arrows, and React.memo on ShapesPanel /
+  // ImagesPanel can't short-circuit — every drag pointermove would
+  // re-render the entire shapes grid + library.
+  const handleAddPrimitive = useCallback(
+    (s: PrimitiveShape) => addLayer(makePrimitiveShape(s)),
+    [addLayer]
+  );
+  const handleAddIcon = useCallback(
+    (name: string) => addLayer(makeIconShape(name)),
+    [addLayer]
+  );
+  const handleAddImageBox = useCallback(
+    () => addLayer(makeImageBox()),
+    [addLayer]
+  );
+  const handleInsertImage = useCallback(
+    (url: string) => addLayer(makeUploadImage(url)),
+    [addLayer]
   );
 
   async function handlePickerUpload(file: File): Promise<void> {
@@ -1237,21 +1437,24 @@ function CanvasEditorDesktop({
     }
   }
 
-  async function handleSvgUpload(file: File) {
-    try {
-      const text = await file.text();
-      const parsed = parseUploadedSvg(text);
-      if (!parsed) {
-        setSaveError("That file didn't look like a valid SVG.");
-        return;
+  const handleSvgUpload = useCallback(
+    async (file: File) => {
+      try {
+        const text = await file.text();
+        const parsed = parseUploadedSvg(text);
+        if (!parsed) {
+          setSaveError("That file didn't look like a valid SVG.");
+          return;
+        }
+        addLayer(makePathShape(parsed.markup, parsed.viewBox));
+      } catch (err) {
+        setSaveError(
+          err instanceof Error ? err.message : "Couldn't read the SVG file."
+        );
       }
-      addLayer(makePathShape(parsed.markup, parsed.viewBox));
-    } catch (err) {
-      setSaveError(
-        err instanceof Error ? err.message : "Couldn't read the SVG file."
-      );
-    }
-  }
+    },
+    [addLayer]
+  );
 
   async function regenerateLayoutText() {
     if (!currentPage || regenPending) return;
@@ -1708,8 +1911,8 @@ function CanvasEditorDesktop({
               <ShapesPanel
                 search={shapeSearch}
                 onSearchChange={setShapeSearch}
-                onAddPrimitive={(s) => addLayer(makePrimitiveShape(s))}
-                onAddIcon={(name) => addLayer(makeIconShape(name))}
+                onAddPrimitive={handleAddPrimitive}
+                onAddIcon={handleAddIcon}
                 onUploadSvg={handleSvgUpload}
               />
             )}
@@ -1717,9 +1920,9 @@ function CanvasEditorDesktop({
             {tab === "images" && (
               <ImagesPanel
                 story={story}
-                onAddImageBox={() => addLayer(makeImageBox())}
+                onAddImageBox={handleAddImageBox}
                 onUpload={handleUpload}
-                onInsertImage={(url) => addLayer(makeUploadImage(url))}
+                onInsertImage={handleInsertImage}
               />
             )}
           </div>
@@ -1782,19 +1985,14 @@ function CanvasEditorDesktop({
                   layer={layer}
                   selected={selectedId === layer.id}
                   editingText={editingTextId === layer.id}
-                  onPointerDown={(e) => startMove(e, layer)}
-                  onStartResize={(e, edge) => startResize(e, layer, edge)}
-                  onStartRotate={(e) => startRotate(e, layer)}
-                  onChangeText={(text) => updateLayer(layer.id, { text })}
-                  onDoubleClickText={() => {
-                    // Snapshot once at edit start so the whole typing
-                    // session is a single undo step.
-                    snapshotPages();
-                    setEditingTextId(layer.id);
-                  }}
-                  onBlurText={() => setEditingTextId(null)}
-                  onImageDrop={(src) => updateLayer(layer.id, { src })}
-                  onChooseImage={() => setPickingLayerId(layer.id)}
+                  onPointerDown={handleLayerPointerDown}
+                  onStartResize={handleLayerStartResize}
+                  onStartRotate={handleLayerStartRotate}
+                  onChangeText={handleLayerChangeText}
+                  onDoubleClickText={handleLayerDoubleClickText}
+                  onBlurText={handleLayerBlurText}
+                  onImageDrop={handleLayerImageDrop}
+                  onChooseImage={handleLayerChooseImage}
                 />
               ))}
             </div>
@@ -2182,7 +2380,11 @@ function UploadIcon({ size = 20 }: { size?: number }) {
 // LayoutThumbnail — tiny visual preview of a layout's image + text regions
 // ---------------------------------------------------------------------------
 
-function LayoutThumbnail({ layout }: { layout: Layout }) {
+const LayoutThumbnail = memo(function LayoutThumbnail({
+  layout,
+}: {
+  layout: Layout;
+}) {
   const toPct = (v: number) => `${(v / CANVAS_SIZE) * 100}%`;
   return (
     <div className="relative h-10 w-10 flex-none overflow-hidden rounded border border-cream-300 bg-cream-200">
@@ -2206,7 +2408,7 @@ function LayoutThumbnail({ layout }: { layout: Layout }) {
       />
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // LayerView — renders one layer with selection box, resize/rotate handles
@@ -2216,17 +2418,27 @@ interface LayerViewProps {
   layer: Layer;
   selected: boolean;
   editingText: boolean;
-  onPointerDown: (e: React.PointerEvent) => void;
-  onStartResize: (e: React.PointerEvent, edge: ResizeEdge) => void;
-  onStartRotate: (e: React.PointerEvent) => void;
-  onChangeText: (t: string) => void;
-  onDoubleClickText: () => void;
+  // All handlers below are STABLE identities (useCallback'd at the
+  // parent) so React.memo can short-circuit re-renders. Each takes the
+  // layer id explicitly rather than closing over the layer object —
+  // wrapping per-layer arrows around `layer` would re-create the
+  // callbacks every parent render and break memoization on every
+  // LayerView, defeating the whole point of memoizing this component.
+  onPointerDown: (e: React.PointerEvent, layerId: string) => void;
+  onStartResize: (
+    e: React.PointerEvent,
+    layerId: string,
+    edge: ResizeEdge
+  ) => void;
+  onStartRotate: (e: React.PointerEvent, layerId: string) => void;
+  onChangeText: (layerId: string, t: string) => void;
+  onDoubleClickText: (layerId: string) => void;
   onBlurText: () => void;
-  onImageDrop: (src: string) => void;
-  onChooseImage: () => void;
+  onImageDrop: (layerId: string, src: string) => void;
+  onChooseImage: (layerId: string) => void;
 }
 
-function LayerView({
+const LayerView = memo(function LayerView({
   layer,
   selected,
   editingText,
@@ -2242,6 +2454,7 @@ function LayerView({
   const [dropActive, setDropActive] = useState(false);
   const isImage = layer.type === "image";
 
+  const layerId = layer.id;
   const dragProps = isImage
     ? {
         onDragOver: (e: React.DragEvent) => {
@@ -2260,7 +2473,7 @@ function LayerView({
             e.dataTransfer.getData(IMAGE_DRAG_MIME) ||
             e.dataTransfer.getData("text/uri-list") ||
             e.dataTransfer.getData("text/plain");
-          if (src) onImageDrop(src);
+          if (src) onImageDrop(layerId, src);
         },
       }
     : {};
@@ -2277,13 +2490,18 @@ function LayerView({
   };
 
   return (
-    <div style={style} onPointerDown={onPointerDown} {...dragProps}>
+    <div
+      data-layer-id={layerId}
+      style={style}
+      onPointerDown={(e) => onPointerDown(e, layerId)}
+      {...dragProps}
+    >
       {layer.type === "text" && (
         <TextLayerContent
           layer={layer}
           editing={editingText}
-          onChangeText={onChangeText}
-          onDoubleClick={onDoubleClickText}
+          onChangeText={(t) => onChangeText(layerId, t)}
+          onDoubleClick={() => onDoubleClickText(layerId)}
           onBlur={onBlurText}
         />
       )}
@@ -2292,7 +2510,7 @@ function LayerView({
         <ImageLayerContent
           layer={layer}
           dropActive={dropActive}
-          onChooseImage={onChooseImage}
+          onChooseImage={() => onChooseImage(layerId)}
         />
       )}
 
@@ -2306,7 +2524,7 @@ function LayerView({
 
           {/* East (right) edge — grow rightward from left anchor. */}
           <div
-            onPointerDown={(e) => onStartResize(e, "e")}
+            onPointerDown={(e) => onStartResize(e, layerId, "e")}
             style={{
               position: "absolute",
               top: 0,
@@ -2319,7 +2537,7 @@ function LayerView({
           />
           {/* West (left) edge — grow leftward from right anchor. */}
           <div
-            onPointerDown={(e) => onStartResize(e, "w")}
+            onPointerDown={(e) => onStartResize(e, layerId, "w")}
             style={{
               position: "absolute",
               top: 0,
@@ -2332,7 +2550,7 @@ function LayerView({
           />
           {/* South (bottom) edge — grow downward from top anchor. */}
           <div
-            onPointerDown={(e) => onStartResize(e, "s")}
+            onPointerDown={(e) => onStartResize(e, layerId, "s")}
             style={{
               position: "absolute",
               left: 0,
@@ -2345,7 +2563,7 @@ function LayerView({
           />
           {/* North (top) edge — grow upward from bottom anchor. */}
           <div
-            onPointerDown={(e) => onStartResize(e, "n")}
+            onPointerDown={(e) => onStartResize(e, layerId, "n")}
             style={{
               position: "absolute",
               left: 0,
@@ -2377,7 +2595,7 @@ function LayerView({
 
           {/* Southeast corner — both axes. Sits above the edge hit zones. */}
           <div
-            onPointerDown={(e) => onStartResize(e, "se")}
+            onPointerDown={(e) => onStartResize(e, layerId, "se")}
             className="cursor-nwse-resize rounded-full border-2 border-moss-700 bg-cream-50"
             style={{
               position: "absolute",
@@ -2391,7 +2609,7 @@ function LayerView({
 
           {/* Rotate */}
           <div
-            onPointerDown={onStartRotate}
+            onPointerDown={(e) => onStartRotate(e, layerId)}
             className="cursor-grab rounded-full border-2 border-moss-700 bg-cream-50"
             style={{
               position: "absolute",
@@ -2407,7 +2625,7 @@ function LayerView({
       )}
     </div>
   );
-}
+});
 
 function TextLayerContent({
   layer,
@@ -2564,7 +2782,7 @@ function ImageLayerContent({
 // PropertiesPanel — right sidebar editing controls for the selected layer
 // ---------------------------------------------------------------------------
 
-function PropertiesPanel({
+const PropertiesPanel = memo(function PropertiesPanel({
   layer,
   showRegenerate,
   regenPending,
@@ -2736,7 +2954,7 @@ function PropertiesPanel({
       )}
     </div>
   );
-}
+});
 
 function NumberField({
   label,
@@ -2828,7 +3046,7 @@ function ColorField({
 // ShapesPanel — primitives + searchable icon grid + custom SVG upload
 // ---------------------------------------------------------------------------
 
-function ShapesPanel({
+const ShapesPanel = memo(function ShapesPanel({
   search,
   onSearchChange,
   onAddPrimitive,
@@ -2966,9 +3184,9 @@ function ShapesPanel({
       )}
     </div>
   );
-}
+});
 
-function IconButton({
+const IconButton = memo(function IconButton({
   name,
   onClick,
 }: {
@@ -2991,7 +3209,7 @@ function IconButton({
       )}
     </button>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // ImagesPanel — Images tab contents. Upload button, Add image box button,
@@ -3038,7 +3256,7 @@ function collectComicImages(
   return out;
 }
 
-function ImagesPanel({
+const ImagesPanel = memo(function ImagesPanel({
   story,
   onAddImageBox,
   onUpload,
@@ -3102,7 +3320,7 @@ function ImagesPanel({
       </div>
     </div>
   );
-}
+});
 
 function LibraryThumb({
   url,
