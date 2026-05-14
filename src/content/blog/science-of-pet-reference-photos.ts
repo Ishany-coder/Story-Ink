@@ -5,6 +5,15 @@ export const post: BlogPost = {
   title: "How to take great pet reference photos for AI illustrations",
   excerpt:
     "How to take pet reference photos that make AI illustrations actually look like your dog or cat — lighting, angle, pose variety, what to avoid.",
+  metaDescription:
+    "How to take pet reference photos that make AI illustrations actually look like your dog or cat — lighting, angles, pose variety, common mistakes.",
+  keywords: [
+    "pet reference photos",
+    "AI pet illustrations",
+    "AI pet portrait",
+    "reference photos for AI",
+    "pet photography for AI",
+  ],
   publishedAt: "2026-04-14",
   readMinutes: 6,
   author: "The StoryInk Team",

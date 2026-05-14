@@ -6,6 +6,7 @@ import {
   getPostBySlug,
   getRelatedPosts,
   POSTS,
+  type BlogBlock,
   type BlogPost,
 } from "@/content/blog";
 
@@ -16,6 +17,8 @@ import {
 const SITE_BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ?? "https://storyink.ai"
 ).replace(/\/$/, "");
+
+const DEFAULT_CATEGORY = "Pet storybooks";
 
 // Pre-render every slug at build time so the route is static.
 export async function generateStaticParams(): Promise<
@@ -39,13 +42,18 @@ export async function generateMetadata({
   }
   const ogImage = post.ogImage ?? "/og.png";
   const canonical = `${SITE_BASE_URL}/blog/${post.slug}`;
+  // metaDescription is the SEO-optimised one-liner; the on-page
+  // `excerpt` stays under the H1 as the reader-facing lead-in. The
+  // two strings often overlap but are not always identical.
+  const description = post.metaDescription ?? post.excerpt;
   return {
     title: `${post.title} — StoryInk Blog`,
-    description: post.excerpt,
+    description,
+    keywords: post.keywords,
     alternates: { canonical },
     openGraph: {
       title: post.title,
-      description: post.excerpt,
+      description,
       url: canonical,
       type: "article",
       publishedTime: post.publishedAt,
@@ -55,7 +63,7 @@ export async function generateMetadata({
     twitter: {
       card: "summary_large_image",
       title: post.title,
-      description: post.excerpt,
+      description,
       images: [ogImage],
     },
   };
@@ -71,16 +79,34 @@ function formatDate(iso: string): string {
   });
 }
 
-function buildJsonLd(post: BlogPost): string {
+// Sum words across every body block. Used for JSON-LD `wordCount`,
+// which Google uses as one signal for article length / depth.
+function countWordsInBlock(block: BlogBlock): number {
+  const text =
+    block.type === "list"
+      ? block.content.join(" ")
+      : block.content;
+  // Trim, collapse whitespace, then split on runs of whitespace.
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+function bodyWordCount(body: BlogBlock[]): number {
+  return body.reduce((n, b) => n + countWordsInBlock(b), 0);
+}
+
+function buildArticleJsonLd(post: BlogPost): string {
   const url = `${SITE_BASE_URL}/blog/${post.slug}`;
   const ogImage = post.ogImage
     ? new URL(post.ogImage, SITE_BASE_URL).toString()
     : `${SITE_BASE_URL}/og.png`;
+  const description = post.metaDescription ?? post.excerpt;
   const data = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
     headline: post.title,
-    description: post.excerpt,
+    description,
     datePublished: post.publishedAt,
     dateModified: post.publishedAt,
     author: { "@type": "Organization", name: post.author },
@@ -92,11 +118,53 @@ function buildJsonLd(post: BlogPost): string {
     image: [ogImage],
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     url,
-  } as const;
+    inLanguage: "en-US",
+    wordCount: bodyWordCount(post.body),
+    articleSection: post.category ?? DEFAULT_CATEGORY,
+    keywords: post.keywords ? post.keywords.join(", ") : undefined,
+    isPartOf: {
+      "@type": "Blog",
+      "@id": `${SITE_BASE_URL}/blog`,
+      name: "StoryInk Journal",
+    },
+  };
+  // Drop keys whose value is undefined so the emitted JSON-LD stays
+  // tidy — schema.org tolerates missing fields better than null ones.
+  const compact = Object.fromEntries(
+    Object.entries(data).filter(([, v]) => v !== undefined),
+  );
   // The result lives inside a <script type="application/ld+json"> tag so
   // standard JSON serialization is fine — but we still strip the
   // closing-tag sequence in case any field ever contains "</" which
   // would break the embedded script. Defense in depth, cheap.
+  return JSON.stringify(compact).replace(/</g, "\\u003c");
+}
+
+function buildBreadcrumbJsonLd(post: BlogPost): string {
+  const data = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: `${SITE_BASE_URL}/`,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "Blog",
+        item: `${SITE_BASE_URL}/blog`,
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: post.title,
+        item: `${SITE_BASE_URL}/blog/${post.slug}`,
+      },
+    ],
+  };
   return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
@@ -109,7 +177,8 @@ export default async function BlogPostPage({
   const post = getPostBySlug(slug);
   if (!post) notFound();
   const related = getRelatedPosts(post.slug, 3);
-  const jsonLd = buildJsonLd(post);
+  const articleJsonLd = buildArticleJsonLd(post);
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd(post);
 
   return (
     <article className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-12 text-ink-700">
@@ -119,7 +188,11 @@ export default async function BlogPostPage({
           because the payload is fully under our control + escaped. */}
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: jsonLd }}
+        dangerouslySetInnerHTML={{ __html: articleJsonLd }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: breadcrumbJsonLd }}
       />
 
       <Link

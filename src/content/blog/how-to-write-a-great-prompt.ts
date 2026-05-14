@@ -5,6 +5,15 @@ export const post: BlogPost = {
   title: "How to write a great prompt for an AI pet storybook",
   excerpt:
     "The one-line prompt is the most important thing you write into an AI pet storybook. A field guide to writing prompts that produce a book worth keeping.",
+  metaDescription:
+    "How to write a great prompt for an AI pet storybook. A practical field guide to one-line prompts that produce a personalized pet book worth keeping.",
+  keywords: [
+    "AI pet storybook prompt",
+    "personalized pet book prompt",
+    "AI pet storybook generator",
+    "writing prompts for pet books",
+    "AI storybook template",
+  ],
   publishedAt: "2026-05-05",
   readMinutes: 6,
   author: "The StoryInk Team",

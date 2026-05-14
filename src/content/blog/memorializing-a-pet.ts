@@ -6,6 +6,16 @@ export const post: BlogPost = {
     "Making a pet memorial book: a writer's notes on Rainbow Bridge and recollection",
   excerpt:
     "A guide to making a pet memorial book after a loss — choosing between a Rainbow Bridge or recollection story, when to wait, what details to include.",
+  metaDescription:
+    "A writer's guide to making a pet memorial book after a loss — choosing between a Rainbow Bridge or recollection story, when to wait, what to include.",
+  keywords: [
+    "pet memorial book",
+    "Rainbow Bridge book",
+    "dog memorial book",
+    "cat memorial book",
+    "pet loss gift",
+  ],
+  category: "Pet memorial",
   publishedAt: "2026-04-20",
   readMinutes: 7,
   author: "The StoryInk Team",

@@ -29,6 +29,16 @@ export interface BlogPost {
   readMinutes: number;
   author: string;
   ogImage?: string;
+  // SEO surface data, all optional so legacy posts keep compiling.
+  // - metaDescription overrides the excerpt for the <meta name=
+  //   "description"> tag and the matching OpenGraph/Twitter cards
+  //   (the on-page excerpt under the H1 still uses excerpt).
+  // - keywords is exposed as JSON-LD `keywords` (comma-joined).
+  // - category seeds JSON-LD `articleSection`. Falls back to
+  //   "Pet storybooks" when unset (see src/app/blog/[slug]/page.tsx).
+  metaDescription?: string;
+  keywords?: string[];
+  category?: string;
 }
 
 // Ordered newest-first so the listing page can render directly off

@@ -6,6 +6,15 @@ export const post: BlogPost = {
     "How AI illustrations from pet photos actually work (behind the scenes)",
   excerpt:
     "How AI turns your pet photos into consistent illustrations across every page of a personalized storybook — what works, what fails, and how to fix it.",
+  metaDescription:
+    "How AI illustrations from pet photos work: page-1 character anchoring, fast vs. quality mode, what the model gets right and wrong, and how to fix it.",
+  keywords: [
+    "AI illustrations from pet photos",
+    "AI pet character sheet",
+    "AI pet illustrations",
+    "AI pet portrait consistency",
+    "personalized pet book illustration",
+  ],
   publishedAt: "2026-05-01",
   readMinutes: 7,
   author: "The StoryInk Team",

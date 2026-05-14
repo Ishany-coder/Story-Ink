@@ -6,6 +6,15 @@ export const post: BlogPost = {
     "Personalized pet storybook vs. photo album: why the format matters",
   excerpt:
     "A personalized pet storybook captures who your dog or cat was — not just what they looked like. Here's why a printed keepsake book outlasts a photo album.",
+  metaDescription:
+    "A personalized pet storybook captures who your dog or cat was — not just what they looked like. Why a printed keepsake book outlasts a photo album.",
+  keywords: [
+    "personalized pet storybook",
+    "hardcover pet book",
+    "pet keepsake book",
+    "photo album alternative",
+    "printed pet book",
+  ],
   publishedAt: "2026-05-12",
   readMinutes: 5,
   author: "The StoryInk Team",

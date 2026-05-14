@@ -5,6 +5,15 @@ export const post: BlogPost = {
   title: "Living vs. Memorial pet book: choosing the right tone for your story",
   excerpt:
     "Living mode makes an adventure book starring your pet. Memorial mode makes a gentle Rainbow Bridge or recollection book. Here's how to choose.",
+  metaDescription:
+    "Living mode makes an adventure book starring your pet. Memorial mode makes a gentle Rainbow Bridge or recollection book. How to pick the right tone.",
+  keywords: [
+    "pet memorial book",
+    "personalized pet adventure book",
+    "Rainbow Bridge book",
+    "Living vs Memorial mode",
+    "pet storybook tone",
+  ],
   publishedAt: "2026-05-08",
   readMinutes: 6,
   author: "The StoryInk Team",

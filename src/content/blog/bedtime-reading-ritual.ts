@@ -5,6 +5,15 @@ export const post: BlogPost = {
   title: "Personalized bedtime stories with your kids: building the ritual",
   excerpt:
     "Bedtime reading is one of the best things parents do with young kids. Why a personalized children's book about your pet earns a permanent spot in the rotation.",
+  metaDescription:
+    "Why a personalized children's book about your pet earns a permanent spot in the bedtime rotation — and how to protect the ritual when life is busy.",
+  keywords: [
+    "personalized children's book",
+    "personalized bedtime stories",
+    "bedtime reading ritual",
+    "personalized pet book for kids",
+    "kids bedtime book",
+  ],
   publishedAt: "2026-04-26",
   readMinutes: 6,
   author: "The StoryInk Team",
