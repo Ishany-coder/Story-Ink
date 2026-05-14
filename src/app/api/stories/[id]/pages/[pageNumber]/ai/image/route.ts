@@ -16,6 +16,11 @@ const MAX_SYSTEM_PROMPT_LEN = 2000;
 interface Body {
   prompt: string;
   globalSystemPrompt?: string | null;
+  // Baseline page.imageUrl captured at request submit time. The
+  // Inngest function compares against the current DB value and flags
+  // `stale` when the user swapped images out from under the
+  // regeneration — the client warns before overwriting.
+  pageImageSnapshot?: string | null;
 }
 
 export async function POST(
@@ -66,6 +71,9 @@ export async function POST(
     );
   }
 
+  const pageImageSnapshot =
+    typeof body.pageImageSnapshot === "string" ? body.pageImageSnapshot : null;
+
   const jobId = await createJob("assist.image", user.id);
   await inngest.send({
     name: "assist/image.requested",
@@ -76,6 +84,7 @@ export async function POST(
       pageNumber: pageNum,
       prompt: userPrompt,
       globalSystemPrompt,
+      pageImageSnapshot,
     },
   });
   return NextResponse.json({ jobId }, { status: 202 });

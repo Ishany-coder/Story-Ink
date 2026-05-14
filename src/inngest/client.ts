@@ -27,3 +27,22 @@ export const EVENTS = {
   assistImage: "assist/image.requested",
   assistInfer: "assist/infer.requested",
 } as const;
+
+// Shared payload-shape documentation for the assist events. The HTTP
+// routes inline their event.data shape and the Inngest handlers
+// destructure with an inline cast — we don't have a generated event
+// type system here — but these are the OPTIONAL fields the routes
+// forward and the handlers honour:
+//
+//   pageTextSnapshot?: string | null
+//     The client's view of page.text at the moment the user submitted
+//     the regen request. The handler compares against the DB's current
+//     page.text and emits `stale: true` on the result when they diverge,
+//     so the Studio can warn before clobbering a manual edit made
+//     between submit and Apply. Applies to: assistText, assistInfer.
+//
+//   pageImageSnapshot?: string | null
+//     Same idea for page.imageUrl. Applies to: assistImage, assistInfer.
+//
+// These are advisory only — the handler always continues the regen and
+// only flags the result; it never aborts based on staleness.

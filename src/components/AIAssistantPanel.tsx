@@ -137,6 +137,59 @@ export default function AIAssistantPanel({
     }
   }
 
+  // Result payload from /api/jobs/[id] for any assist job. The optional
+  // `stale*` fields are set by the Inngest handler when the submitted
+  // snapshot diverged from the DB at handler pickup — see the
+  // PendingStale doc in AIAssistantPreview.tsx for the full contract.
+  type AssistResult = {
+    targets: ("text" | "image")[];
+    text: string | null;
+    imageUrl: string | null;
+    stale?: boolean;
+    currentText?: string | null;
+    snapshotText?: string | null;
+    currentImageUrl?: string | null;
+    snapshotImageUrl?: string | null;
+  };
+
+  // Compute a PendingStale from (a) the result's server-side flags
+  // and (b) a client-side compare of the submit-time snapshots
+  // against the page the user is looking at NOW. Either path
+  // independently is sufficient: the server catches concurrent saves,
+  // the client catches local-state edits made during the regen that
+  // haven't been persisted yet.
+  function computeStale(
+    payload: AssistResult,
+    submitTextSnapshot: string,
+    submitImageSnapshot: string
+  ): import("./AIAssistantPreview").PendingStale | undefined {
+    const clientTextStale =
+      payload.targets.includes("text") &&
+      currentPage.text !== submitTextSnapshot;
+    const clientImageStale =
+      payload.targets.includes("image") &&
+      (currentPage.imageUrl ?? "") !== submitImageSnapshot;
+    const serverTextStale =
+      payload.stale === true &&
+      typeof payload.snapshotText === "string" &&
+      typeof payload.currentText === "string" &&
+      payload.snapshotText !== payload.currentText;
+    const serverImageStale =
+      payload.stale === true &&
+      typeof payload.snapshotImageUrl === "string" &&
+      typeof payload.currentImageUrl === "string" &&
+      payload.snapshotImageUrl !== payload.currentImageUrl;
+    const textStale = clientTextStale || serverTextStale;
+    const imageStale = clientImageStale || serverImageStale;
+    if (!textStale && !imageStale) return undefined;
+    return {
+      text: textStale || undefined,
+      image: imageStale || undefined,
+      textSnapshot: textStale ? submitTextSnapshot : undefined,
+      imageSnapshot: imageStale ? submitImageSnapshot : undefined,
+    };
+  }
+
   // Single infer call. When mode === "auto" the server runs the classifier
   // and decides between text, image, or both. When mode is "text" or "image"
   // we pass `targets` to bypass classification.
@@ -154,6 +207,13 @@ export default function AIAssistantPanel({
     setError(null);
     setPending(null);
     setInferredTargets(null);
+    // Snapshot the page text + image at SUBMIT time. Used both as the
+    // server-side baseline (forwarded in the request body) and the
+    // client-side baseline (compared against the live currentPage
+    // when the result returns). A manual edit during the regen will
+    // surface as a stale-edit warning on the preview modal.
+    const submitTextSnapshot = currentPage.text;
+    const submitImageSnapshot = currentPage.imageUrl ?? "";
     try {
       const res = await fetch(
         `/api/stories/${storyId}/pages/${currentPage.pageNumber}/ai/infer`,
@@ -163,6 +223,8 @@ export default function AIAssistantPanel({
           body: JSON.stringify({
             prompt: trimmed,
             globalSystemPrompt: globalPrompt || null,
+            pageTextSnapshot: submitTextSnapshot,
+            pageImageSnapshot: submitImageSnapshot,
             ...(mode !== "auto" ? { targets: [mode] } : {}),
           }),
         }
@@ -175,16 +237,17 @@ export default function AIAssistantPanel({
       }
       const { jobId } = (await res.json()) as { jobId: string };
 
-      const payload = await waitForJob<{
-        targets: ("text" | "image")[];
-        text: string | null;
-        imageUrl: string | null;
-      }>(jobId);
+      const payload = await waitForJob<AssistResult>(jobId);
 
       setInferredTargets(payload.targets);
 
       const wantsText = payload.targets.includes("text");
       const wantsImage = payload.targets.includes("image");
+      const stale = computeStale(
+        payload,
+        submitTextSnapshot,
+        submitImageSnapshot
+      );
 
       if (wantsText && wantsImage) {
         if (payload.text == null && payload.imageUrl == null) {
@@ -196,6 +259,7 @@ export default function AIAssistantPanel({
           page: currentPage,
           newText: payload.text ?? undefined,
           newImageUrl: payload.imageUrl ?? undefined,
+          stale,
         });
       } else if (wantsText) {
         if (payload.text == null) {
@@ -206,6 +270,7 @@ export default function AIAssistantPanel({
           kind: "text",
           page: currentPage,
           newText: payload.text,
+          stale,
         });
       } else if (wantsImage) {
         if (payload.imageUrl == null) {
@@ -216,6 +281,7 @@ export default function AIAssistantPanel({
           kind: "image",
           page: currentPage,
           newImageUrl: payload.imageUrl,
+          stale,
         });
       }
     } catch (err) {
@@ -247,6 +313,8 @@ export default function AIAssistantPanel({
         ? { newText: undefined as string | undefined, newImageUrl: pending.newImageUrl }
         : { newText: pending.newText, newImageUrl: pending.newImageUrl };
 
+    const submitTextSnapshot = currentPage.text;
+    const submitImageSnapshot = currentPage.imageUrl ?? "";
     try {
       const res = await fetch(
         `/api/stories/${storyId}/pages/${currentPage.pageNumber}/ai/infer`,
@@ -256,6 +324,8 @@ export default function AIAssistantPanel({
           body: JSON.stringify({
             prompt: trimmed,
             globalSystemPrompt: globalPrompt || null,
+            pageTextSnapshot: submitTextSnapshot,
+            pageImageSnapshot: submitImageSnapshot,
             targets: [missing],
           }),
         }
@@ -267,11 +337,28 @@ export default function AIAssistantPanel({
         throw new Error(body.error || "Couldn't enqueue generation");
       }
       const { jobId } = (await res.json()) as { jobId: string };
-      const payload = await waitForJob<{
-        targets: ("text" | "image")[];
-        text: string | null;
-        imageUrl: string | null;
-      }>(jobId);
+      const payload = await waitForJob<AssistResult>(jobId);
+
+      const newStale = computeStale(
+        payload,
+        submitTextSnapshot,
+        submitImageSnapshot
+      );
+      // Merge the new side's staleness with whatever was already on
+      // the pending — the user is reviewing the combined diff, so
+      // either side's edit racing with regen should warn.
+      const mergedStale: import("./AIAssistantPreview").PendingStale | undefined =
+        (() => {
+          const a = pending.stale;
+          const b = newStale;
+          if (!a && !b) return undefined;
+          return {
+            text: a?.text || b?.text || undefined,
+            image: a?.image || b?.image || undefined,
+            textSnapshot: a?.textSnapshot ?? b?.textSnapshot,
+            imageSnapshot: a?.imageSnapshot ?? b?.imageSnapshot,
+          };
+        })();
 
       setPending({
         kind: "both",
@@ -284,6 +371,7 @@ export default function AIAssistantPanel({
           missing === "image"
             ? payload.imageUrl ?? undefined
             : existing.newImageUrl,
+        stale: mergedStale,
       });
       setInferredTargets((prev) => {
         if (!prev) return ["text", "image"];

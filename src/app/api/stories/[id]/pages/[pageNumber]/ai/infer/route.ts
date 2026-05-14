@@ -18,6 +18,14 @@ interface Body {
   prompt: string;
   globalSystemPrompt?: string | null;
   targets?: AssistTarget[];
+  // Baselines captured at request submit time. The Inngest function
+  // compares these against the current DB values and flags `stale` on
+  // the result payload when they diverge — the client uses that to
+  // warn the user before clobbering a manual edit made between submit
+  // and Apply. Strings are forwarded verbatim, no length cap (page
+  // text is already capped by the editor).
+  pageTextSnapshot?: string | null;
+  pageImageSnapshot?: string | null;
 }
 
 function sanitizeTargets(v: unknown): AssistTarget[] | undefined {
@@ -79,6 +87,11 @@ export async function POST(
     );
   }
 
+  const pageTextSnapshot =
+    typeof body.pageTextSnapshot === "string" ? body.pageTextSnapshot : null;
+  const pageImageSnapshot =
+    typeof body.pageImageSnapshot === "string" ? body.pageImageSnapshot : null;
+
   const jobId = await createJob("assist.infer", user.id);
   await inngest.send({
     name: "assist/infer.requested",
@@ -90,6 +103,8 @@ export async function POST(
       prompt: userPrompt,
       globalSystemPrompt,
       targets: sanitizeTargets(body.targets),
+      pageTextSnapshot,
+      pageImageSnapshot,
     },
   });
   return NextResponse.json({ jobId }, { status: 202 });

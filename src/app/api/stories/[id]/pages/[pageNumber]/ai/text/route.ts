@@ -18,6 +18,11 @@ const MAX_SYSTEM_PROMPT_LEN = 2000;
 interface Body {
   prompt: string;
   globalSystemPrompt?: string | null;
+  // Baseline page.text captured at request submit time. The Inngest
+  // function compares against the current DB value and flags `stale`
+  // when it diverges, so the client can warn before overwriting a
+  // manual edit made during the regeneration.
+  pageTextSnapshot?: string | null;
 }
 
 export async function POST(
@@ -68,6 +73,9 @@ export async function POST(
     );
   }
 
+  const pageTextSnapshot =
+    typeof body.pageTextSnapshot === "string" ? body.pageTextSnapshot : null;
+
   const jobId = await createJob("assist.text", user.id);
   await inngest.send({
     name: "assist/text.requested",
@@ -78,6 +86,7 @@ export async function POST(
       pageNumber: pageNum,
       prompt: userPrompt,
       globalSystemPrompt,
+      pageTextSnapshot,
     },
   });
   return NextResponse.json({ jobId }, { status: 202 });

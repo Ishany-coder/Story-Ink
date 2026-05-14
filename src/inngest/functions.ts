@@ -494,20 +494,39 @@ export const assistTextFn = inngest.createFunction(
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, userId, storyId, pageNumber, prompt, globalSystemPrompt } =
-      event.data as {
-        jobId: string;
-        userId?: string;
-        storyId: string;
-        pageNumber: number;
-        prompt: string;
-        globalSystemPrompt?: string | null;
-      };
+    const {
+      jobId,
+      userId,
+      storyId,
+      pageNumber,
+      prompt,
+      globalSystemPrompt,
+      pageTextSnapshot,
+    } = event.data as {
+      jobId: string;
+      userId?: string;
+      storyId: string;
+      pageNumber: number;
+      prompt: string;
+      globalSystemPrompt?: string | null;
+      // Snapshot of page.text the client read at submit. We compare
+      // against the DB value at handler pickup so the result payload
+      // can carry a `stale` flag for the UI.
+      pageTextSnapshot?: string | null;
+    };
     await step.run("mark-running", () => markRunning(jobId));
 
     const { story, page } = await step.run("fetch", () =>
       fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
+
+    // Stale-edit detection. If the user supplied a snapshot AND the
+    // DB's current page text differs from it, a manual edit landed
+    // between submit and pickup — flag the result so the Studio can
+    // warn before clobbering it on Apply.
+    const stale =
+      typeof pageTextSnapshot === "string" &&
+      pageTextSnapshot !== page.text;
 
     const text = await step.run("generate", () =>
       assistRegenerateText({
@@ -528,7 +547,14 @@ export const assistTextFn = inngest.createFunction(
     );
 
     await step.run("mark-done", () =>
-      markDone(jobId, { targets: ["text"], text, imageUrl: null })
+      markDone(jobId, {
+        targets: ["text"],
+        text,
+        imageUrl: null,
+        stale,
+        currentText: stale ? page.text : null,
+        snapshotText: stale ? pageTextSnapshot ?? null : null,
+      })
     );
     return { text };
   }
@@ -546,20 +572,36 @@ export const assistImageFn = inngest.createFunction(
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, userId, storyId, pageNumber, prompt, globalSystemPrompt } =
-      event.data as {
-        jobId: string;
-        userId?: string;
-        storyId: string;
-        pageNumber: number;
-        prompt: string;
-        globalSystemPrompt?: string | null;
-      };
+    const {
+      jobId,
+      userId,
+      storyId,
+      pageNumber,
+      prompt,
+      globalSystemPrompt,
+      pageImageSnapshot,
+    } = event.data as {
+      jobId: string;
+      userId?: string;
+      storyId: string;
+      pageNumber: number;
+      prompt: string;
+      globalSystemPrompt?: string | null;
+      pageImageSnapshot?: string | null;
+    };
     await step.run("mark-running", () => markRunning(jobId));
 
     const { story, page } = await step.run("fetch", () =>
       fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
+
+    // Stale-edit detection for image. If the user manually swapped a
+    // page's image after submitting the regen, the DB's imageUrl no
+    // longer matches the snapshot — flag stale so the Studio can warn
+    // before overwriting on Apply.
+    const stale =
+      typeof pageImageSnapshot === "string" &&
+      pageImageSnapshot !== (page.imageUrl ?? "");
 
     const imageUrl = await step.run("generate-and-upload", async () => {
       const dataUri = await assistRegenerateImage({
@@ -578,7 +620,14 @@ export const assistImageFn = inngest.createFunction(
     });
 
     await step.run("mark-done", () =>
-      markDone(jobId, { targets: ["image"], text: null, imageUrl })
+      markDone(jobId, {
+        targets: ["image"],
+        text: null,
+        imageUrl,
+        stale,
+        currentImageUrl: stale ? page.imageUrl ?? null : null,
+        snapshotImageUrl: stale ? pageImageSnapshot ?? null : null,
+      })
     );
     return { imageUrl };
   }
@@ -604,6 +653,8 @@ export const assistInferFn = inngest.createFunction(
       prompt,
       globalSystemPrompt,
       targets: overrideTargets,
+      pageTextSnapshot,
+      pageImageSnapshot,
     } = event.data as {
       jobId: string;
       userId?: string;
@@ -612,12 +663,27 @@ export const assistInferFn = inngest.createFunction(
       prompt: string;
       globalSystemPrompt?: string | null;
       targets?: AssistTarget[];
+      pageTextSnapshot?: string | null;
+      pageImageSnapshot?: string | null;
     };
     await step.run("mark-running", () => markRunning(jobId));
 
     const { story, page } = await step.run("fetch", () =>
       fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
+
+    // Stale-edit detection. The submit-time snapshots (text/image) are
+    // compared against the DB's current page values. Either side may
+    // diverge independently — a manual text edit or a manual image
+    // swap during the regen — so we track them as separate flags and
+    // surface them on the result. The handler continues regardless;
+    // the client decides what to do at Apply time.
+    const textStale =
+      typeof pageTextSnapshot === "string" &&
+      pageTextSnapshot !== page.text;
+    const imageStale =
+      typeof pageImageSnapshot === "string" &&
+      pageImageSnapshot !== (page.imageUrl ?? "");
     const systemPrompt = composeSystemPrompt(
       globalSystemPrompt,
       story.ai_system_prompt
@@ -691,8 +757,24 @@ export const assistInferFn = inngest.createFunction(
         : Promise.resolve(null),
     ]);
 
+    // Only surface staleness for sides we actually regenerated — a
+    // text-only run shouldn't warn about an image swap the user made,
+    // and vice versa.
+    const reportTextStale = textStale && targets.includes("text");
+    const reportImageStale = imageStale && targets.includes("image");
+    const stale = reportTextStale || reportImageStale;
+
     await step.run("mark-done", () =>
-      markDone(jobId, { targets, text, imageUrl })
+      markDone(jobId, {
+        targets,
+        text,
+        imageUrl,
+        stale,
+        currentText: reportTextStale ? page.text : null,
+        snapshotText: reportTextStale ? pageTextSnapshot ?? null : null,
+        currentImageUrl: reportImageStale ? page.imageUrl ?? null : null,
+        snapshotImageUrl: reportImageStale ? pageImageSnapshot ?? null : null,
+      })
     );
     return { targets, text, imageUrl };
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CANVAS_SIZE,
   type ImageLayer,
@@ -12,16 +12,37 @@ import { resolveDisplayLayers } from "@/lib/layouts";
 import ReadOnlyLayer from "./ReadOnlyLayer";
 import { useAutoFitFontSize } from "./useAutoFitFontSize";
 
+// Stale-edit metadata attached to every Pending. The client compares
+// the submit-time snapshot against the page text/image at Apply time
+// — if they diverge it means the user manually edited the page during
+// the regeneration, and applying the AI result would silently
+// overwrite that edit. The server also sets `stale` when the DB
+// diverges (a concurrent save mid-regen); we OR them together at the
+// render site. None of this aborts the flow — it only gates Apply
+// behind an explicit confirmation.
+export interface PendingStale {
+  // True when text divergence has been detected (client- or server-side).
+  text?: boolean;
+  // True when image divergence has been detected (client- or server-side).
+  image?: boolean;
+  // The text/image the user last saw in the editor when they submitted
+  // the request. Used as the baseline for client-side comparison.
+  textSnapshot?: string;
+  imageSnapshot?: string;
+}
+
 export type PendingText = {
   kind: "text";
   page: StoryPage;
   newText: string;
+  stale?: PendingStale;
 };
 
 export type PendingImage = {
   kind: "image";
   page: StoryPage;
   newImageUrl: string;
+  stale?: PendingStale;
 };
 
 // Combined preview produced by /ai/infer when the classifier (or the user's
@@ -32,6 +53,7 @@ export type PendingBoth = {
   page: StoryPage;
   newText?: string;
   newImageUrl?: string;
+  stale?: PendingStale;
 };
 
 export type Pending = PendingText | PendingImage | PendingBoth;
@@ -67,6 +89,17 @@ export default function AIAssistantPreview({
     return () => window.removeEventListener("keydown", onKey);
   }, [pending, onDiscard]);
 
+  // Stale-edit acknowledgement. When the AI result diverges from a
+  // manual edit the user made during the regen, we gate Apply behind
+  // an explicit "yes, overwrite my edit" toggle. The acknowledgement
+  // is keyed to the specific pending object — if a new pending swaps
+  // in (e.g. the user runs another generation), the stale-ack of the
+  // previous preview must not carry over. Tracking via the
+  // pending-object identity lets us derive the effective acknowledged
+  // flag without a setState-in-effect cascade.
+  const [ackedPending, setAckedPending] = useState<Pending | null>(null);
+  const staleAcknowledged = ackedPending === pending;
+
   if (!pending) return null;
 
   // Whether the diff includes a text change, an image change, or both.
@@ -75,6 +108,14 @@ export default function AIAssistantPreview({
   const hasImage = pendingHasImage(pending);
   const failedText = pending.kind === "both" && !hasText;
   const failedImage = pending.kind === "both" && !hasImage;
+
+  // Surface staleness only on sides we're actually about to apply —
+  // a text-only diff shouldn't warn about an image swap that never
+  // gets clobbered.
+  const staleText = !!pending.stale?.text && hasText;
+  const staleImage = !!pending.stale?.image && hasImage;
+  const isStale = staleText || staleImage;
+  const applyDisabled = isStale && !staleAcknowledged;
 
   return (
     <div
@@ -107,6 +148,15 @@ export default function AIAssistantPreview({
         </header>
 
         <div className="flex-1 overflow-auto px-6 py-5">
+          {isStale && (
+            <StaleEditWarning
+              staleText={staleText}
+              staleImage={staleImage}
+              acknowledged={staleAcknowledged}
+              onAcknowledgeChange={(v) => setAckedPending(v ? pending : null)}
+            />
+          )}
+
           <PageDiffBody pending={pending} />
 
           {failedText && (
@@ -141,8 +191,9 @@ export default function AIAssistantPreview({
 
         <footer className="flex items-center justify-between gap-3 border-t border-cream-300 bg-cream-200/40 px-6 py-4">
           <p className="text-[11px] font-bold text-ink-300">
-            Apply updates this page locally. Hit &quot;Save page&quot; in the
-            studio to persist.
+            {applyDisabled
+              ? "Tick the acknowledgement above to overwrite your edit."
+              : "Apply updates this page locally. Hit “Save page” in the studio to persist."}
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -150,19 +201,80 @@ export default function AIAssistantPreview({
               onClick={onDiscard}
               className="rounded-2xl bg-moss-100 px-5 py-2 text-sm font-black uppercase text-ink-500 transition-all hover:bg-cream-300"
             >
-              Discard
+              {isStale ? "Cancel" : "Discard"}
             </button>
             <button
               type="button"
               onClick={onApply}
-              className="rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 py-2 text-sm font-black uppercase text-cream-50 shadow-md transition-all hover:scale-105"
+              disabled={applyDisabled}
+              className="rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 py-2 text-sm font-black uppercase text-cream-50 shadow-md transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
             >
-              Apply
+              {isStale ? "Apply anyway" : "Apply"}
             </button>
           </div>
         </footer>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StaleEditWarning — shown at the top of the preview body when the
+// submit-time snapshot diverged from the page state at result time.
+// The user has to explicitly acknowledge before Apply enables.
+// ---------------------------------------------------------------------------
+
+function StaleEditWarning({
+  staleText,
+  staleImage,
+  acknowledged,
+  onAcknowledgeChange,
+}: {
+  staleText: boolean;
+  staleImage: boolean;
+  acknowledged: boolean;
+  onAcknowledgeChange: (v: boolean) => void;
+}) {
+  // Build the warning sentence dynamically so it matches the sides that
+  // actually diverged. Either both, or one of two — never neither
+  // (the parent gates rendering on isStale).
+  let what: string;
+  if (staleText && staleImage) {
+    what = "You edited this page's text AND swapped the illustration";
+  } else if (staleText) {
+    what = "You edited this page's text";
+  } else {
+    what = "You swapped this page's illustration";
+  }
+
+  return (
+    <section className="mb-5 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3">
+      <div className="flex items-start gap-3">
+        <span aria-hidden="true" className="text-base leading-none text-amber-600">
+          ⚠
+        </span>
+        <div className="flex-1">
+          <p className="text-[11px] font-black uppercase tracking-wider text-amber-700">
+            Stale assistant result
+          </p>
+          <p className="mt-1 text-[13px] leading-snug text-amber-900">
+            {what} while the assistant was working. Applying this
+            suggestion will overwrite your edit. The diff above compares
+            the AI result against the page&apos;s ORIGINAL state — your
+            unsaved edit isn&apos;t shown.
+          </p>
+          <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-[12px] font-bold text-amber-900">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => onAcknowledgeChange(e.target.checked)}
+              className="h-4 w-4 cursor-pointer accent-amber-600"
+            />
+            I understand — overwrite my edit
+          </label>
+        </div>
+      </div>
+    </section>
   );
 }
 
