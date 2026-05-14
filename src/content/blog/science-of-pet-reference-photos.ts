@@ -2,9 +2,9 @@ import type { BlogPost } from "./index";
 
 export const post: BlogPost = {
   slug: "science-of-pet-reference-photos",
-  title: "The science of taking great pet reference photos",
+  title: "How to take great pet reference photos for AI illustrations",
   excerpt:
-    "Why the photos you upload do more work than anything else in the system. A short, opinionated guide to taking the kind that produce illustrations that actually look like your dog.",
+    "How to take pet reference photos that make AI illustrations actually look like your dog or cat — lighting, angle, pose variety, what to avoid.",
   publishedAt: "2026-04-14",
   readMinutes: 6,
   author: "The StoryInk Team",
@@ -12,16 +12,16 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "If you only do one thing carefully in the StoryInk flow, do this. The reference photos are the single largest variable in whether the illustrations look like your pet. Better photos in, better book out. The prompt matters too, the mode matters too, but neither of them can compensate for blurry low-light selfies as the reference set.",
+        "If you only do one thing carefully in the StoryInk flow, do this. The reference photos are the single largest variable in whether the illustrations look like your pet. Better photos in, better book out. [The prompt matters too](/blog/how-to-write-a-great-prompt), the mode matters too, but neither of them can compensate for blurry low-light selfies as the reference set.",
     },
     {
       type: "paragraph",
       content:
-        "We have looked at a lot of these now and the patterns are pretty consistent. This post is the short version of what actually moves the needle.",
+        "We have looked at a lot of AI illustrations from pet photos by now and the patterns are pretty consistent. This post is the short version of what actually moves the needle.",
     },
     {
       type: "heading",
-      content: "Natural light, always",
+      content: "Natural light: the biggest factor in pet reference photos",
     },
     {
       type: "paragraph",
@@ -69,7 +69,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "You do not need all five. Three good ones beat five mediocre ones. The system is using the references collectively to build up a picture of what the animal looks like from any angle, and an angle the references do not show is an angle the AI will invent.",
+        "You do not need all five. Three good ones beat five mediocre ones. The system uses the references collectively to build up a picture of what the animal looks like from any angle — and inside a book, [the system uses page 1 as a character anchor](/blog/behind-the-illustrations) for the pages that follow. An angle the references do not show is an angle the AI will invent.",
     },
     {
       type: "heading",
@@ -96,7 +96,7 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "What confuses the AI",
+      content: "What confuses AI pet illustrations",
     },
     {
       type: "paragraph",
@@ -118,7 +118,7 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "What helps the AI",
+      content: "What helps AI illustrations from pet photos look like your pet",
     },
     {
       type: "paragraph",

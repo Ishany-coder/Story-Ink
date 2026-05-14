@@ -2,9 +2,9 @@ import type { BlogPost } from "./index";
 
 export const post: BlogPost = {
   slug: "bedtime-reading-ritual",
-  title: "Reading bedtime stories with your kids — making it a ritual",
+  title: "Personalized bedtime stories with your kids: building the ritual",
   excerpt:
-    "Bedtime reading is one of the most reliably good things parents do with their kids. Some thoughts on protecting the ritual, and on why a personalized book lands so differently than a generic one.",
+    "Bedtime reading is one of the best things parents do with young kids. Why a personalized children's book about your pet earns a permanent spot in the rotation.",
   publishedAt: "2026-04-26",
   readMinutes: 6,
   author: "The StoryInk Team",
@@ -55,21 +55,21 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "Why personalized books work at this age",
+      content: "Why a personalized children's book works at bedtime",
     },
     {
       type: "paragraph",
       content:
-        "Books work because kids project themselves onto the protagonist. A book where the protagonist is already them — or already someone they love, like the family dog — collapses that step. The projection is immediate. They are not pretending to be the rabbit on the page. They are reading about their own dog, and it is already their dog.",
+        "A personalized children's book works because kids project themselves onto the protagonist, and a book where the protagonist is already them — or already someone they love, like the family dog — collapses that step. The projection is immediate. They are not pretending to be the rabbit on the page. They are reading about their own dog, and it is already their dog.",
     },
     {
       type: "paragraph",
       content:
-        "We have noticed that the books in the StoryInk early-user rotation tend to get the same treatment as the favorite generic books — the corners get worn, the pages get sticky, they are the first ones the kid grabs at bedtime. The personalization is not a novelty for them. It is just that the dog they already love is in the book. That is a different relationship with the page than they have with the bunny in Goodnight Moon.",
+        "We have noticed that the books in the StoryInk early-user rotation tend to get the same treatment as the favorite generic books — the corners get worn, the pages get sticky, they are the first ones the kid grabs at bedtime. The personalization is not a novelty for them. It is just that [the dog they already love is in the book](/blog/pet-storybook-vs-photo-album). That is a different relationship with the page than they have with the bunny in Goodnight Moon.",
     },
     {
       type: "heading",
-      content: "What we recommend keeping in rotation",
+      content: "Where a personalized pet book fits next to picture-book classics",
     },
     {
       type: "paragraph",
@@ -98,7 +98,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "If the book that ends up at the top of the rotation is the one you made about your dog, you are getting something extra out of those hundred reads. You are saying the dog's name to your child a hundred times in the dark. That is a strange and lovely thing to give them.",
+        "If the book that ends up at the top of the rotation is [the book you made about your dog](/create), you are getting something extra out of those hundred reads. You are saying the dog's name to your child a hundred times in the dark. That is a strange and lovely thing to give them.",
     },
   ],
 };
