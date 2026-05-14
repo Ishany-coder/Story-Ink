@@ -2,9 +2,18 @@ import type { BlogPost } from "./index";
 
 export const post: BlogPost = {
   slug: "living-vs-memorial-mode",
-  title: "Living vs Memorial mode: choosing the right tone for your story",
+  title: "Living vs. Memorial pet book: choosing the right tone for your story",
   excerpt:
-    "StoryInk asks you up front whether your pet is still with you. That single choice changes the entire story. Here is what each mode does, and how to tell which one you want.",
+    "Living mode makes an adventure book starring your pet. Memorial mode makes a gentle Rainbow Bridge or recollection book. Here's how to choose.",
+  metaDescription:
+    "Living mode makes an adventure book starring your pet. Memorial mode makes a gentle Rainbow Bridge or recollection book. How to pick the right tone.",
+  keywords: [
+    "pet memorial book",
+    "personalized pet adventure book",
+    "Rainbow Bridge book",
+    "Living vs Memorial mode",
+    "pet storybook tone",
+  ],
   publishedAt: "2026-05-08",
   readMinutes: 6,
   author: "The StoryInk Team",
@@ -21,7 +30,16 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "Living mode: adventure, mischief, warmth",
+      content: "What a ‘pet memorial book’ actually is",
+    },
+    {
+      type: "paragraph",
+      content:
+        "A pet memorial book is a short printed keepsake about an animal who is no longer with you. It is not a biography. It is six to eight pages — one feeling, written gently — that gives a family something to hold and re-read. The two narrative shapes we use, recollection and Rainbow Bridge, are described in detail below.",
+    },
+    {
+      type: "heading",
+      content: "Living mode: a personalized pet adventure book",
     },
     {
       type: "paragraph",
@@ -35,7 +53,7 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "Memorial mode: gentler, slower, never blended",
+      content: "Memorial mode: a gentle pet memorial book, never blended",
     },
     {
       type: "paragraph",
@@ -46,7 +64,7 @@ export const post: BlogPost = {
       type: "list",
       content: [
         "Recollection — a quiet remembering of an everyday moment the pet was part of. A walk, a window seat, a morning. The pet is present and alive throughout. The ending is fond, not final.",
-        "Rainbow Bridge — a soft, symbolic farewell that uses the language of crossing-over. The pet is not in pain. The crossing is gentle. The ending is peaceful and complete.",
+        "Rainbow Bridge — a soft, symbolic Rainbow Bridge farewell using the language of crossing over. The pet is not in pain. The crossing is gentle. The ending is peaceful and complete.",
       ],
     },
     {
@@ -80,7 +98,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "The edge cases tend to be these. A pet who is older and slowing down, but who is still here — we recommend Living. The story-as-record matters more during a pet's actual life than after. A pet who you lost only weeks ago — Memorial is the structurally honest choice, but we gently suggest waiting a bit. Grief that is very fresh tends to want a different kind of attention than a book can give. We have written more about that in the memorial-mode essay.",
+        "The edge cases tend to be these. A pet who is older and slowing down, but who is still here — we recommend Living. The story-as-record matters more during a pet's actual life than after. A pet who you lost only weeks ago — Memorial is the structurally honest choice, but we gently suggest waiting a bit. Grief that is very fresh tends to want a different kind of attention than a book can give. We have written more about that in [the memorial-mode essay](/blog/memorializing-a-pet).",
     },
     {
       type: "heading",
@@ -103,7 +121,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "Some families end up with two volumes for the same pet — a Living book made during the pet's life, and a Memorial book made some time after. They sit on the same shelf and they read very differently. That is the version we quietly hope for: a record of who your animal was, made while you still had them, plus a goodbye written in your own voice when you were ready.",
+        "Some families end up with two volumes for the same pet — [a Living book made during the pet's life](/blog/pet-storybook-vs-photo-album), and a Memorial book made some time after. They sit on the same shelf and they read very differently. That is the version we quietly hope for: a record of who your animal was, made while you still had them, plus a goodbye written in your own voice when you were ready.",
     },
     {
       type: "paragraph",

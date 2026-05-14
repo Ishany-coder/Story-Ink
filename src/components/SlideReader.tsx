@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { type Story } from "@/lib/types";
 import { resolveDisplayLayers } from "@/lib/layouts";
 import { isBetaTesting } from "@/lib/beta-flag";
@@ -10,6 +11,18 @@ import ReadOnlyLayer from "./ReadOnlyLayer";
 export default function SlideReader({ story }: { story: Story }) {
   const [currentPage, setCurrentPage] = useState(0);
   const pages = story.pages;
+
+  // One-time first-run tip strip. HomeCreate appends `?fresh=1` after
+  // a successful generation; we show a single dismissible cream
+  // banner above the reader explaining the Studio and (outside
+  // closed beta) the hardcover keepsake CTA. Initial state reads
+  // the param on mount; dismissal is component-local so closing it
+  // just hides for this view without touching localStorage.
+  const searchParams = useSearchParams();
+  const fresh = searchParams?.get("fresh") === "1";
+  const [tipDismissed, setTipDismissed] = useState(false);
+  const betaOn = isBetaTesting();
+  const showFreshTip = fresh && !tipDismissed;
 
   const goNext = useCallback(() => {
     setCurrentPage((p) => Math.min(p + 1, pages.length - 1));
@@ -39,6 +52,40 @@ export default function SlideReader({ story }: { story: Story }) {
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-gradient-to-b from-cream-200 to-cream-100">
+      {showFreshTip && (
+        <div className="flex items-center justify-center gap-2 border-b border-cream-300 bg-cream-100 px-4 py-2 text-center text-[12px] font-medium text-ink-700 sm:px-6 lg:px-8">
+          <span className="flex-1 sm:flex-none">
+            Your story is ready. Want to tweak a page?{" "}
+            <Link
+              href={`/canvas/${story.id}`}
+              className="font-semibold text-moss-700 underline decoration-moss-300 underline-offset-2 hover:text-moss-900 hover:decoration-moss-700"
+            >
+              Open in Studio
+            </Link>{" "}
+            · Reading on mobile? Pages auto-flow.
+            {!betaOn && (
+              <>
+                {" "}· Want a hardcover keepsake?{" "}
+                <Link
+                  href={`/ship/${story.id}`}
+                  className="font-semibold text-moss-700 underline decoration-moss-300 underline-offset-2 hover:text-moss-900 hover:decoration-moss-700"
+                >
+                  Order a copy
+                </Link>
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => setTipDismissed(true)}
+            aria-label="Dismiss tip"
+            className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-ink-500 hover:bg-cream-200 hover:text-ink-900"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 border-b-2 border-dashed border-cream-300 px-3 py-3 sm:px-6 sm:gap-4 lg:px-8">
         <Link

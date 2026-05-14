@@ -7,22 +7,28 @@ import { POSTS } from "@/content/blog";
 // nothing to fetch at request time. Posts are already sorted newest-
 // first by the registry.
 
+const SITE_BASE_URL = (
+  process.env.NEXT_PUBLIC_BASE_URL ?? "https://storyink.ai"
+).replace(/\/$/, "");
+
+const LISTING_DESCRIPTION =
+  "Notes on personalized pet storybooks, AI illustration, and making a keepsake book about your dog or cat — from the StoryInk team.";
+
 export const metadata: Metadata = {
-  title: "Blog — StoryInk",
-  description:
-    "Notes from the team on pet storytelling, the craft of personalized children's books, and how StoryInk works under the hood.",
+  title: "StoryInk Journal — personalized pet storybooks & AI illustration",
+  description: LISTING_DESCRIPTION,
+  alternates: { canonical: `${SITE_BASE_URL}/blog` },
   openGraph: {
-    title: "Blog — StoryInk",
-    description:
-      "Notes from the team on pet storytelling, the craft of personalized children's books, and how StoryInk works under the hood.",
+    title: "StoryInk Journal — personalized pet storybooks & AI illustration",
+    description: LISTING_DESCRIPTION,
     type: "website",
+    url: `${SITE_BASE_URL}/blog`,
     images: ["/og.png"],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Blog — StoryInk",
-    description:
-      "Notes from the team on pet storytelling, the craft of personalized children's books, and how StoryInk works under the hood.",
+    title: "StoryInk Journal — personalized pet storybooks & AI illustration",
+    description: LISTING_DESCRIPTION,
     images: ["/og.png"],
   },
 };
@@ -37,19 +43,57 @@ function formatDate(iso: string): string {
   });
 }
 
+// JSON-LD for the listing page itself. The Blog node references every
+// post by its canonical URL so Google can attribute them to the same
+// publication; individual posts re-emit their own BlogPosting node on
+// their slug page (no need to duplicate full bodies here).
+function buildListingJsonLd(): string {
+  const data = {
+    "@context": "https://schema.org",
+    "@type": "Blog",
+    "@id": `${SITE_BASE_URL}/blog`,
+    name: "StoryInk Journal",
+    description: LISTING_DESCRIPTION,
+    url: `${SITE_BASE_URL}/blog`,
+    inLanguage: "en-US",
+    publisher: {
+      "@type": "Organization",
+      name: "StoryInk",
+      logo: {
+        "@type": "ImageObject",
+        url: `${SITE_BASE_URL}/og.png`,
+      },
+    },
+    blogPost: POSTS.map((p) => ({
+      "@type": "BlogPosting",
+      headline: p.title,
+      url: `${SITE_BASE_URL}/blog/${p.slug}`,
+      datePublished: p.publishedAt,
+      description: p.metaDescription ?? p.excerpt,
+    })),
+  };
+  return JSON.stringify(data).replace(/</g, "\\u003c");
+}
+
 export default function BlogIndexPage() {
+  const jsonLd = buildListingJsonLd();
   return (
     <article className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-12 text-ink-700">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLd }}
+      />
+
       <header className="text-center">
         <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
           StoryInk Journal
         </span>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-4xl font-semibold tracking-tight text-ink-900 sm:text-5xl">
-          Blog
+          StoryInk Journal: notes on personalized pet storybooks
         </h1>
         <p className="mx-auto mt-3 max-w-xl text-base text-ink-500">
-          Notes from the team on pet storytelling, the craft of personalized
-          children&rsquo;s books, and how StoryInk works under the hood.
+          Notes on personalized pet storybooks, AI illustration, and
+          making a keepsake book about your dog or cat.
         </p>
       </header>
 

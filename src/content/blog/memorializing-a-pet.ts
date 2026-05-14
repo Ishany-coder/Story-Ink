@@ -2,17 +2,32 @@ import type { BlogPost } from "./index";
 
 export const post: BlogPost = {
   slug: "memorializing-a-pet",
-  title: "Memorializing a pet: a writer's notes",
+  title:
+    "Making a pet memorial book: a writer's notes on Rainbow Bridge and recollection",
   excerpt:
-    "Some thoughts on using StoryInk after a loss. What to put in the book. When to wait. What this format can and cannot do for grief.",
+    "A guide to making a pet memorial book after a loss — choosing between a Rainbow Bridge or recollection story, when to wait, what details to include.",
+  metaDescription:
+    "A writer's guide to making a pet memorial book after a loss — choosing between a Rainbow Bridge or recollection story, when to wait, what to include.",
+  keywords: [
+    "pet memorial book",
+    "Rainbow Bridge book",
+    "dog memorial book",
+    "cat memorial book",
+    "pet loss gift",
+  ],
+  category: "Pet memorial",
   publishedAt: "2026-04-20",
   readMinutes: 7,
   author: "The StoryInk Team",
   body: [
     {
+      type: "heading",
+      content: "What a pet memorial book is for",
+    },
+    {
       type: "paragraph",
       content:
-        "Memorial mode is the part of StoryInk we think about most carefully. The Living-mode books are a kind of joy — we put them out and people laugh. The Memorial books are different. They tend to be made by someone who is sitting alone in a quiet room and trying to do one small good thing for an animal who is no longer here. The decisions we make around that flow matter more than they would in a regular product, so we want to talk through what the format does, what it does not do, and how to use it well.",
+        "Making a pet memorial book is the part of StoryInk we think about most carefully. The Living-mode books are a kind of joy — we put them out and people laugh. The Memorial books are different. They tend to be made by someone who is sitting alone in a quiet room and trying to do one small good thing for an animal who is no longer here. The decisions we make around that flow matter more than they would in a regular product, so we want to talk through what the format does, what it does not do, and how to use it well.",
     },
     {
       type: "paragraph",
@@ -21,7 +36,7 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "What a memorial book can do",
+      content: "What a pet memorial book can do",
     },
     {
       type: "paragraph",
@@ -49,12 +64,12 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "Choosing the narrative path",
+      content: "Choosing between a Rainbow Bridge book and a recollection book",
     },
     {
       type: "paragraph",
       content:
-        "Memorial mode picks one of two paths and commits to it. (See the post on Living vs Memorial mode for the longer treatment.) The short version:",
+        "Memorial mode picks one of two paths and commits to it. (See [the post on Living vs Memorial mode](/blog/living-vs-memorial-mode) for the longer treatment.) The short version:",
     },
     {
       type: "list",
@@ -75,7 +90,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "When you write the one-line idea, pick the smallest, most specific moment you can. Not a summary of the pet's life. Not the most dramatic memory. The everyday one. The one no one outside your household would know.",
+        "When you write the one-line idea, pick the smallest, most specific moment you can. Not a summary of the pet's life. Not the most dramatic memory. The everyday one. The one no one outside your household would know. Whether you're making a dog memorial book or a cat memorial book, that level of particularity is what reads as true.",
     },
     {
       type: "paragraph",
@@ -99,16 +114,16 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "This means the prose will be quieter than in a living book. The pages are shorter. The scenes are slower. That is not the AI being lazy. It is the AI doing what we asked it to.",
+        "This means the prose will be quieter than in a living book. The pages are shorter. The scenes are slower. That is not the AI being lazy. It is the AI doing what we asked it to. (The illustrations, separately, rest on whichever photos you upload — picking [the kind of reference photos that hold up](/blog/science-of-pet-reference-photos) matters here too.)",
     },
     {
       type: "heading",
-      content: "On printing the book",
+      content: "Printing a memorial pet book as a hardcover keepsake",
     },
     {
       type: "paragraph",
       content:
-        "Memorial books, in our experience, benefit from being printed rather than left as a PDF. The book on a shelf is doing different work than the book on a screen. It becomes part of the room. It becomes a thing the family points at when they want to remember together.",
+        "Memorial books, in our experience, benefit from being printed rather than left as a PDF. [The printed keepsake on a shelf](/blog/pet-storybook-vs-photo-album) is doing different work than the book on a screen. It becomes part of the room. It becomes a thing the family points at when they want to remember together.",
     },
     {
       type: "paragraph",

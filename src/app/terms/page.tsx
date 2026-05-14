@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { LAST_UPDATED, SUPPORT_EMAIL } from "@/lib/legal";
+import { isBetaTesting } from "@/lib/beta-flag";
 
-// Plain-language Terms of Service. The refund policy and governing-law
-// section are written as sensible defaults; the operator should adjust
-// the specifics (refund windows, jurisdiction) before high-stakes use.
+// Plain-language Terms of Service. Governing law is Washington (King
+// County). The refunds section is hidden during closed beta because
+// there are no real purchases — showing "no refunds" copy while the
+// paid surfaces are disabled would be misleading.
 // See the footer note at the bottom of the page for the caveat.
 
 export const metadata = {
@@ -13,6 +15,8 @@ export const metadata = {
 };
 
 export default function TermsPage() {
+  const beta = isBetaTesting();
+
   return (
     <article className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-12 text-ink-700">
       <Link
@@ -141,62 +145,30 @@ export default function TermsPage() {
           </ul>
         </div>
 
-        <div>
-          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            5. Refunds
-          </h2>
-          <p>
-            These are the defaults. The operator should adjust the
-            specifics to match the actual fulfillment partner&rsquo;s
-            terms before live launch.
-          </p>
-          <ul className="mt-2 ml-5 list-disc space-y-1">
-            <li>
-              <strong>Digital unlock</strong> — non-refundable once the
-              full digital PDF has been generated for you. You can
-              still preview the book before unlocking; the unlock fee
-              applies once the full version is produced.
-            </li>
-            <li>
-              <strong>Hardcover, before production begins</strong> —
-              fully refundable. Production typically begins within a
-              few minutes of checkout, when our system builds the
-              print-ready PDFs. If you contact{" "}
+        {!beta && (
+          <div>
+            <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+              5. Refunds
+            </h2>
+            <p>
+              <strong>All sales are final.</strong> We do not issue
+              refunds for digital downloads, hardcover orders, or any
+              other purchase. Defective or damaged hardcovers will be
+              replaced at our discretion — email{" "}
               <a
                 href={`mailto:${SUPPORT_EMAIL}`}
                 className="text-moss-700 underline hover:text-moss-900"
               >
                 {SUPPORT_EMAIL}
               </a>{" "}
-              before the PDF build completes, we will cancel and
-              refund.
-            </li>
-            <li>
-              <strong>Hardcover, after production begins but before
-              shipping</strong> — partial refund at our discretion;
-              production costs may be deducted.
-            </li>
-            <li>
-              <strong>Hardcover, after shipping</strong> — refunds are
-              available only for defective or damaged products and for
-              packages lost in transit. Email{" "}
-              <a
-                href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-moss-700 underline hover:text-moss-900"
-              >
-                {SUPPORT_EMAIL}
-              </a>{" "}
-              within thirty days of delivery (or expected delivery)
-              with photos and we will make it right with a replacement
-              or refund.
-            </li>
-            <li>
-              Refunds are issued to the original Stripe payment method.
-              If you refund the hardcover order entirely, the digital
-              unlock that came with it is revoked as well.
-            </li>
-          </ul>
-        </div>
+              within thirty days of delivery with photos of the issue
+              and we will arrange a replacement where appropriate.
+              Orders returned because of an incorrect shipping address,
+              or refused at delivery, are not eligible for a refund;
+              reshipping requires a new order.
+            </p>
+          </div>
+        )}
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
@@ -306,19 +278,14 @@ export default function TermsPage() {
             11. Governing law
           </h2>
           <p>
-            {/*
-              Operator: pick the US state whose law you want to govern
-              this agreement before treating this clause as binding.
-              The default below is a placeholder.
-            */}
-            These terms are governed by the laws of{" "}
-            <span className="italic">[your state]</span>, without regard
-            to its conflict-of-laws principles. Disputes are subject to
-            the exclusive jurisdiction of state and federal courts
-            located in{" "}
-            <span className="italic">[your state]</span>, except where
-            applicable consumer-protection law gives you the right to
-            sue locally.
+            These terms are governed by the laws of the State of
+            Washington, without regard to its conflict-of-laws
+            principles. Any dispute arising out of or relating to these
+            terms or the service will be brought in the state or
+            federal courts located in King County, Washington, and you
+            consent to the personal jurisdiction of those courts —
+            except where applicable consumer-protection law gives you
+            the right to sue locally.
           </p>
         </div>
 

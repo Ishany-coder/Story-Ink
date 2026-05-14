@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import GeneratingOverlay from "./GeneratingOverlay";
 import LegalConsentModal, { readStoredConsent } from "./LegalConsentModal";
 import PetAvatar from "./PetAvatar";
+import { isBetaTesting } from "@/lib/beta-flag";
 import { useJobPolling } from "@/lib/useJobPolling";
+import { useMediaQuery } from "@/lib/useMediaQuery";
 import { startersForMode } from "@/lib/story-starters";
 import {
   DEFAULT_IMAGE_STYLE,
@@ -36,10 +38,25 @@ interface Props {
 // emoji or runaway animations.
 export default function HomeCreate({ pets }: Props) {
   const router = useRouter();
-  const [kind, setKind] = useState<"pet" | "generic">(
-    pets.length > 0 ? "pet" : "generic"
-  );
-  const [petId, setPetId] = useState<string | null>(pets[0]?.id ?? null);
+  const searchParams = useSearchParams();
+  // If we landed here from PetForm's post-create redirect
+  // (`/create?petId=…`), preselect that pet. Falls back to the
+  // newest pet (pets are already ordered by created_at desc on the
+  // server). Guard against a stale id pointing at a deleted pet by
+  // checking the lookup table.
+  const requestedPetId = searchParams?.get("petId") ?? null;
+  const initialPetId = useMemo(() => {
+    if (requestedPetId && pets.some((p) => p.id === requestedPetId)) {
+      return requestedPetId;
+    }
+    return pets[0]?.id ?? null;
+  }, [pets, requestedPetId]);
+  // Default to pet mode in both cases. With zero pets we still show
+  // the empty PetPicker (which carries the "Add a pet to get started"
+  // CTA) and surface Generic as a small text-link escape hatch below
+  // it — that way the primary funnel for new users is the pet path.
+  const [kind, setKind] = useState<"pet" | "generic">("pet");
+  const [petId, setPetId] = useState<string | null>(initialPetId);
   const [prompt, setPrompt] = useState("");
   const [pageCount, setPageCount] = useState(MIN_PAGES);
   const [customMode, setCustomMode] = useState(false);
@@ -58,6 +75,16 @@ export default function HomeCreate({ pets }: Props) {
   // the user only cares about the gate when they're about to submit.
   const [consentModalOpen, setConsentModalOpen] = useState(false);
 
+  // Mobile awareness banner. Tells phone users up front that they can
+  // create and read on their device but the Studio (page editor)
+  // needs a tablet/desktop. Dismissible per-mount; we don't persist
+  // because a) it's a small one-liner and b) the surface is the very
+  // first thing a new user sees, so re-showing it on a fresh visit is
+  // fine.
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const [mobileNoticeDismissed, setMobileNoticeDismissed] = useState(false);
+  const betaOn = isBetaTesting();
+
   const { state, start } = useJobPolling<{ storyId: string }>();
 
   const selectedPet = useMemo(
@@ -72,7 +99,11 @@ export default function HomeCreate({ pets }: Props) {
 
   useEffect(() => {
     if (state.kind === "done") {
-      router.push(`/read/${state.result.storyId}`);
+      // ?fresh=1 triggers a one-time tip strip in the reader telling
+      // a first-time user about the Studio (and, outside beta, the
+      // hardcover keepsake CTA). SlideReader reads + dismisses it
+      // entirely in component state — no localStorage.
+      router.push(`/read/${state.result.storyId}?fresh=1`);
     } else if (state.kind === "failed") {
       setError(state.error);
       setGenerating(false);
@@ -166,33 +197,66 @@ export default function HomeCreate({ pets }: Props) {
       />
 
 
-      <form onSubmit={handleSubmit} className="w-full space-y-6">
-        {/* Mode toggle */}
-        <div className="mx-auto flex w-fit rounded-full border border-cream-300 bg-cream-50 p-1">
-          <ModeToggleButton
-            active={kind === "pet"}
-            onClick={() => {
-              if (pets.length === 0) {
-                router.push("/pets/new");
-              } else {
-                setKind("pet");
-              }
-            }}
-            label="Pet story"
-          />
-          <ModeToggleButton
-            active={kind === "generic"}
-            onClick={() => setKind("generic")}
-            label="Generic story"
-          />
+      {!isDesktop && !mobileNoticeDismissed && (
+        <div className="mx-auto mb-4 flex w-full max-w-xl items-start gap-3 rounded-2xl border border-cream-300 bg-cream-50 px-4 py-3 text-xs leading-5 text-ink-700 shadow-[0_1px_2px_rgba(14,26,43,0.04)]">
+          <span aria-hidden="true" className="mt-0.5 text-moss-700">
+            ⓘ
+          </span>
+          <span className="flex-1">
+            You can create and read stories on your phone. The page
+            editor (Studio) needs a tablet or desktop.
+          </span>
+          <button
+            type="button"
+            onClick={() => setMobileNoticeDismissed(true)}
+            aria-label="Dismiss"
+            className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-ink-500 hover:bg-cream-100 hover:text-ink-900"
+          >
+            Dismiss
+          </button>
         </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="w-full space-y-6">
+        {/* Mode toggle. Hidden entirely when the user has no pets —
+            with zero pets the primary funnel should be "add a pet";
+            we offer Generic as a small text link below the empty
+            picker instead so the toggle isn't a coin-flip a first-time
+            visitor has to make before doing anything else. */}
+        {pets.length > 0 && (
+          <div className="mx-auto flex w-fit rounded-full border border-cream-300 bg-cream-50 p-1">
+            <ModeToggleButton
+              active={kind === "pet"}
+              onClick={() => setKind("pet")}
+              label="Pet story"
+            />
+            <ModeToggleButton
+              active={kind === "generic"}
+              onClick={() => setKind("generic")}
+              label="Generic story"
+            />
+          </div>
+        )}
 
         {kind === "pet" && (
-          <PetPicker
-            pets={pets}
-            selectedId={petId}
-            onSelect={setPetId}
-          />
+          <>
+            <PetPicker
+              pets={pets}
+              selectedId={petId}
+              onSelect={setPetId}
+            />
+            {pets.length === 0 && (
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => setKind("generic")}
+                  className="text-xs font-medium text-ink-500 underline decoration-cream-400 underline-offset-2 transition-colors hover:text-moss-700 hover:decoration-moss-300"
+                >
+                  Just want to test the AI? Try a generic story →
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         {kind === "pet" && selectedPet && (
@@ -316,6 +380,16 @@ export default function HomeCreate({ pets }: Props) {
           >
             Create my story
           </button>
+
+          {/* Pricing disclosure below the CTA. Hidden entirely during
+              closed beta — reading is auto-unlocked and hardcover is
+              paused, so quoting either price would be misleading. */}
+          {!betaOn && (
+            <p className="text-center text-xs text-ink-500">
+              Read online or download for $9.99. Hardcover keepsakes from
+              $34.99.
+            </p>
+          )}
 
           {error && (
             <p className="text-center text-sm text-rose-600">{error}</p>

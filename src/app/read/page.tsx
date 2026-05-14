@@ -38,7 +38,7 @@ export default async function ReadPage() {
         title="No stories yet"
         subtitle="Make your first one and it'll show up here."
         ctaLabel="Create a story"
-        ctaHref="/"
+        ctaHref="/create"
       />
     );
   }

@@ -2,9 +2,18 @@ import type { BlogPost } from "./index";
 
 export const post: BlogPost = {
   slug: "how-to-write-a-great-prompt",
-  title: "How to write a great prompt for your pet's story",
+  title: "How to write a great prompt for an AI pet storybook",
   excerpt:
-    "The story idea is a single text box. It looks like it does not matter much. It matters more than anything else you do. Here is what we have learned from watching thousands of these go in and out of the system.",
+    "The one-line prompt is the most important thing you write into an AI pet storybook. A field guide to writing prompts that produce a book worth keeping.",
+  metaDescription:
+    "How to write a great prompt for an AI pet storybook. A practical field guide to one-line prompts that produce a personalized pet book worth keeping.",
+  keywords: [
+    "AI pet storybook prompt",
+    "personalized pet book prompt",
+    "AI pet storybook generator",
+    "writing prompts for pet books",
+    "AI storybook template",
+  ],
   publishedAt: "2026-05-05",
   readMinutes: 6,
   author: "The StoryInk Team",
@@ -12,7 +21,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "The prompt box on the create page is small. It is one line. It feels almost incidental compared with the form above it — the pet, the photos, the mode. We promise you it is the single most important thing you write into StoryInk. The illustrations follow the words. The pages follow the words. A specific, evocative one-liner makes a specific, evocative book. A generic one-liner makes a generic book.",
+        "The prompt box on the create page is small. It is one line. It feels almost incidental compared with the form above it — the pet, the photos, the mode. We promise you it is the single most important thing you write into an AI pet storybook generator. The illustrations follow the words. The pages follow the words. A specific, evocative one-liner makes a specific, evocative book. A generic one-liner makes a generic book.",
     },
     {
       type: "paragraph",
@@ -73,7 +82,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "When you add a pet, you can tag quirks — things like loves the vacuum cleaner, scared of skateboards, eats grass, sneezes when happy. Those quirks are not decorative. They get fed into the prompt as facts the AI is encouraged to use. A single quirk can drive an entire page.",
+        "When you add a pet, you can tag quirks — things like loves the vacuum cleaner, scared of skateboards, eats grass, sneezes when happy. Those quirks are not decorative. They get fed into the prompt as facts the AI is encouraged to use. A single quirk can drive an entire page. (Quirks pull their weight in the prose; on the illustration side, what does most of the work is [the right reference photos](/blog/science-of-pet-reference-photos).)",
     },
     {
       type: "paragraph",
@@ -105,12 +114,12 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "What to do if the first draft is not right",
+      content: "Fixing an AI pet storybook draft page by page",
     },
     {
       type: "paragraph",
       content:
-        "If the first generation is close-but-not-quite, do not start over. The AI Assistant in the Studio can rewrite a single page, regenerate a single illustration, or do both at once. We have found that going page-by-page with small targeted instructions — change this character to a tabby, make this page indoors, tone down this paragraph — gets you the book you actually wanted faster than re-rolling the whole thing.",
+        "If the first generation is close-but-not-quite, do not start over. The AI Assistant in the Studio can rewrite a single page, [regenerate a single illustration](/blog/behind-the-illustrations), or do both at once. We have found that going page-by-page with small targeted instructions — change this character to a tabby, make this page indoors, tone down this paragraph — gets you the book you actually wanted faster than re-rolling the whole thing.",
     },
     {
       type: "paragraph",
@@ -119,7 +128,7 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "A template you can copy",
+      content: "A prompt template for your personalized pet book",
     },
     {
       type: "paragraph",

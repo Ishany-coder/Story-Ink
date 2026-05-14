@@ -173,8 +173,23 @@ export default function PetForm({ initial = null }: Props) {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(errBody.error || "Save failed");
       }
-      router.push("/pets");
-      router.refresh();
+      if (editing) {
+        router.push("/pets");
+        router.refresh();
+      } else {
+        // First-run UX: drop the user back into the create funnel they
+        // came from instead of the /pets dashboard. /create reads
+        // `?petId=…` to pre-select the freshly created pet so the
+        // user can skip the picker entirely.
+        const created = (await res.json().catch(() => null)) as
+          | { pet?: { id?: string } }
+          | null;
+        const newPetId = created?.pet?.id;
+        router.push(
+          newPetId ? `/create?petId=${encodeURIComponent(newPetId)}` : "/create",
+        );
+        router.refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
       setPending(false);
@@ -210,9 +225,17 @@ export default function PetForm({ initial = null }: Props) {
       onSubmit={handleSubmit}
       className="animate-rise-in mx-auto max-w-2xl space-y-6 px-4 sm:px-6 lg:px-8 py-10"
     >
-      <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
-        {editing ? `Edit ${initial!.name}` : "Add a pet"}
-      </h1>
+      <div>
+        <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
+          {editing ? `Edit ${initial!.name}` : "Add a pet"}
+        </h1>
+        {!editing && (
+          <p className="mt-1 text-sm text-ink-500">
+            Required: name and a photo or two. The rest sharpens how the
+            AI captures your pet.
+          </p>
+        )}
+      </div>
 
       <Field label="Name">
         <input
@@ -277,9 +300,14 @@ export default function PetForm({ initial = null }: Props) {
       <section className="rounded-2xl border border-cream-300 bg-cream-50 p-5">
         <div className="mb-3 flex items-baseline justify-between gap-3">
           <div>
-            <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
-              Personality DNA
-            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
+                Personality DNA
+              </h2>
+              <span className="rounded-full bg-cream-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-ink-500">
+                Optional but recommended
+              </span>
+            </div>
             <p className="mt-0.5 text-xs text-ink-500">
               Specific traits make stories feel like your pet. Five
               questions to start; add your own for the things only your
@@ -364,6 +392,11 @@ export default function PetForm({ initial = null }: Props) {
             label="In memory"
           />
         </div>
+        <p className="mt-1.5 text-xs text-ink-500">
+          Living — playful adventures starring your pet. In memory —
+          gentle recollections or a Rainbow Bridge story for a pet who
+          has passed.
+        </p>
       </Field>
 
       {mode === "memorial" && (
