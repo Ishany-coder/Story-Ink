@@ -2,9 +2,10 @@ import type { BlogPost } from "./index";
 
 export const post: BlogPost = {
   slug: "pet-storybook-vs-photo-album",
-  title: "Why a printed pet storybook beats a photo album",
+  title:
+    "Personalized pet storybook vs. photo album: why the format matters",
   excerpt:
-    "A photo album captures what your pet looked like. A storybook captures who they were. Here is why we think the format matters more than people give it credit for.",
+    "A personalized pet storybook captures who your dog or cat was — not just what they looked like. Here's why a printed keepsake book outlasts a photo album.",
   publishedAt: "2026-05-12",
   readMinutes: 5,
   author: "The StoryInk Team",
@@ -12,12 +13,12 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "We started StoryInk because we kept noticing the same gap. People take thousands of photos of their pets — phones, cloud backups, the occasional Shutterfly album when they remember — but very few of those images ever get read out loud. They get scrolled. They get shared, briefly, and then they disappear into a feed. A photo of your dog is a record. A story about your dog is a relationship.",
+        "We started StoryInk because we kept noticing the same gap. A personalized pet storybook does something a camera roll cannot, and most families never end up making one. People take thousands of photos of their pets — phones, cloud backups, the occasional Shutterfly album when they remember — but very few of those images ever get read out loud. They get scrolled. They get shared, briefly, and then they disappear into a feed. A photo of your dog is a record. A story about your dog is a relationship.",
     },
     {
       type: "paragraph",
       content:
-        "A printed storybook does something a photo album cannot. It gives the animal a narrative — a name on a cover, a beginning, a moment in the middle where they get into something they should not, an ending. The book exists to be picked up and read, not just looked at. That single shift changes how the keepsake works in your home.",
+        "A printed storybook does something a photo album cannot. It gives the animal a narrative — a name on a cover, a beginning, a moment in the middle where they get into something they should not, an ending. The book exists to be picked up and read, not just looked at. That single shift changes how the keepsake works in your home. The illustrations sit underneath the narrative — and they only land if you give the system [the kinds of reference photos that make the illustrations look like the actual dog](/blog/science-of-pet-reference-photos).",
     },
     {
       type: "heading",
@@ -54,7 +55,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "We are unusually picky about the production. The interior is heavyweight uncoated paper, the cover is a true hardcover with a printed wrap, the trim is square because square sits nicely on a coffee table and reads well in a child's lap. None of those choices are visible in a photo of the product. You feel them when you pick the book up.",
+        "We are unusually picky about the production. The interior of every hardcover pet book is heavyweight uncoated paper, the cover is a true hardcover with a printed wrap, the trim is square because square sits nicely on a coffee table and reads well in a child's lap. None of those choices are visible in a photo of the product. You feel them when you pick the book up.",
     },
     {
       type: "paragraph",
@@ -73,7 +74,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "One book per pet is probably enough. Most of the families we have spoken with end up with one living-mode book during the pet's life and, eventually, one memorial-mode book afterward. Both sit on the same shelf, and they read very differently. Together they tell the truth about a life better than any camera roll we have seen.",
+        "One book per pet is probably enough. Most of the families we have spoken with end up with one living-mode book during the pet's life and, eventually, one [memorial-mode book](/blog/living-vs-memorial-mode) afterward. Both sit on the same shelf, and they read very differently. Together they tell the truth about a life better than any camera roll we have seen.",
     },
     {
       type: "heading",
