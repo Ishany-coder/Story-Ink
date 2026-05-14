@@ -2,9 +2,10 @@ import type { BlogPost } from "./index";
 
 export const post: BlogPost = {
   slug: "behind-the-illustrations",
-  title: "Behind the illustrations: how StoryInk uses your pet photos",
+  title:
+    "How AI illustrations from pet photos actually work (behind the scenes)",
   excerpt:
-    "Why the same dog appears on every page. What page 1 is actually doing. What the AI gets right, what it gets wrong, and how to fix it.",
+    "How AI turns your pet photos into consistent illustrations across every page of a personalized storybook — what works, what fails, and how to fix it.",
   publishedAt: "2026-05-01",
   readMinutes: 7,
   author: "The StoryInk Team",
@@ -13,6 +14,15 @@ export const post: BlogPost = {
       type: "paragraph",
       content:
         "The most common question we get from new users is some version of: how is my dog actually showing up on the page? It looks like the same dog from front to back. Is the model just trained on my photos? The answer is more interesting than that, and it explains why the book takes the time it takes to generate.",
+    },
+    {
+      type: "heading",
+      content: "Do AI pet illustrations actually look like the pet?",
+    },
+    {
+      type: "paragraph",
+      content:
+        "Short answer: yes, when the system is given good references and is allowed to do its serial-grounding trick across the book. Long answer is the rest of this post — including the boring privacy bit, which comes first because people reasonably ask.",
     },
     {
       type: "heading",
@@ -30,7 +40,7 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "Page 1 is the canonical character sheet",
+      content: "Page 1 is the canonical AI pet character sheet",
     },
     {
       type: "paragraph",
@@ -49,7 +59,7 @@ export const post: BlogPost = {
     },
     {
       type: "heading",
-      content: "Fast mode and when to use it",
+      content: "Fast vs. quality mode for AI pet illustrations",
     },
     {
       type: "paragraph",
@@ -68,7 +78,7 @@ export const post: BlogPost = {
     {
       type: "paragraph",
       content:
-        "Within a single book, when the references are good, the AI is genuinely good at: keeping fur color and pattern consistent, keeping body shape consistent, keeping breed silhouette readable, putting the pet into varied poses (sitting, running, sleeping, looking up at the sky), and matching the time of day and weather described in the text.",
+        "Within a single book, when [the references are good](/blog/science-of-pet-reference-photos), the AI is genuinely good at: keeping fur color and pattern consistent, keeping body shape consistent, keeping breed silhouette readable, putting the pet into varied poses (sitting, running, sleeping, looking up at the sky), and matching the time of day and weather described in the text.",
     },
     {
       type: "paragraph",
@@ -87,7 +97,7 @@ export const post: BlogPost = {
     {
       type: "list",
       content: [
-        "Eye color. The model is unreliable about heterochromia and unusual eye colors. If your dog has one blue eye and one brown, expect to use the AI Assistant on the pages where it matters.",
+        "Eye color. The model is unreliable about heterochromia and unusual eye colors. If your dog has one blue eye and one brown, expect to use [the AI Assistant](/blog/how-to-write-a-great-prompt) on the pages where it matters.",
         "Markings. Specific patches — a heart-shaped white spot, an asymmetric face mark — drift. The model gets the general fur pattern but specific shapes are not stable.",
         "Subtle breed mixes. A clear single-breed dog reads correctly. A mix of three breeds tends to settle into whichever breed the model is most confident drawing.",
         "Hands. If you ask for a page where a person is holding the pet, the person's hands can come out wrong. We try to crop those tightly. Sometimes one slips.",
