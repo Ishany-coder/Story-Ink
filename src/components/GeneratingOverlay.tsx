@@ -27,6 +27,10 @@ export default function GeneratingOverlay({ progress = null }: Props) {
               ? `Drawing page ${progress.current} of ${progress.total}…`
               : "This usually takes a minute or two."}
           </p>
+          <p className="mt-2 text-xs text-ink-300">
+            Safe to close this tab — your story will appear on your home
+            page when it&rsquo;s ready.
+          </p>
         </div>
 
         {pct !== null && (
