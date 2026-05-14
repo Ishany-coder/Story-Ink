@@ -231,27 +231,43 @@ export const generateStoryFn = inngest.createFunction(
 
     let imageUrls: string[];
     if (kind === "pet" && imageMode === "quality") {
-      imageUrls = [];
-      let firstPageUrl: string | null = null;
-      for (const p of scriptData.pages) {
-        await step.run(`progress-${p.pageNumber}`, () =>
-          markProgress(jobId, {
-            current: p.pageNumber,
-            total: scriptData.pages.length,
-            phase: "image",
-          })
-        );
-        const previousPageUrl =
-          imageUrls.length > 0 ? imageUrls[imageUrls.length - 1] || null : null;
-        // Page 1 has no anchor yet — the photos do the grounding. Page
-        // 2..N pass page 1 (canonical) AND the immediately-previous
-        // page (style continuity), which bounds drift.
-        const isFirstPage = imageUrls.length === 0;
-        const url: string = await step
-          .run(`generate-page-image-${p.pageNumber}`, async () => {
-            const dataUri = await generatePageImage(p.text, scriptData.title, {
+      // Quality mode: page 1 establishes the canonical character sheet
+      // and MUST finish before anything else. Page 2 then anchors
+      // continuation tone with page 1 as its reference and MUST finish
+      // before pages 3+. From page 3 onward we fan out in parallel
+      // batches; every page 3..N anchors on page 1 (identity) AND
+      // page 2 (style continuity) instead of its immediate
+      // predecessor. The audit's tradeoff: a small drift cost vs. an
+      // ~N/batch speedup on wall-clock time for a 20+ page book.
+      //
+      // The batch size is tunable via GEMINI_PARALLEL_BATCH; default
+      // 4 keeps us well under Gemini's per-minute image quota for
+      // tier-1 keys but still cuts a 24-page generate from ~8min to
+      // ~2-3min.
+      const parsedBatch = Number.parseInt(
+        process.env.GEMINI_PARALLEL_BATCH ?? "",
+        10
+      );
+      const PARALLEL_BATCH =
+        Number.isFinite(parsedBatch) && parsedBatch > 0 ? parsedBatch : 4;
+
+      const pages = scriptData.pages;
+      imageUrls = new Array<string>(pages.length).fill("");
+
+      // Helper that does the per-page generate+upload inside its own
+      // step.run so Inngest retries each page independently — a single
+      // failed page can't kill the batch.
+      async function generateOne(
+        pageNumber: number,
+        text: string,
+        firstPageUrl: string | null,
+        previousPageUrl: string | null
+      ): Promise<string> {
+        return step
+          .run(`generate-page-image-${pageNumber}`, async () => {
+            const dataUri = await generatePageImage(text, scriptData.title, {
               ...imageContextBase,
-              firstPageUrl: isFirstPage ? null : firstPageUrl,
+              firstPageUrl,
               previousPageUrl,
             });
             if (!dataUri) return "";
@@ -259,7 +275,7 @@ export const generateStoryFn = inngest.createFunction(
               return await uploadGeneratedImage(dataUri);
             } catch (err) {
               console.error(
-                `[inngest.generate] page ${p.pageNumber} upload failed:`,
+                `[inngest.generate] page ${pageNumber} upload failed:`,
                 err
               );
               return "";
@@ -267,13 +283,76 @@ export const generateStoryFn = inngest.createFunction(
           })
           .catch((err: unknown) => {
             console.error(
-              `[inngest.generate] page ${p.pageNumber} gave up after retries:`,
+              `[inngest.generate] page ${pageNumber} gave up after retries:`,
               err
             );
             return "";
           });
-        imageUrls.push(url);
-        if (isFirstPage && url) firstPageUrl = url;
+      }
+
+      // Page 1 (canonical character sheet). No anchors — the
+      // reference photos do the grounding.
+      await step.run("progress-1", () =>
+        markProgress(jobId, {
+          current: 1,
+          total: pages.length,
+          phase: "image",
+        })
+      );
+      const page1 = pages[0];
+      const page1Url = page1
+        ? await generateOne(page1.pageNumber, page1.text, null, null)
+        : "";
+      if (page1) imageUrls[0] = page1Url;
+
+      // Page 2 (continuation anchor). References page 1 as both the
+      // canonical character and the immediate predecessor.
+      if (pages.length > 1) {
+        await step.run("progress-2", () =>
+          markProgress(jobId, {
+            current: 2,
+            total: pages.length,
+            phase: "image",
+          })
+        );
+        const page2 = pages[1];
+        const page2Url = await generateOne(
+          page2.pageNumber,
+          page2.text,
+          page1Url || null,
+          page1Url || null
+        );
+        imageUrls[1] = page2Url;
+      }
+
+      const page2Url = imageUrls[1] || null;
+
+      // Pages 3..N in parallel batches. Each page anchors on page 1
+      // (identity) and page 2 (style/tone continuation) instead of its
+      // immediate predecessor — a coherent identity signal that lets
+      // batches run concurrently.
+      for (let i = 2; i < pages.length; i += PARALLEL_BATCH) {
+        const batch = pages.slice(i, i + PARALLEL_BATCH);
+        await step.run(`progress-${i + 1}`, () =>
+          markProgress(jobId, {
+            current: i + 1,
+            total: pages.length,
+            phase: "image",
+          })
+        );
+        const results = await Promise.all(
+          batch.map((p) =>
+            generateOne(
+              p.pageNumber,
+              p.text,
+              page1Url || null,
+              page2Url
+            )
+          )
+        );
+        for (let j = 0; j < results.length; j++) {
+          imageUrls[i + j] = results[j];
+        }
       }
     } else {
       imageUrls = await Promise.all(
