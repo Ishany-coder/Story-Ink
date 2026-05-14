@@ -316,7 +316,24 @@ export default function PrivacyPage() {
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            10. Changes to this policy
+            10. Governing law
+          </h2>
+          <p>
+            This policy and any dispute about how we handle your
+            personal information are governed by the laws of the State
+            of Washington, without regard to its conflict-of-laws
+            principles. Any such dispute will be brought in the state
+            or federal courts located in King County, Washington, and
+            you consent to the personal jurisdiction of those courts —
+            except where the data-protection or consumer-protection law
+            of your home jurisdiction gives you the right to sue or
+            complain locally.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+            11. Changes to this policy
           </h2>
           <p>
             We may update this policy as the product evolves. Material
@@ -328,7 +345,7 @@ export default function PrivacyPage() {
 
         <div>
           <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            11. Contact
+            12. Contact
           </h2>
           <p>
             Questions, requests, or complaints:{" "}
