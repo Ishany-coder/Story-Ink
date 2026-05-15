@@ -373,13 +373,13 @@ export const generateStoryFn = inngest.createFunction(
       if (!isValidStoryPageCount(pageCount)) {
         return {
           storyId: null,
-          fatalError: `Story generation requested ${pageCount} pages, but the current supported range is ${MIN_STORY_PAGES}-${MAX_STORY_PAGES}. This may indicate a configuration change — please contact support with your job ID.`,
+          fatalError: `Story generation requested ${pageCount} pages, but the current supported range is ${MIN_STORY_PAGES}-${MAX_STORY_PAGES}. This may indicate a configuration change — please contact support with job ID ${jobId}.`,
         };
       }
       if (pages.length !== pageCount) {
         return {
           storyId: null,
-          fatalError: `Story generation produced ${pages.length} pages but expected ${pageCount}. This indicates a generation bug — please contact support with your job ID.`,
+          fatalError: `Story generation produced ${pages.length} pages but expected ${pageCount}. This indicates a generation bug — please contact support with job ID ${jobId}.`,
         };
       }
 
