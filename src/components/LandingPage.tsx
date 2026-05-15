@@ -349,11 +349,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "What is memorial mode?",
-    a: "Memorial mode creates a gentle tribute for a pet who has passed. The AI uses a tender, celebratory tone — no peril, no sadness. You choose between a recollection style (favourite memories) or a Rainbow Bridge narrative.",
+    a: "Memorial mode creates a gentle tribute for a pet who has passed. The AI uses a tender, celebratory tone — no peril, no sadness. You choose between a recollection style (favorite memories) or a Rainbow Bridge narrative.",
   },
   {
     q: "How realistic are the illustrations?",
-    a: "The AI uses your pet\u2019s reference photos to keep their appearance consistent across every page — same colouring, markings, and character. The style is warm and illustrated, designed to feel like a premium picture book.",
+    a: "The AI uses your pet\u2019s reference photos to keep their appearance consistent across every page — same coloring, markings, and character. The style is warm and illustrated, designed to feel like a premium picture book.",
   },
   {
     q: "Can I edit the story after it\u2019s generated?",
@@ -365,7 +365,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "What pets work best?",
-    a: "Dogs and cats are the most common, but the AI works with any pet \u2014 rabbits, birds, horses, and more. Clear, well-lit reference photos produce the most consistent illustrations.",
+    a: "Dogs and cats are the most common, but the AI works with any pet\u2014rabbits, birds, horses, and more. Clear, well-lit reference photos produce the most consistent illustrations.",
   },
 ];
 
