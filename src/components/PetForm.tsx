@@ -248,6 +248,55 @@ export default function PetForm({ initial = null }: Props) {
         />
       </Field>
 
+      <Field
+        label={`Reference photos (${photos.length}/${MAX_PHOTOS})`}
+        hint="Clear, well-lit, full body or face — this is what your pet will look like in every illustration. Upload 3–5 photos in different poses for the best results."
+      >
+        <div className="space-y-3">
+          {photos.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {photos.map((url) => (
+                <div
+                  key={url}
+                  className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt={
+                      name.trim()
+                        ? `Reference photo of ${name.trim()}`
+                        : "Pet reference photo"
+                    }
+                    className="h-full w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(url)}
+                    className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {photos.length < MAX_PHOTOS && (
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-sm font-medium text-ink-500 transition-colors hover:border-moss-500 hover:bg-cream-100">
+              {uploading ? "Uploading…" : "+ Upload photos"}
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={uploading}
+                onChange={handlePhotoPick}
+                className="hidden"
+              />
+            </label>
+          )}
+        </div>
+      </Field>
+
       <Field label="Species">
         <select
           value={species}
@@ -427,55 +476,6 @@ export default function PetForm({ initial = null }: Props) {
           </Field>
         </>
       )}
-
-      <Field
-        label={`Reference photos (${photos.length}/${MAX_PHOTOS})`}
-        hint="The AI uses these on every page so the pet looks like the pet. 3–5 clear photos in different poses works best."
-      >
-        <div className="space-y-3">
-          {photos.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {photos.map((url) => (
-                <div
-                  key={url}
-                  className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={url}
-                    alt={
-                      name.trim()
-                        ? `Reference photo of ${name.trim()}`
-                        : "Pet reference photo"
-                    }
-                    className="h-full w-full object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removePhoto(url)}
-                    className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          {photos.length < MAX_PHOTOS && (
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-sm font-medium text-ink-500 transition-colors hover:border-moss-500 hover:bg-cream-100">
-              {uploading ? "Uploading…" : "+ Upload photos"}
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={uploading}
-                onChange={handlePhotoPick}
-                className="hidden"
-              />
-            </label>
-          )}
-        </div>
-      </Field>
 
 
       {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
