@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import GeneratingOverlay from "./GeneratingOverlay";
-import LegalConsentModal, { readStoredConsent } from "./LegalConsentModal";
 import PetAvatar from "./PetAvatar";
 import { isBetaTesting } from "@/lib/beta-flag";
 import { useJobPolling } from "@/lib/useJobPolling";
@@ -85,12 +84,6 @@ export default function HomeCreate({ pets }: Props) {
     current: number;
     total: number;
   } | null>(null);
-  // First-time consent gate. Read lazily at submit time — checking
-  // localStorage on mount would require a setState-in-effect dance
-  // that triggers a lint rule (and an extra render) for no benefit;
-  // the user only cares about the gate when they're about to submit.
-  const [consentModalOpen, setConsentModalOpen] = useState(false);
-
   // Mobile awareness banner. Tells phone users up front that they can
   // create and read on their device but the Studio (page editor)
   // needs a tablet/desktop. Dismissible per-mount; we don't persist
@@ -166,14 +159,8 @@ export default function HomeCreate({ pets }: Props) {
     e.preventDefault();
     if (!prompt.trim()) return;
     if (kind === "pet" && !petId) return;
-    // First-time gate: if there's no stored consent yet, open the
-    // modal and park the submission. `runGenerate` is called from the
-    // modal's onAccept callback. Reading at submit time (not on mount)
-    // avoids a setState-in-effect lint complaint and an extra render.
-    if (readStoredConsent() === null) {
-      setConsentModalOpen(true);
-      return;
-    }
+    // Legal acceptance is handled outside /create; keep this submit path
+    // frictionless and avoid per-story re-acceptance prompts.
     await runGenerate();
   }
 
@@ -214,17 +201,6 @@ export default function HomeCreate({ pets }: Props) {
   return (
     <>
       {generating && <GeneratingOverlay progress={generatingProgress} />}
-      <LegalConsentModal
-        open={consentModalOpen}
-        onAccept={() => {
-          setConsentModalOpen(false);
-          // Resume the submission the user originally triggered. The
-          // modal has already persisted the consent record so the
-          // next submit won't re-prompt.
-          void runGenerate();
-        }}
-        onCancel={() => setConsentModalOpen(false)}
-      />
 
       {!isDesktop && !mobileNoticeDismissed && (
         <div className="mx-auto mb-4 flex w-full max-w-xl items-start gap-3 rounded-2xl border border-cream-300 bg-cream-50 px-4 py-3 text-xs leading-5 text-ink-700 shadow-[0_1px_2px_rgba(14,26,43,0.04)]">
