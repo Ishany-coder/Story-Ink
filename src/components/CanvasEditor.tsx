@@ -227,23 +227,180 @@ const TEXT_PRESETS: Array<{
   },
 ];
 
-// Fonts users can pick from the "Story fonts" list. Each click adds a
-// 18px sample text in that family — clicking again with a layer
-// selected swaps the family.
-const STORY_FONTS: Array<{ label: string; family: string }> = [
+type PrimitiveShape = "rect" | "circle" | "line";
+
+type ElementPreset = {
+  name: string;
+  category: "Frames" | "Labels" | "Bursts" | "Dividers" | "Callouts";
+  keywords: string[];
+  viewBox: string;
+  svgMarkup: string;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  width?: number;
+  height?: number;
+};
+
+const ELEMENT_PRESETS: ElementPreset[] = [
   {
-    label: "EB Garamond",
-    family: 'var(--font-display), "EB Garamond", serif',
+    name: "Blob frame",
+    category: "Frames",
+    keywords: ["organic", "photo", "blob", "frame"],
+    viewBox: "0 0 100 100",
+    svgMarkup:
+      '<path d="M50 5C64 4 80 10 88 22c9 14 5 31-3 43-8 13-20 26-36 27-15 1-33-7-40-21C2 58 6 40 15 27 23 15 36 7 50 5Z" fill="currentColor"/>',
+    fill: "#d9f99d",
+    stroke: "#365143",
+    strokeWidth: 0,
   },
-  { label: "Lora", family: '"Lora", serif' },
-  { label: "Crimson Pro", family: '"Crimson Pro", serif' },
   {
-    label: "Albert Sans",
-    family: '"Albert Sans", var(--font-sans), system-ui, sans-serif',
+    name: "Scallop badge",
+    category: "Frames",
+    keywords: ["seal", "badge", "circle", "scallop"],
+    viewBox: "0 0 100 100",
+    svgMarkup:
+      '<path d="M50 4l7 9 10-5 3 11 12-1-2 12 11 5-7 10 8 9-11 6 3 12-12 1-4 11-10-6-8 9-8-9-10 6-4-11-12-1 3-12-11-6 8-9-7-10 11-5-2-12 12 1 3-11 10 5 7-9Z" fill="currentColor"/>',
+    fill: "#fef3c7",
+    stroke: "#92400e",
+    strokeWidth: 0,
+  },
+  {
+    name: "Arch frame",
+    category: "Frames",
+    keywords: ["arch", "window", "photo", "frame"],
+    viewBox: "0 0 100 120",
+    svgMarkup:
+      '<path d="M10 118V49C10 22 28 4 50 4s40 18 40 45v69H10Z" fill="currentColor"/><path d="M22 108V50c0-20 12-34 28-34s28 14 28 34v58H22Z" fill="rgba(255,255,255,.55)"/>',
+    fill: "#bfdbfe",
+    stroke: "#1e3a8a",
+    strokeWidth: 0,
+    height: 240,
+  },
+  {
+    name: "Rounded label",
+    category: "Labels",
+    keywords: ["label", "pill", "tag", "caption"],
+    viewBox: "0 0 180 64",
+    svgMarkup:
+      '<rect x="4" y="8" width="172" height="48" rx="24" fill="currentColor"/><circle cx="30" cy="32" r="6" fill="rgba(255,255,255,.7)"/>',
+    fill: "#f9a8d4",
+    stroke: "#831843",
+    strokeWidth: 0,
+    width: 300,
+    height: 110,
+  },
+  {
+    name: "Ribbon",
+    category: "Labels",
+    keywords: ["ribbon", "banner", "title", "label"],
+    viewBox: "0 0 220 80",
+    svgMarkup:
+      '<path d="M8 14h204l-24 26 24 26H8l24-26L8 14Z" fill="currentColor"/><path d="M32 40h156" stroke="rgba(255,255,255,.55)" stroke-width="4" stroke-linecap="round"/>',
+    fill: "#93c5fd",
+    stroke: "#1d4ed8",
+    strokeWidth: 0,
+    width: 340,
+    height: 124,
+  },
+  {
+    name: "Corner sticker",
+    category: "Labels",
+    keywords: ["corner", "sticker", "fold", "page"],
+    viewBox: "0 0 100 100",
+    svgMarkup:
+      '<path d="M8 8h84v84L8 8Z" fill="currentColor"/><path d="M92 92V38L62 62l30 30Z" fill="rgba(0,0,0,.12)"/>',
+    fill: "#fde68a",
+    stroke: "#854d0e",
+    strokeWidth: 0,
+  },
+  {
+    name: "Starburst",
+    category: "Bursts",
+    keywords: ["star", "burst", "sale", "splash"],
+    viewBox: "0 0 100 100",
+    svgMarkup:
+      '<path d="M50 4l8 22 21-11-11 21 22 8-22 8 11 21-21-11-8 22-8-22-21 11 11-21-22-8 22-8-11-21 21 11 8-22Z" fill="currentColor"/>',
+    fill: "#fb7185",
+    stroke: "#881337",
+    strokeWidth: 0,
+  },
+  {
+    name: "Sparkle cluster",
+    category: "Bursts",
+    keywords: ["sparkle", "stars", "magic", "shine"],
+    viewBox: "0 0 120 120",
+    svgMarkup:
+      '<path d="M58 6l9 31 31 9-31 9-9 31-9-31-31-9 31-9 9-31Z" fill="currentColor"/><path d="M96 70l5 15 15 5-15 5-5 15-5-15-15-5 15-5 5-15Z" fill="currentColor" opacity=".72"/><path d="M24 78l3 10 10 3-10 3-3 10-3-10-10-3 10-3 3-10Z" fill="currentColor" opacity=".62"/>',
+    fill: "#c084fc",
+    stroke: "#581c87",
+    strokeWidth: 0,
+  },
+  {
+    name: "Paint splash",
+    category: "Bursts",
+    keywords: ["splash", "paint", "blob", "ink"],
+    viewBox: "0 0 120 100",
+    svgMarkup:
+      '<path d="M18 44C10 34 16 18 31 21c8-19 34-18 41 0 18-8 37 9 28 27 17 7 14 32-5 33-8 13-31 13-40 1-16 9-39-2-34-21-11-1-17-9-3-17Z" fill="currentColor"/><circle cx="101" cy="19" r="8" fill="currentColor" opacity=".75"/><circle cx="15" cy="82" r="6" fill="currentColor" opacity=".65"/>',
+    fill: "#86efac",
+    stroke: "#166534",
+    strokeWidth: 0,
+    width: 260,
+  },
+  {
+    name: "Wavy divider",
+    category: "Dividers",
+    keywords: ["divider", "wave", "line", "separator"],
+    viewBox: "0 0 220 36",
+    svgMarkup:
+      '<path d="M4 18c18-18 36 18 54 0s36-18 54 0 36 18 54 0 36-18 50-3" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>',
+    fill: "transparent",
+    stroke: "#0f766e",
+    strokeWidth: 3,
+    width: 360,
+    height: 70,
+  },
+  {
+    name: "Leaf divider",
+    category: "Dividers",
+    keywords: ["divider", "leaf", "botanical", "line"],
+    viewBox: "0 0 240 60",
+    svgMarkup:
+      '<path d="M15 35c52-30 157-30 210 0" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><path d="M78 24c-18-14-30-8-34 10 19 5 30 1 34-10Zm84 0c18-14 30-8 34 10-19 5-30 1-34-10Z" fill="currentColor"/>',
+    fill: "#65a30d",
+    stroke: "#365314",
+    strokeWidth: 3,
+    width: 360,
+    height: 90,
+  },
+  {
+    name: "Speech bubble",
+    category: "Callouts",
+    keywords: ["speech", "bubble", "quote", "callout"],
+    viewBox: "0 0 160 110",
+    svgMarkup:
+      '<path d="M18 16h124c8 0 14 6 14 14v46c0 8-6 14-14 14H66l-31 17 9-17H18C10 90 4 84 4 76V30c0-8 6-14 14-14Z" fill="currentColor"/>',
+    fill: "#bfdbfe",
+    stroke: "#1e40af",
+    strokeWidth: 0,
+    width: 280,
+    height: 190,
+  },
+  {
+    name: "Thought bubble",
+    category: "Callouts",
+    keywords: ["thought", "bubble", "dream", "callout"],
+    viewBox: "0 0 170 120",
+    svgMarkup:
+      '<ellipse cx="86" cy="48" rx="70" ry="38" fill="currentColor"/><circle cx="48" cy="92" r="11" fill="currentColor"/><circle cx="25" cy="110" r="6" fill="currentColor"/>',
+    fill: "#e9d5ff",
+    stroke: "#6b21a8",
+    strokeWidth: 0,
+    width: 290,
+    height: 205,
   },
 ];
-
-type PrimitiveShape = "rect" | "circle" | "line";
 
 function makePrimitiveShape(shape: PrimitiveShape): ShapeLayer {
   return {
@@ -282,7 +439,11 @@ function makeIconShape(iconName: string): ShapeLayer {
   };
 }
 
-function makePathShape(svgMarkup: string, viewBox: string): ShapeLayer {
+function makePathShape(
+  svgMarkup: string,
+  viewBox: string,
+  opts: Partial<Pick<ShapeLayer, "fill" | "stroke" | "strokeWidth" | "width" | "height">> = {}
+): ShapeLayer {
   return {
     id: uid(),
     type: "shape",
@@ -291,14 +452,24 @@ function makePathShape(svgMarkup: string, viewBox: string): ShapeLayer {
     viewBox,
     x: 300,
     y: 300,
-    width: 200,
-    height: 200,
+    width: opts.width ?? 200,
+    height: opts.height ?? 200,
     rotation: 0,
-    fill: "transparent",
-    stroke: "#7c3aed",
-    strokeWidth: 1,
+    fill: opts.fill ?? "transparent",
+    stroke: opts.stroke ?? "#7c3aed",
+    strokeWidth: opts.strokeWidth ?? 1,
     source: "user",
   };
+}
+
+function makeElementShape(preset: ElementPreset): ShapeLayer {
+  return makePathShape(preset.svgMarkup, preset.viewBox, {
+    fill: preset.fill,
+    stroke: preset.stroke,
+    strokeWidth: preset.strokeWidth,
+    width: preset.width,
+    height: preset.height,
+  });
 }
 
 // Parse a user-uploaded SVG string into a shape layer.
@@ -2331,39 +2502,31 @@ function CanvasEditorDesktop({
                   ))}
                 </div>
 
-                <div className="mt-5 mb-2.5 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
-                  Story fonts
-                </div>
-                <div className="flex flex-col gap-2">
-                  {STORY_FONTS.map((f) => (
-                    <button
-                      key={f.label}
-                      type="button"
-                      onClick={() => {
-                        // If a text layer is selected, retypeset it.
-                        // Otherwise add a new 18px sample in that family.
-                        if (selectedLayer && selectedLayer.type === "text") {
-                          updateLayer(selectedLayer.id, {
-                            fontFamily: f.family,
-                          });
-                        } else {
-                          addLayer(
-                            makeText({
-                              text: f.label,
-                              fontSize: 18,
-                              fontWeight: "normal",
-                              fontFamily: f.family,
-                            })
-                          );
-                        }
-                      }}
-                      className="w-full rounded-lg border border-linen-200 bg-paper px-3 py-2.5 text-left text-[13px] text-bark-900 transition-colors hover:bg-cream-50"
-                      style={{ fontFamily: f.family }}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
+                <FontGallery
+                  selectedFamily={
+                    selectedLayer?.type === "text"
+                      ? selectedLayer.fontFamily
+                      : null
+                  }
+                  onSelect={(font) => {
+                    // If a text layer is selected, retypeset it.
+                    // Otherwise add a sample text layer in that family.
+                    if (selectedLayer && selectedLayer.type === "text") {
+                      updateLayer(selectedLayer.id, {
+                        fontFamily: font.family,
+                      });
+                    } else {
+                      addLayer(
+                        makeText({
+                          text: font.label,
+                          fontSize: 18,
+                          fontWeight: "normal",
+                          fontFamily: font.family,
+                        })
+                      );
+                    }
+                  }}
+                />
               </div>
             )}
 
@@ -2372,6 +2535,7 @@ function CanvasEditorDesktop({
                 search={shapeSearch}
                 onSearchChange={setShapeSearch}
                 onAddPrimitive={(s) => addLayer(makePrimitiveShape(s))}
+                onAddElement={(preset) => addLayer(makeElementShape(preset))}
                 onAddIcon={(name) => addLayer(makeIconShape(name))}
                 onUploadSvg={handleSvgUpload}
               />
@@ -5026,12 +5190,14 @@ function ShapesPanel({
   search,
   onSearchChange,
   onAddPrimitive,
+  onAddElement,
   onAddIcon,
   onUploadSvg,
 }: {
   search: string;
   onSearchChange: (v: string) => void;
   onAddPrimitive: (s: PrimitiveShape) => void;
+  onAddElement: (preset: ElementPreset) => void;
   onAddIcon: (name: string) => void;
   onUploadSvg: (file: File) => void;
 }) {
@@ -5051,6 +5217,14 @@ function ShapesPanel({
           i.name.includes(q) || i.category.toLowerCase().includes(q)
       )
     : ICONS;
+  const matchingElements = q
+    ? ELEMENT_PRESETS.filter(
+        (e) =>
+          e.name.toLowerCase().includes(q) ||
+          e.category.toLowerCase().includes(q) ||
+          e.keywords.some((keyword) => keyword.includes(q))
+      )
+    : ELEMENT_PRESETS;
 
   return (
     <div className="space-y-3">
@@ -5109,6 +5283,23 @@ function ShapesPanel({
           </div>
         )}
 
+        {matchingElements.length > 0 && (
+          <div>
+            <p className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
+              Elements ({matchingElements.length})
+            </p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {matchingElements.map((preset) => (
+                <ElementButton
+                  key={preset.name}
+                  preset={preset}
+                  onClick={() => onAddElement(preset)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* When not searching, group by category with headers. When searching,
             flatten to a single list so matches across categories are visible
             together. */}
@@ -5153,12 +5344,45 @@ function ShapesPanel({
         )}
       </div>
 
-      {matchingIcons.length === 0 && matchingPrimitives.length === 0 && (
+      {matchingIcons.length === 0 &&
+        matchingPrimitives.length === 0 &&
+        matchingElements.length === 0 && (
         <p className="py-4 text-center text-[11px] font-medium text-ink-300">
           No shapes match &quot;{search}&quot;.
         </p>
       )}
     </div>
+  );
+}
+
+function ElementButton({
+  preset,
+  onClick,
+}: {
+  preset: ElementPreset;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={preset.name}
+      className="group flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border border-cream-300 bg-cream-50 p-2 text-center transition-all hover:scale-105 hover:border-moss-500 hover:bg-cream-200"
+    >
+      <svg
+        viewBox={preset.viewBox}
+        aria-hidden="true"
+        className="h-9 w-9 text-ink-500 transition-colors group-hover:text-moss-700"
+        style={{
+          color:
+            preset.fill === "transparent" ? preset.stroke : preset.fill,
+        }}
+        dangerouslySetInnerHTML={{ __html: preset.svgMarkup }}
+      />
+      <span className="max-w-full truncate text-[9px] font-black uppercase tracking-[.04em] text-ink-300">
+        {preset.name}
+      </span>
+    </button>
   );
 }
 
@@ -5871,6 +6095,108 @@ function DefineLayoutForm({
 // Escape, or selection. Trigger label renders the currently-selected
 // font's name in that font.
 // ---------------------------------------------------------------------------
+
+function FontGallery({
+  selectedFamily,
+  onSelect,
+}: {
+  selectedFamily: string | null;
+  onSelect: (font: FontOption) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const grouped = useMemo(() => {
+    const out: Record<FontCategory, FontOption[]> = {
+      sans: [],
+      serif: [],
+      display: [],
+      handwriting: [],
+      mono: [],
+    };
+    for (const font of FONT_OPTIONS) {
+      if (q && !font.label.toLowerCase().includes(q)) continue;
+      out[font.category].push(font);
+    }
+    return out;
+  }, [q]);
+  const matchCount = Object.values(grouped).reduce(
+    (count, fonts) => count + fonts.length,
+    0
+  );
+
+  return (
+    <div className="mt-5">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+          All fonts
+        </div>
+        <span className="text-[10px] tabular-nums text-stone-500">
+          {matchCount}
+        </span>
+      </div>
+      <input
+        type="search"
+        placeholder="Search fonts..."
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        className="mb-2 w-full rounded-xl border-2 border-cream-300 bg-cream-200/40 px-3 py-2 text-xs font-bold text-ink-900 placeholder-ink-300 focus:border-moss-500 focus:outline-none"
+      />
+      <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
+        {FONT_CATEGORY_ORDER.map((category) => {
+          const fonts = grouped[category];
+          if (fonts.length === 0) return null;
+          return (
+            <section key={category}>
+              <div className="mb-1 px-1 text-[10px] font-black uppercase tracking-wider text-ink-300">
+                {FONT_CATEGORY_LABELS[category]} ({fonts.length})
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {fonts.map((font) => {
+                  const active = font.family === selectedFamily;
+                  return (
+                    <button
+                      key={font.family}
+                      type="button"
+                      onClick={() => onSelect(font)}
+                      aria-pressed={active}
+                      className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                        active
+                          ? "border-moss-500 bg-moss-100 text-bark-900"
+                          : "border-linen-200 bg-paper text-bark-900 hover:bg-cream-50"
+                      }`}
+                    >
+                      <span
+                        className="block truncate text-[17px] leading-tight"
+                        style={{
+                          fontFamily: font.family,
+                          fontWeight:
+                            category === "display" ||
+                            category === "handwriting"
+                              ? 400
+                              : 700,
+                        }}
+                      >
+                        {font.label}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[10px] text-stone-500">
+                        The quick brown fox
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+        {matchCount === 0 && (
+          <p className="rounded-xl border border-dashed border-cream-300 bg-cream-50 px-3 py-5 text-center text-[11px] font-medium text-ink-300">
+            No fonts match &quot;{query}&quot;.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function FontPicker({
   value,

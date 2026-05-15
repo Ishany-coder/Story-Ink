@@ -148,7 +148,7 @@ export default function ShapeRenderer({ layer }: { layer: ShapeLayer }) {
           height: "100%",
           // SVGs that use currentColor pick up the wrapper color; ones with
           // baked-in fills keep theirs.
-          color: layer.stroke,
+          color: layer.fill === "transparent" ? layer.stroke : layer.fill,
         }}
         // Sanitized at upload time — strips <script> and on* event handlers.
         dangerouslySetInnerHTML={{ __html: layer.svgMarkup }}
