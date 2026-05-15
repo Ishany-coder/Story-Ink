@@ -85,6 +85,10 @@ function isPageCountConstraintError(err: { message?: string } | null): boolean {
   );
 }
 
+type SaveStoryResult =
+  | { storyId: string; fatalError: null }
+  | { storyId: null; fatalError: string };
+
 async function onInngestFailure(
   wrappedEvent: unknown,
   error: unknown
@@ -348,17 +352,17 @@ export const generateStoryFn = inngest.createFunction(
       })
     );
 
-    const saveResult = await step.run("save-story", async () => {
+    const saveResult = await step.run("save-story", async (): Promise<SaveStoryResult> => {
       if (!isValidStoryPageCount(pageCount)) {
         return {
           storyId: null,
-          fatalError: `Story generation requested ${pageCount} pages, but supported range is ${MIN_STORY_PAGES}-${MAX_STORY_PAGES}.`,
+          fatalError: `Story generation requested ${pageCount} pages, but the current supported range is ${MIN_STORY_PAGES}-${MAX_STORY_PAGES}. This may indicate a configuration change — please contact support with your job ID.`,
         };
       }
       if (pages.length !== pageCount) {
         return {
           storyId: null,
-          fatalError: `Story generation produced ${pages.length} pages, expected ${pageCount}.`,
+          fatalError: `Story generation produced ${pages.length} pages but expected ${pageCount}. This indicates a generation bug — please contact support with your job ID.`,
         };
       }
 
