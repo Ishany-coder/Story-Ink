@@ -46,27 +46,49 @@ export default function PetForm({ initial = null }: Props) {
   // bank's wording later doesn't invalidate persisted answers.
   interface QuirkRow {
     prompt: string;
+    // Free-text typed by the user (separate from pill selections).
     answer: string;
+    // Pills the user has tapped — rendered as removable chips.
+    selectedPills: string[];
     // True when the prompt was supplied by the bank (locked); false
     // when the user added it themselves via "+ Add custom quirk."
     fromBank: boolean;
   }
 
   const [quirkRows, setQuirkRows] = useState<QuirkRow[]>(() => {
-    const saved: QuirkRow[] = (initial?.quirks ?? []).map((q) => ({
-      prompt: q.prompt,
-      answer: q.answer,
-      // Treat any saved row whose prompt matches the current bank as
-      // a "bank" row (prompt locked); user-edited prompts become
-      // custom rows.
-      fromBank: QUIRK_BANK.some((b) => b.prompt === q.prompt),
-    }));
+    const saved: QuirkRow[] = (initial?.quirks ?? []).map((q) => {
+      const bankEntry = QUIRK_BANK.find((b) => b.prompt === q.prompt);
+      const knownPills = new Set(bankEntry?.pills ?? []);
+      // Re-hydrate pill chips from a previously saved comma-separated answer.
+      // Parts that exactly match a known pill are restored as selectedPills;
+      // anything else becomes free-text.
+      const parts = q.answer.split(",").map((s) => s.trim()).filter(Boolean);
+      const restoredPills: string[] = [];
+      const freeTextParts: string[] = [];
+      for (const part of parts) {
+        if (knownPills.has(part)) {
+          restoredPills.push(part);
+        } else {
+          freeTextParts.push(part);
+        }
+      }
+      return {
+        prompt: q.prompt,
+        answer: freeTextParts.join(", "),
+        selectedPills: restoredPills,
+        // Treat any saved row whose prompt matches the current bank as
+        // a "bank" row (prompt locked); user-edited prompts become
+        // custom rows.
+        fromBank: QUIRK_BANK.some((b) => b.prompt === q.prompt),
+      };
+    });
     const usedPrompts = new Set(saved.map((r) => r.prompt));
     const banked: QuirkRow[] = QUIRK_BANK.filter(
       (b) => !usedPrompts.has(b.prompt)
     ).map((b) => ({
       prompt: b.prompt,
       answer: "",
+      selectedPills: [],
       fromBank: true,
     }));
     return [...saved, ...banked];
@@ -76,17 +98,33 @@ export default function PetForm({ initial = null }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const filledQuirkCount = quirkRows.filter((r) => r.answer.trim()).length;
+  const filledQuirkCount = quirkRows.filter(
+    (r) => r.answer.trim() || r.selectedPills.length > 0
+  ).length;
 
   function updateQuirk(idx: number, patch: Partial<QuirkRow>) {
     setQuirkRows((prev) =>
       prev.map((r, i) => (i === idx ? { ...r, ...patch } : r))
     );
   }
+  function togglePill(idx: number, pill: string) {
+    setQuirkRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx) return r;
+        const already = r.selectedPills.includes(pill);
+        return {
+          ...r,
+          selectedPills: already
+            ? r.selectedPills.filter((p) => p !== pill)
+            : [...r.selectedPills, pill],
+        };
+      })
+    );
+  }
   function addCustomQuirk() {
     setQuirkRows((prev) => [
       ...prev,
-      { prompt: "", answer: "", fromBank: false },
+      { prompt: "", answer: "", selectedPills: [], fromBank: false },
     ]);
   }
   function removeCustomQuirk(idx: number) {
@@ -144,7 +182,17 @@ export default function PetForm({ initial = null }: Props) {
     setError(null);
 
     const quirks: PetQuirk[] = quirkRows
-      .map((r) => ({ prompt: r.prompt.trim(), answer: r.answer.trim() }))
+      .map((r) => {
+        // Deduplicate: if the user typed something already covered by a
+        // selected pill, skip the typed duplicate to avoid repetition.
+        const pillSet = new Set(r.selectedPills);
+        const freeText = r.answer.trim();
+        const parts = [
+          ...r.selectedPills,
+          ...(freeText && !pillSet.has(freeText) ? [freeText] : []),
+        ];
+        return { prompt: r.prompt.trim(), answer: parts.join(", ") };
+      })
       .filter((q) => q.prompt.length > 0 && q.answer.length > 0);
 
     const body = {
@@ -398,49 +446,98 @@ export default function PetForm({ initial = null }: Props) {
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {quirkRows.map((row, idx) => (
-            <div key={idx} className="space-y-1">
-              {row.fromBank ? (
-                <label className="block text-xs font-medium text-ink-700">
-                  {row.prompt}
-                </label>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={row.prompt}
-                    onChange={(e) =>
-                      updateQuirk(idx, { prompt: e.target.value })
-                    }
-                    maxLength={200}
-                    placeholder="Your own question (e.g. How does she greet you?)"
-                    className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeCustomQuirk(idx)}
-                    aria-label="Remove this question"
-                    className="shrink-0 rounded-lg border border-cream-300 bg-cream-50 px-2 py-1 text-[10px] font-medium text-ink-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
-              <input
-                type="text"
-                value={row.answer}
-                onChange={(e) => updateQuirk(idx, { answer: e.target.value })}
-                maxLength={400}
-                placeholder={
-                  row.fromBank
-                    ? QUIRK_BANK.find((b) => b.prompt === row.prompt)
-                        ?.placeholder ?? "Your answer"
-                    : "Your answer"
-                }
-                className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-sm text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
-              />
-            </div>
-          ))}
+          {quirkRows.map((row, idx) => {
+            const bankEntry = QUIRK_BANK.find((b) => b.prompt === row.prompt);
+            const pills = row.fromBank ? (bankEntry?.pills ?? []) : [];
+            return (
+              <div key={idx} className="space-y-1">
+                {row.fromBank ? (
+                  <label className="block text-xs font-medium text-ink-700">
+                    {row.prompt}
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={row.prompt}
+                      onChange={(e) =>
+                        updateQuirk(idx, { prompt: e.target.value })
+                      }
+                      maxLength={200}
+                      placeholder="Your own question (e.g. How does she greet you?)"
+                      className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeCustomQuirk(idx)}
+                      aria-label="Remove this question"
+                      className="shrink-0 rounded-lg border border-cream-300 bg-cream-50 px-2 py-1 text-[10px] font-medium text-ink-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+
+                {/* Pill suggestions for bank rows */}
+                {pills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {pills.map((pill) => {
+                      const active = row.selectedPills.includes(pill);
+                      return (
+                        <button
+                          key={pill}
+                          type="button"
+                          onClick={() => togglePill(idx, pill)}
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                            active
+                              ? "border-moss-700 bg-moss-700 text-cream-50"
+                              : "border-cream-300 bg-cream-50 text-ink-600 hover:border-moss-500 hover:text-ink-900"
+                          }`}
+                        >
+                          {active ? `✕ ${pill}` : `+ ${pill}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Selected pill chips */}
+                {row.selectedPills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {row.selectedPills.map((pill) => (
+                      <span
+                        key={pill}
+                        className="inline-flex items-center gap-1 rounded-full border border-moss-300 bg-moss-100/60 px-2.5 py-0.5 text-[11px] font-medium text-moss-900"
+                      >
+                        {pill}
+                        <button
+                          type="button"
+                          onClick={() => togglePill(idx, pill)}
+                          aria-label={`Remove ${pill}`}
+                          className="ml-0.5 text-moss-600 hover:text-moss-900"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={row.answer}
+                  onChange={(e) => updateQuirk(idx, { answer: e.target.value })}
+                  maxLength={400}
+                  placeholder={
+                    row.fromBank
+                      ? bankEntry?.placeholder ?? "Your answer"
+                      : "Your answer"
+                  }
+                  className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-sm text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
+                />
+              </div>
+            );
+          })}
 
           <button
             type="button"

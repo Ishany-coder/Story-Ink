@@ -9,6 +9,10 @@ import {
   containsProfanity,
   PROFANITY_REJECTION_MESSAGE,
 } from "@/lib/profanity";
+import {
+  MAX_STORY_PAGES,
+  MIN_STORY_PAGES,
+} from "@/lib/story-page-count";
 
 // Kicks off the Inngest `story/generate.requested` function. Returns a
 // jobId immediately — the client polls /api/jobs/[id] until status is
@@ -68,7 +72,10 @@ export async function POST(request: NextRequest) {
     // hardcover checkout on `pages.length >= 24` and offers digital
     // instead. Clamp aggressively so a malformed client request can't
     // kick off a runaway 10000-page image generation job.
-    const pageCount = Math.min(Math.max(body.pageCount || 24, 6), 800);
+    const pageCount = Math.min(
+      Math.max(body.pageCount || 24, MIN_STORY_PAGES),
+      MAX_STORY_PAGES
+    );
     const kind = body.kind === "pet" ? "pet" : "generic";
     const petId = kind === "pet" ? body.petId ?? null : null;
     if (kind === "pet" && !petId) {
