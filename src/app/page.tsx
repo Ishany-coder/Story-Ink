@@ -2,6 +2,7 @@ import Link from "next/link";
 import HeroSection from "@/components/HeroSection";
 import HomeCreate from "@/components/HomeCreate";
 import BookCard from "@/components/BookCard";
+import LandingPage from "@/components/LandingPage";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import type { Pet } from "@/lib/types";
 
@@ -142,7 +143,7 @@ function DashboardHeader() {
     <div className="animate-rise-in mb-12 flex flex-col items-center gap-4 text-center sm:mb-14 sm:flex-row sm:items-end sm:justify-between sm:text-left">
       <div>
         <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
-          The fine art of pet storytelling
+          The fine art of personalized storytelling
         </span>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-ink-900 sm:text-5xl">
           Your library
@@ -237,15 +238,5 @@ function SectionHeading({
 }
 
 function SignedOutHero() {
-  return (
-    <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-2xl flex-col items-center justify-center gap-8 px-4 sm:px-6 lg:px-8 py-16 text-center">
-      <HeroSection />
-      <Link
-        href="/login"
-        className="rounded-full bg-moss-700 px-8 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
-      >
-        Get started
-      </Link>
-    </div>
-  );
+  return <LandingPage />;
 }
