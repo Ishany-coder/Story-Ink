@@ -250,7 +250,7 @@ export default function PetForm({ initial = null }: Props) {
             />
           </Field>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             <Field label="Species">
               <select
                 value={species}
@@ -317,7 +317,7 @@ export default function PetForm({ initial = null }: Props) {
           >
             <div className="space-y-3">
               {photos.length > 0 && (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {photos.map((url) => (
                     <div
                       key={url}
