@@ -41,6 +41,7 @@ export default function LoginPage() {
 // Value props shown in the brand panel (desktop) and mobile header.
 const VALUE_PROPS = [
   {
+    id: "personalized",
     icon: (
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.5" />
@@ -50,6 +51,7 @@ const VALUE_PROPS = [
     text: "Personalized to your pet's look and personality",
   },
   {
+    id: "hardcover",
     icon: (
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <rect x="2" y="3" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
@@ -60,6 +62,7 @@ const VALUE_PROPS = [
     text: "Museum-grade hardcover — a real keepsake to hold",
   },
   {
+    id: "memorial",
     icon: (
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
         <path d="M9 2L10.8 6.5H16L11.6 9.5L13.4 14L9 11L4.6 14L6.4 9.5L2 6.5H7.2L9 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
@@ -70,6 +73,7 @@ const VALUE_PROPS = [
 ];
 
 // Decorative stacked-books illustration drawn in SVG using brand colors.
+// Fill values mirror the design tokens in globals.css (@theme inline).
 function BookStackIllustration() {
   return (
     <svg
@@ -81,32 +85,32 @@ function BookStackIllustration() {
     >
       {/* Bottom book — largest, tilted slightly left */}
       <g transform="rotate(-8, 100, 120)">
-        <rect x="30" y="110" width="140" height="24" rx="3" fill="#1f3d2e" />
-        <rect x="30" y="110" width="12" height="24" rx="2" fill="#0f2418" />
-        <rect x="34" y="114" width="4" height="16" rx="1" fill="#c9a96b" />
+        <rect x="30" y="110" width="140" height="24" rx="3" style={{ fill: "var(--color-moss-700)" }} />
+        <rect x="30" y="110" width="12" height="24" rx="2" style={{ fill: "var(--color-moss-900)" }} />
+        <rect x="34" y="114" width="4" height="16" rx="1" style={{ fill: "var(--color-gold-500)" }} />
       </g>
       {/* Middle book */}
       <g transform="rotate(3, 100, 95)">
-        <rect x="38" y="88" width="124" height="22" rx="3" fill="#2d5944" />
-        <rect x="38" y="88" width="11" height="22" rx="2" fill="#1f3d2e" />
-        <rect x="42" y="92" width="3" height="14" rx="1" fill="#e0c898" />
+        <rect x="38" y="88" width="124" height="22" rx="3" style={{ fill: "var(--color-moss-500)" }} />
+        <rect x="38" y="88" width="11" height="22" rx="2" style={{ fill: "var(--color-moss-700)" }} />
+        <rect x="42" y="92" width="3" height="14" rx="1" style={{ fill: "var(--color-gold-300)" }} />
       </g>
       {/* Top book — centered, upright */}
-      <rect x="46" y="52" width="108" height="36" rx="4" fill="#c9a96b" />
-      <rect x="46" y="52" width="13" height="36" rx="3" fill="#ad8a4d" />
-      <rect x="50" y="58" width="4" height="24" rx="1.5" fill="#faf7ee" opacity="0.7" />
+      <rect x="46" y="52" width="108" height="36" rx="4" style={{ fill: "var(--color-gold-500)" }} />
+      <rect x="46" y="52" width="13" height="36" rx="3" style={{ fill: "var(--color-gold-700)" }} />
+      <rect x="50" y="58" width="4" height="24" rx="1.5" style={{ fill: "var(--color-cream-50)" }} opacity="0.7" />
       {/* Book cover illustration — simple paw print */}
-      <circle cx="105" cy="70" r="7" fill="#faf7ee" opacity="0.25" />
-      <circle cx="105" cy="70" r="4" fill="#faf7ee" opacity="0.4" />
-      <circle cx="99" cy="65" r="2" fill="#faf7ee" opacity="0.4" />
-      <circle cx="111" cy="65" r="2" fill="#faf7ee" opacity="0.4" />
-      <circle cx="105" cy="63" r="2" fill="#faf7ee" opacity="0.4" />
+      <circle cx="105" cy="70" r="7" style={{ fill: "var(--color-cream-50)" }} opacity="0.25" />
+      <circle cx="105" cy="70" r="4" style={{ fill: "var(--color-cream-50)" }} opacity="0.4" />
+      <circle cx="99" cy="65" r="2" style={{ fill: "var(--color-cream-50)" }} opacity="0.4" />
+      <circle cx="111" cy="65" r="2" style={{ fill: "var(--color-cream-50)" }} opacity="0.4" />
+      <circle cx="105" cy="63" r="2" style={{ fill: "var(--color-cream-50)" }} opacity="0.4" />
       {/* Gold rule accent */}
-      <line x1="60" y1="145" x2="140" y2="145" stroke="#c9a96b" strokeWidth="1" strokeLinecap="round" />
+      <line x1="60" y1="145" x2="140" y2="145" style={{ stroke: "var(--color-gold-500)" }} strokeWidth="1" strokeLinecap="round" />
       {/* Floating sparkle dots */}
-      <circle cx="160" cy="48" r="2.5" fill="#c9a96b" opacity="0.5" />
-      <circle cx="40" cy="42" r="1.5" fill="#c9a96b" opacity="0.35" />
-      <circle cx="170" cy="100" r="1.5" fill="#88a092" opacity="0.5" />
+      <circle cx="160" cy="48" r="2.5" style={{ fill: "var(--color-gold-500)" }} opacity="0.5" />
+      <circle cx="40" cy="42" r="1.5" style={{ fill: "var(--color-gold-500)" }} opacity="0.35" />
+      <circle cx="170" cy="100" r="1.5" style={{ fill: "var(--color-moss-300)" }} opacity="0.5" />
     </svg>
   );
 }
@@ -164,8 +168,8 @@ function BrandPanel({ mobile = false }: { mobile?: boolean }) {
 
       {/* Bottom: value props */}
       <ul className="relative space-y-3">
-        {VALUE_PROPS.map((vp, i) => (
-          <li key={i} className="flex items-start gap-3 text-sm text-moss-200">
+        {VALUE_PROPS.map((vp) => (
+          <li key={vp.id} className="flex items-start gap-3 text-sm text-moss-200">
             <span className="mt-0.5 shrink-0 text-gold-300">{vp.icon}</span>
             <span>{vp.text}</span>
           </li>
