@@ -134,7 +134,7 @@ export default function HomeCreate({ pets }: Props) {
         throw new Error(data.error || "Generation failed");
       }
       const { jobId } = (await res.json()) as { jobId: string };
-      router.push(`/create/generating?jobId=${encodeURIComponent(jobId)}`);
+      router.replace(`/create/generating?jobId=${encodeURIComponent(jobId)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setSubmitting(false);

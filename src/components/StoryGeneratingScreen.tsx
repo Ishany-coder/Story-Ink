@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import GeneratingOverlay from "./GeneratingOverlay";
 import { useJobPolling } from "@/lib/useJobPolling";
 
@@ -10,9 +10,15 @@ interface Props {
   jobId: string;
 }
 
+interface StoryGenerateJobResult {
+  storyId?: string;
+  current?: number;
+  total?: number;
+}
+
 export default function StoryGeneratingScreen({ jobId }: Props) {
   const router = useRouter();
-  const { state, start } = useJobPolling<{ storyId: string }>();
+  const { state, start } = useJobPolling<StoryGenerateJobResult>();
 
   useEffect(() => {
     start(jobId);
@@ -20,7 +26,12 @@ export default function StoryGeneratingScreen({ jobId }: Props) {
 
   useEffect(() => {
     if (state.kind === "done") {
-      router.replace(`/read/${state.result.storyId}?fresh=1`);
+      const storyId = state.result?.storyId;
+      router.replace(
+        typeof storyId === "string" && storyId
+          ? `/read/${storyId}?fresh=1`
+          : "/read?fresh=1"
+      );
     }
   }, [state, router]);
 
@@ -32,25 +43,28 @@ export default function StoryGeneratingScreen({ jobId }: Props) {
     };
   }, []);
 
-  const progress = useMemo(() => {
-    if (state.kind !== "running" || !state.result) return null;
-    const value = state.result as Partial<{ current: number; total: number }>;
-    if (typeof value.current !== "number" || typeof value.total !== "number") {
-      return null;
-    }
-    return { current: value.current, total: value.total };
-  }, [state]);
+  const progress =
+    state.kind === "running" &&
+    state.result &&
+    typeof state.result.current === "number" &&
+    typeof state.result.total === "number"
+      ? { current: state.result.current, total: state.result.total }
+      : null;
 
   if (state.kind === "failed" || state.kind === "stalled") {
+    const heading =
+      state.kind === "failed"
+        ? "Couldn’t finish building your storybook"
+        : "Your story is still being created";
     const message =
       state.kind === "failed"
-        ? state.error
+        ? state.error || "An unexpected error occurred."
         : "Your story is taking longer than expected. It'll appear on your home page when it's ready — feel free to leave this tab.";
     return (
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-xl flex-col items-center justify-center px-4 sm:px-6 lg:px-8">
         <div className="w-full rounded-3xl border border-cream-300 bg-cream-50 px-6 py-8 text-center shadow-[0_24px_60px_rgba(14,26,43,0.10)]">
           <p className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-            Couldn&rsquo;t finish building your storybook
+            {heading}
           </p>
           <p className="mt-2 text-sm text-ink-500">{message}</p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
