@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import GeneratingOverlay from "./GeneratingOverlay";
 import LegalConsentModal, { readStoredConsent } from "./LegalConsentModal";
 import PetAvatar from "./PetAvatar";
 import { isBetaTesting } from "@/lib/beta-flag";
-import { useJobPolling } from "@/lib/useJobPolling";
 import { useMediaQuery } from "@/lib/useMediaQuery";
 import { startersForMode } from "@/lib/story-starters";
 import {
@@ -63,12 +61,8 @@ export default function HomeCreate({ pets }: Props) {
   const [imageMode, setImageMode] = useState<"fast" | "quality">("quality");
   const [imageStyle, setImageStyle] =
     useState<ImageStyleId>(DEFAULT_IMAGE_STYLE);
-  const [generating, setGenerating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [generatingProgress, setGeneratingProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
   // First-time consent gate. Read lazily at submit time — checking
   // localStorage on mount would require a setState-in-effect dance
   // that triggers a lint rule (and an extra render) for no benefit;
@@ -85,8 +79,6 @@ export default function HomeCreate({ pets }: Props) {
   const [mobileNoticeDismissed, setMobileNoticeDismissed] = useState(false);
   const betaOn = isBetaTesting();
 
-  const { state, start } = useJobPolling<{ storyId: string }>();
-
   const selectedPet = useMemo(
     () => pets.find((p) => p.id === petId) ?? null,
     [pets, petId]
@@ -96,34 +88,6 @@ export default function HomeCreate({ pets }: Props) {
     () => (selectedPet ? startersForMode(selectedPet.mode) : []),
     [selectedPet]
   );
-
-  useEffect(() => {
-    if (state.kind === "done") {
-      // ?fresh=1 triggers a one-time tip strip in the reader telling
-      // a first-time user about the Studio (and, outside beta, the
-      // hardcover keepsake CTA). SlideReader reads + dismisses it
-      // entirely in component state — no localStorage.
-      router.push(`/read/${state.result.storyId}?fresh=1`);
-    } else if (state.kind === "failed") {
-      setError(state.error);
-      setGenerating(false);
-      setGeneratingProgress(null);
-    } else if (state.kind === "stalled") {
-      // Wall-clock budget exhausted but Inngest keeps running. Surface
-      // an info message instead of treating it as a failure — the
-      // story will land in the dashboard when it finishes.
-      setError(
-        "Your story is taking longer than expected. It'll appear on your home page when it's ready — feel free to leave this tab."
-      );
-      setGenerating(false);
-      setGeneratingProgress(null);
-    } else if (state.kind === "running" && state.result) {
-      const r = state.result as Partial<{ current: number; total: number }>;
-      if (typeof r.current === "number" && typeof r.total === "number") {
-        setGeneratingProgress({ current: r.current, total: r.total });
-      }
-    }
-  }, [state, router]);
 
   function applyStarter(id: string) {
     if (!selectedPet) return;
@@ -148,8 +112,7 @@ export default function HomeCreate({ pets }: Props) {
   }
 
   async function runGenerate() {
-    setGenerating(true);
-    setGeneratingProgress(null);
+    setSubmitting(true);
     setError("");
 
     try {
@@ -171,10 +134,10 @@ export default function HomeCreate({ pets }: Props) {
         throw new Error(data.error || "Generation failed");
       }
       const { jobId } = (await res.json()) as { jobId: string };
-      start(jobId);
+      router.push(`/create/generating?jobId=${encodeURIComponent(jobId)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
-      setGenerating(false);
+      setSubmitting(false);
     }
   }
 
@@ -183,7 +146,6 @@ export default function HomeCreate({ pets }: Props) {
 
   return (
     <>
-      {generating && <GeneratingOverlay progress={generatingProgress} />}
       <LegalConsentModal
         open={consentModalOpen}
         onAccept={() => {
@@ -375,7 +337,7 @@ export default function HomeCreate({ pets }: Props) {
         <div className="flex flex-col items-center gap-3">
           <button
             type="submit"
-            disabled={!ready || generating}
+            disabled={!ready || submitting}
             className="rounded-full bg-moss-700 px-8 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-moss-700"
           >
             Create my story
