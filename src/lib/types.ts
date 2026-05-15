@@ -16,6 +16,25 @@ export type LayerBase = {
   height: number;
   rotation: number;
   source?: LayerSource;
+  // ---------------------------------------------------------------------
+  // Editor metadata (all optional; legacy layers without these fields
+  // continue to work). Persisted as part of overlays so the experience
+  // is preserved across reloads.
+  // ---------------------------------------------------------------------
+  // 0..1; multiplies the rendered alpha. Undefined = 1.
+  opacity?: number;
+  // If true, the layer is not selectable or editable in the Studio (it
+  // still renders). The Layers panel exposes a toggle to flip this.
+  locked?: boolean;
+  // If true, the layer is hidden in the editor and at render time. Used
+  // by the eye-toggle in the Layers panel.
+  hidden?: boolean;
+  // Optional human-readable name shown in the Layers panel. Defaults to
+  // a derived label ("Text", "Shape", "Image").
+  name?: string;
+  // Layers sharing a non-undefined groupId move together when any one
+  // of them is dragged, and ⌘G/⌘⇧G manages this. Optional.
+  groupId?: string;
 };
 
 export type TextLayer = LayerBase & {
@@ -25,6 +44,24 @@ export type TextLayer = LayerBase & {
   color: string;
   fontFamily: string;
   fontWeight: "normal" | "bold";
+  // Optional text effects — all undefined = legacy "no effects" rendering.
+  italic?: boolean;
+  underline?: boolean;
+  letterSpacing?: number; // em units, e.g. 0.05
+  lineHeight?: number; // multiplier, default 1.15
+  textAlign?: "left" | "center" | "right";
+  // Drop shadow: present means render a CSS text-shadow.
+  shadow?: {
+    color: string;
+    blur: number; // logical px
+    offsetX: number;
+    offsetY: number;
+  } | null;
+  // Stroke / outline. Width is logical px.
+  stroke?: {
+    color: string;
+    width: number;
+  } | null;
 };
 
 export type ShapeKind = "rect" | "circle" | "line" | "icon" | "path";
@@ -43,6 +80,11 @@ export type ShapeLayer = LayerBase & {
   // artwork scales into the layer's box.
   svgMarkup?: string;
   viewBox?: string;
+  // Optional shape style polish — all undefined = legacy defaults.
+  // Corner radius for rect (logical px). Undefined falls back to 12.
+  cornerRadius?: number;
+  // SVG-style dash pattern (e.g. "8 4"). Empty / undefined = solid line.
+  strokeDash?: string;
 };
 
 export type ImageLayer = LayerBase & {
@@ -52,6 +94,21 @@ export type ImageLayer = LayerBase & {
   // and crop), user-source -> "contain" (letterbox). Empty "add image box"
   // slots override to "cover" so a dropped image visibly fills the frame.
   fit?: "cover" | "contain";
+  // Optional CSS filter values applied to the rendered image. All undefined
+  // = no filter. Numbers; rendered as percent/blur(px) via CSS filter().
+  brightness?: number; // 1 = normal, 0..2
+  contrast?: number;   // 1 = normal, 0..2
+  saturation?: number; // 1 = normal, 0..2
+  blur?: number;       // logical px, 0 = no blur
+  // Crop window inside the source image (0..1, relative). When set, only
+  // this sub-rectangle of the natural image is shown inside the layer box.
+  // Undefined = no crop (full image).
+  crop?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
 };
 
 export type Layer = TextLayer | ShapeLayer | ImageLayer;

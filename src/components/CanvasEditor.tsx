@@ -10,7 +10,6 @@ import {
   type Layer,
   type Layout,
   type Rect,
-  type ShapeKind,
   type ShapeLayer,
   type Story,
   type TextLayer,
@@ -37,6 +36,22 @@ import {
   type FontOption,
 } from "@/lib/fonts";
 import { useMediaQuery } from "@/lib/useMediaQuery";
+import {
+  alignLayers,
+  distributeLayers,
+  type AlignAxis,
+  type DistributeAxis,
+} from "./studio/align";
+import { snapForDrag, type SnapGuide } from "./studio/snapping";
+import { copyLayers, hasClipboard, pasteLayers, duplicateLayers } from "./studio/clipboard";
+import { reorderLayers } from "./studio/zorder";
+import { expandToGroups, isLayerSelectable, unionRect, rectsIntersect, layerAABB } from "./studio/selection";
+import LayersPanel from "./studio/LayersPanel";
+import ContextMenu, { type ContextMenuItem } from "./studio/ContextMenu";
+import AlignToolbar from "./studio/AlignToolbar";
+import { getRecentColors, recordRecentColor } from "./studio/recentColors";
+import FindReplaceModal from "./studio/FindReplaceModal";
+import ShortcutsHelp from "./studio/ShortcutsHelp";
 
 interface CanvasEditorProps {
   story: Story;
@@ -46,15 +61,23 @@ interface CanvasEditorProps {
   pet?: import("@/lib/types").Pet | null;
 }
 
-type SidebarTab = "layouts" | "text" | "shapes" | "images" | "assistant";
+type SidebarTab = "layouts" | "text" | "shapes" | "images" | "layers" | "assistant";
 
 // Compass points for resize handles. The edge the user grabs determines
 // which corner stays anchored and whether width/height grows positive or
 // negative relative to the drag delta.
-type ResizeEdge = "e" | "w" | "n" | "s" | "se";
+type ResizeEdge = "e" | "w" | "n" | "s" | "se" | "ne" | "nw" | "sw";
 
 type Drag =
-  | { kind: "move"; layerId: string; startX: number; startY: number; origX: number; origY: number }
+  | {
+      kind: "move";
+      // Initial positions for every layer being moved (multi-select aware).
+      starts: Map<string, { x: number; y: number }>;
+      startX: number;
+      startY: number;
+      // Original bounding box of the moving set; used for snap guides.
+      origBounds: Rect;
+    }
   | {
       kind: "resize";
       edge: ResizeEdge;
@@ -73,6 +96,16 @@ type Drag =
       cy: number;
       startAngle: number;
       origRot: number;
+    }
+  | {
+      // Marquee select: drag on empty canvas to select layers under the
+      // resulting rectangle.
+      kind: "marquee";
+      startX: number; // canvas-logical coords
+      startY: number;
+      curX: number;
+      curY: number;
+      additive: boolean; // hold shift to add to existing selection
     };
 
 function uid(): string {
@@ -377,7 +410,7 @@ function CanvasEditorDesktop({
     const restored = history.undo(current);
     if (!restored) return;
     setStory((s) => ({ ...s, pages: restored }));
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setEditingTextId(null);
     markChangedPagesDirty(current, restored);
   }, [history, story.pages, markChangedPagesDirty]);
@@ -386,7 +419,7 @@ function CanvasEditorDesktop({
     const restored = history.redo(current);
     if (!restored) return;
     setStory((s) => ({ ...s, pages: restored }));
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setEditingTextId(null);
     markChangedPagesDirty(current, restored);
   }, [history, story.pages, markChangedPagesDirty]);
@@ -401,15 +434,62 @@ function CanvasEditorDesktop({
     [pet]
   );
   const [pageIdx, setPageIdx] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ---------------------------------------------------------------------
+  // Selection — supports multi-layer. selectedIds is the source of truth;
+  // selectedId is a convenience accessor for "the primary single
+  // selection" (used by the existing single-target side panels and
+  // resize/rotate handles). When exactly one layer is selected,
+  // selectedId is that id; otherwise it's null and the right inspector
+  // shows multi-select hints instead of layer fields.
+  // ---------------------------------------------------------------------
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+  const setSelectedId = useCallback((id: string | null) => {
+    setSelectedIds(id ? new Set([id]) : new Set());
+  }, []);
   const [tab, setTab] = useState<SidebarTab>("layouts");
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [dirty, setDirty] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [regenPending, setRegenPending] = useState(false);
   const [shapeSearch, setShapeSearch] = useState("");
+
+  // Context-menu state. Null = closed.
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(
+    null
+  );
+
+  // Right-side panel toggle: "inspector" (default — properties of the
+  // selected layer) or "layers" (the z-order panel). Persisted in local
+  // state per session so the user's preference sticks while they work.
+  const [rightPanel, setRightPanel] = useState<"inspector" | "layers">("inspector");
+
+  // Image crop mode. When set, the canvas suppresses the normal selection
+  // chrome for the targeted image and shows crop handles instead.
+  const [croppingId, setCroppingId] = useState<string | null>(null);
+
+  // Find & replace modal.
+  const [findOpen, setFindOpen] = useState(false);
+  // Keyboard-shortcuts cheatsheet.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // Canvas zoom level (multiplier). 1 = fit-to-frame; user-controlled via
+  // ⌘+ / ⌘- / ⌘0 / pinch. Clamped to [0.25, 4]. Stored here (not in a
+  // ref) so the canvas re-renders the scale on changes.
+  const [zoom, setZoom] = useState(1);
+
+  // Recent-color palette persisted to localStorage so the user's hues
+  // come back across sessions.
+  const [recentColors, setRecentColors] = useState<string[]>([]);
+  useEffect(() => {
+    setRecentColors(getRecentColors());
+  }, []);
+  const pushRecentColor = useCallback((c: string) => {
+    setRecentColors(recordRecentColor(c));
+  }, []);
 
   // Custom layouts (saved from this Studio). Fetched once on mount; new saves
   // prepend to the list so they appear immediately in the Layouts tab.
@@ -453,6 +533,10 @@ function CanvasEditorDesktop({
     [currentPage]
   );
   const selectedLayer = layers.find((l) => l.id === selectedId) ?? null;
+  const selectedLayers = useMemo(
+    () => layers.filter((l) => selectedIds.has(l.id)),
+    [layers, selectedIds]
+  );
   const currentLayoutId = currentPage?.layoutId ?? DEFAULT_LAYOUT_ID;
 
   // Fetch this story's custom layouts (globals + scoped to this story).
@@ -529,7 +613,7 @@ function CanvasEditorDesktop({
       updatePageLayers(currentPage.pageNumber, (ls) => [...ls, layer]);
       setSelectedId(layer.id);
     },
-    [currentPage, updatePageLayers, snapshotPages]
+    [currentPage, updatePageLayers, snapshotPages, setSelectedId]
   );
 
   const updateLayer = useCallback(
@@ -549,9 +633,205 @@ function CanvasEditorDesktop({
       updatePageLayers(currentPage.pageNumber, (ls) =>
         ls.filter((l) => l.id !== id)
       );
-      if (selectedId === id) setSelectedId(null);
+      setSelectedIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     },
-    [currentPage, selectedId, updatePageLayers, snapshotPages]
+    [currentPage, updatePageLayers, snapshotPages]
+  );
+
+  // Delete every selected layer in one go. Used by Delete/Backspace when
+  // a multi-selection is active, by the context menu's "Delete", and by
+  // ⌘X (cut). Layer-source "layout" layers are filtered out — those are
+  // load-bearing for the layout system and shouldn't be removed via
+  // multi-select; the user can still delete them individually with the
+  // properties-panel Delete button.
+  const deleteSelected = useCallback(() => {
+    if (!currentPage) return;
+    if (selectedIds.size === 0) return;
+    snapshotPages();
+    updatePageLayers(currentPage.pageNumber, (ls) =>
+      ls.filter((l) => !selectedIds.has(l.id))
+    );
+    setSelectedIds(new Set());
+  }, [currentPage, selectedIds, updatePageLayers, snapshotPages]);
+
+  // Apply a partial patch to every selected layer at once. Used by the
+  // multi-select properties panel + the keyboard-driven align/distribute
+  // workflow.
+  const updateSelectedLayers = useCallback(
+    (mapper: (l: Layer) => Layer) => {
+      if (!currentPage) return;
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        ls.map((l) => (selectedIds.has(l.id) ? mapper(l) : l))
+      );
+    },
+    [currentPage, selectedIds, updatePageLayers]
+  );
+
+  // ---- Z-order ------------------------------------------------------------
+
+  const reorderSelected = useCallback(
+    (op: "forward" | "backward" | "front" | "back") => {
+      if (!currentPage) return;
+      if (selectedIds.size === 0) return;
+      snapshotPages();
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        reorderLayers(ls, selectedIds, op)
+      );
+    },
+    [currentPage, selectedIds, updatePageLayers, snapshotPages]
+  );
+
+  // ---- Group / ungroup ----------------------------------------------------
+
+  const groupSelected = useCallback(() => {
+    if (!currentPage) return;
+    if (selectedIds.size < 2) return;
+    snapshotPages();
+    const groupId = uid();
+    updatePageLayers(currentPage.pageNumber, (ls) =>
+      ls.map((l) => (selectedIds.has(l.id) ? { ...l, groupId } : l))
+    );
+  }, [currentPage, selectedIds, updatePageLayers, snapshotPages]);
+
+  const ungroupSelected = useCallback(() => {
+    if (!currentPage) return;
+    if (selectedIds.size === 0) return;
+    snapshotPages();
+    updatePageLayers(currentPage.pageNumber, (ls) =>
+      ls.map((l) => {
+        if (!selectedIds.has(l.id)) return l;
+        if (!l.groupId) return l;
+        const next = { ...l };
+        delete next.groupId;
+        return next;
+      })
+    );
+  }, [currentPage, selectedIds, updatePageLayers, snapshotPages]);
+
+  // ---- Alignment + distribution ------------------------------------------
+
+  const doAlign = useCallback(
+    (axis: AlignAxis) => {
+      if (!currentPage) return;
+      if (selectedIds.size === 0) return;
+      snapshotPages();
+      // Align relative to canvas when only one layer is selected (Canva
+      // behavior — single-layer align jumps the layer to the canvas edge);
+      // otherwise align relative to the selection bounding box.
+      const relativeTo = selectedIds.size === 1 ? "canvas" : "selection";
+      const sel = layers.filter((l) => selectedIds.has(l.id));
+      const moves = alignLayers(sel, axis, relativeTo);
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        ls.map((l) => {
+          const m = moves.get(l.id);
+          if (!m) return l;
+          return { ...l, x: l.x + m.x, y: l.y + m.y };
+        })
+      );
+    },
+    [currentPage, selectedIds, layers, snapshotPages, updatePageLayers]
+  );
+
+  const doDistribute = useCallback(
+    (axis: DistributeAxis) => {
+      if (!currentPage) return;
+      if (selectedIds.size < 3) return;
+      snapshotPages();
+      const sel = layers.filter((l) => selectedIds.has(l.id));
+      const moves = distributeLayers(sel, axis);
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        ls.map((l) => {
+          const m = moves.get(l.id);
+          if (!m) return l;
+          return { ...l, x: l.x + m.x, y: l.y + m.y };
+        })
+      );
+    },
+    [currentPage, selectedIds, layers, snapshotPages, updatePageLayers]
+  );
+
+  // ---- Clipboard ---------------------------------------------------------
+
+  const handleCopy = useCallback(() => {
+    if (selectedLayers.length === 0) return;
+    copyLayers(selectedLayers);
+  }, [selectedLayers]);
+
+  const handlePaste = useCallback(() => {
+    if (!currentPage) return;
+    if (!hasClipboard()) return;
+    const fresh = pasteLayers(uid);
+    if (!fresh || fresh.length === 0) return;
+    snapshotPages();
+    updatePageLayers(currentPage.pageNumber, (ls) => [...ls, ...fresh]);
+    setSelectedIds(new Set(fresh.map((l) => l.id)));
+  }, [currentPage, snapshotPages, updatePageLayers]);
+
+  const handleCut = useCallback(() => {
+    if (selectedLayers.length === 0) return;
+    copyLayers(selectedLayers);
+    deleteSelected();
+  }, [selectedLayers, deleteSelected]);
+
+  const handleDuplicate = useCallback(() => {
+    if (!currentPage) return;
+    if (selectedLayers.length === 0) return;
+    snapshotPages();
+    const dups = duplicateLayers(selectedLayers, uid);
+    updatePageLayers(currentPage.pageNumber, (ls) => [...ls, ...dups]);
+    setSelectedIds(new Set(dups.map((l) => l.id)));
+  }, [currentPage, selectedLayers, snapshotPages, updatePageLayers]);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(layers.filter(isLayerSelectable).map((l) => l.id)));
+  }, [layers]);
+
+  // ---- Visibility / lock toggles -----------------------------------------
+
+  const toggleLayerVisible = useCallback(
+    (id: string) => {
+      if (!currentPage) return;
+      snapshotPages();
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        ls.map((l) => (l.id === id ? { ...l, hidden: !l.hidden } : l))
+      );
+    },
+    [currentPage, snapshotPages, updatePageLayers]
+  );
+
+  const toggleLayerLocked = useCallback(
+    (id: string) => {
+      if (!currentPage) return;
+      snapshotPages();
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        ls.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l))
+      );
+      // Locking the active selection drops the lock from selection (an
+      // active drag/resize on a locked layer is incoherent).
+      setSelectedIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    },
+    [currentPage, snapshotPages, updatePageLayers]
+  );
+
+  const renameLayer = useCallback(
+    (id: string, name: string) => {
+      if (!currentPage) return;
+      snapshotPages();
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        ls.map((l) => (l.id === id ? { ...l, name } : l))
+      );
+    },
+    [currentPage, snapshotPages, updatePageLayers]
   );
 
   // Apply an AI-regenerated text to the current page: update both page.text
@@ -646,7 +926,7 @@ function CanvasEditorDesktop({
     setSaveLayoutError(null);
     setSelectedId(null);
     setEditingTextId(null);
-  }, [currentLayoutId, customLayouts]);
+  }, [currentLayoutId, customLayouts, setSelectedId]);
 
   const cancelDefineLayout = useCallback(() => {
     setDefineMode(null);
@@ -825,6 +1105,106 @@ function CanvasEditorDesktop({
       if (editingTextId) return;
       if (inField) return;
 
+      // Clipboard shortcuts work when the canvas is focused OR when the
+      // user has clicked on a layer (we focus the canvas after selecting
+      // so this is the same condition). Clipboard ops don't need the
+      // canvas to own focus exclusively — keep them above the
+      // activeElement gate.
+      if (meta && (e.key === "c" || e.key === "C")) {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        handleCopy();
+        return;
+      }
+      if (meta && (e.key === "x" || e.key === "X")) {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        handleCut();
+        return;
+      }
+      if (meta && (e.key === "v" || e.key === "V")) {
+        if (!hasClipboard()) return;
+        e.preventDefault();
+        handlePaste();
+        return;
+      }
+      if (meta && (e.key === "d" || e.key === "D")) {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        handleDuplicate();
+        return;
+      }
+      if (meta && (e.key === "a" || e.key === "A")) {
+        if (layers.length === 0) return;
+        e.preventDefault();
+        selectAll();
+        canvasRef.current?.focus();
+        return;
+      }
+      // Find & replace
+      if (meta && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      // Shortcut: "?" opens the cheatsheet. Works at any focus location
+      // since shortcuts are a meta-level affordance.
+      if (e.key === "?" && !meta) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+      // Zoom: ⌘+, ⌘-, ⌘0 (reset). The default browser zoom is also
+      // bound to these so we always preventDefault.
+      if (meta && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        setZoom((z) => Math.min(4, Number((z + 0.1).toFixed(2))));
+        return;
+      }
+      if (meta && e.key === "-") {
+        e.preventDefault();
+        setZoom((z) => Math.max(0.25, Number((z - 0.1).toFixed(2))));
+        return;
+      }
+      if (meta && e.key === "0") {
+        e.preventDefault();
+        setZoom(1);
+        return;
+      }
+      // Group / ungroup
+      if (meta && (e.key === "g" || e.key === "G")) {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        if (e.shiftKey) ungroupSelected();
+        else groupSelected();
+        return;
+      }
+      // Z-order: ⌘[ / ⌘] = front/back; [ / ] = forward/backward
+      if (meta && e.key === "]") {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        reorderSelected("front");
+        return;
+      }
+      if (meta && e.key === "[") {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        reorderSelected("back");
+        return;
+      }
+      if (!meta && e.key === "]") {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        reorderSelected("forward");
+        return;
+      }
+      if (!meta && e.key === "[") {
+        if (selectedIds.size === 0) return;
+        e.preventDefault();
+        reorderSelected("backward");
+        return;
+      }
+
       // Selection-aware keys (arrows / Delete / Backspace / Escape /
       // Tab) only engage when focus is actually on the canvas. The
       // previous version listened on `window` unconditionally, which
@@ -834,22 +1214,30 @@ function CanvasEditorDesktop({
       // owns these keys only while it's focused.
       if (document.activeElement !== canvasRef.current) return;
 
-      if (e.key === "Escape" && selectedId) {
-        e.preventDefault();
-        setSelectedId(null);
-        return;
+      if (e.key === "Escape") {
+        if (croppingId) {
+          e.preventDefault();
+          setCroppingId(null);
+          return;
+        }
+        if (selectedIds.size > 0) {
+          e.preventDefault();
+          setSelectedIds(new Set());
+          return;
+        }
       }
 
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {
         e.preventDefault();
-        deleteLayer(selectedId);
+        deleteSelected();
         return;
       }
 
       // Arrow-key nudge. 1px default, 10px with Shift. Logical
-      // coordinates — see CANVAS_SIZE.
+      // coordinates — see CANVAS_SIZE. Operates on the entire current
+      // selection, so multi-select moves stay together.
       if (
-        selectedId &&
+        selectedIds.size > 0 &&
         (e.key === "ArrowUp" ||
           e.key === "ArrowDown" ||
           e.key === "ArrowLeft" ||
@@ -865,7 +1253,7 @@ function CanvasEditorDesktop({
         snapshotPages();
         updatePageLayers(currentPage.pageNumber, (ls) =>
           ls.map((l) =>
-            l.id === selectedId ? { ...l, x: l.x + dx, y: l.y + dy } : l
+            selectedIds.has(l.id) ? { ...l, x: l.x + dx, y: l.y + dy } : l
           )
         );
         return;
@@ -878,7 +1266,10 @@ function CanvasEditorDesktop({
       if (e.key === "Tab") {
         if (!layers.length) return;
         e.preventDefault();
-        const ordered = [...layers].sort((a, b) => a.y - b.y || a.x - b.x);
+        const ordered = [...layers].filter(isLayerSelectable).sort(
+          (a, b) => a.y - b.y || a.x - b.x
+        );
+        if (ordered.length === 0) return;
         if (!selectedId) {
           setSelectedId(ordered[e.shiftKey ? ordered.length - 1 : 0].id);
           canvasRef.current?.focus();
@@ -896,14 +1287,25 @@ function CanvasEditorDesktop({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     selectedId,
-    deleteLayer,
+    selectedIds,
+    deleteSelected,
     editingTextId,
     handleUndo,
     handleRedo,
+    handleCopy,
+    handlePaste,
+    handleCut,
+    handleDuplicate,
+    selectAll,
+    groupSelected,
+    ungroupSelected,
+    reorderSelected,
     layers,
     currentPage,
     snapshotPages,
     updatePageLayers,
+    setSelectedId,
+    croppingId,
   ]);
 
   // ---- Drag / resize / rotate ---------------------------------------------
@@ -916,16 +1318,35 @@ function CanvasEditorDesktop({
 
   function startMove(e: React.PointerEvent, layer: Layer) {
     e.stopPropagation();
-    setSelectedId(layer.id);
+    if (layer.locked) return;
+    // Resolve the effective selection at click time. Three cases:
+    //   1) User clicked an already-selected layer → use the current
+    //      multi-selection so a multi-drag moves everything together.
+    //   2) User shift/cmd-clicked an unselected layer → additive add.
+    //   3) User clicked an unselected layer → replace selection.
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    let activeIds: Set<string>;
+    if (selectedIds.has(layer.id)) {
+      activeIds = expandToGroups(layers, selectedIds);
+    } else if (additive) {
+      activeIds = expandToGroups(layers, new Set([...selectedIds, layer.id]));
+      setSelectedIds(activeIds);
+    } else {
+      activeIds = expandToGroups(layers, new Set([layer.id]));
+      setSelectedIds(activeIds);
+    }
     // Snapshot pre-drag state so the entire drag is one undo step.
     snapshotPages();
+    const moving = layers.filter((l) => activeIds.has(l.id));
+    const starts = new Map<string, { x: number; y: number }>();
+    for (const l of moving) starts.set(l.id, { x: l.x, y: l.y });
+    const bounds = unionRect(moving.map(layerAABB)) ?? layerAABB(layer);
     setDrag({
       kind: "move",
-      layerId: layer.id,
+      starts,
       startX: e.clientX,
       startY: e.clientY,
-      origX: layer.x,
-      origY: layer.y,
+      origBounds: bounds,
     });
     (e.target as Element).setPointerCapture?.(e.pointerId);
   }
@@ -977,12 +1398,44 @@ function CanvasEditorDesktop({
       if (!drag) return;
       if (drag.kind === "move") {
         const scale = clientToCanvasScale();
-        const dx = (e.clientX - drag.startX) * scale;
-        const dy = (e.clientY - drag.startY) * scale;
-        updateLayer(drag.layerId, {
-          x: drag.origX + dx,
-          y: drag.origY + dy,
-        });
+        let dx = (e.clientX - drag.startX) * scale;
+        let dy = (e.clientY - drag.startY) * scale;
+        // Compute snap targets against the proposed bounding box. Skip
+        // snapping when the user holds Alt (mirrors Canva: Alt = "I
+        // mean it, no snap"). Hidden / locked layers participate as
+        // anchors so users can align to them.
+        if (!e.altKey && currentPage) {
+          const others = (currentPage.overlays ?? []).filter(
+            (l) => !drag.starts.has(l.id)
+          );
+          const proposed = {
+            x: drag.origBounds.x + dx,
+            y: drag.origBounds.y + dy,
+            width: drag.origBounds.width,
+            height: drag.origBounds.height,
+          };
+          const snap = snapForDrag(
+            // Use a synthetic Layer-like for snap's signature
+            { ...proposed, rotation: 0, id: "__moving__", type: "shape", shape: "rect", fill: "", stroke: "", strokeWidth: 0 } as unknown as Layer,
+            proposed.x,
+            proposed.y,
+            others
+          );
+          dx += snap.dx;
+          dy += snap.dy;
+          setSnapGuides(snap.guides);
+        } else {
+          setSnapGuides([]);
+        }
+        if (!currentPage) return;
+        const moves = drag.starts;
+        updatePageLayers(currentPage.pageNumber, (ls) =>
+          ls.map((l) => {
+            const orig = moves.get(l.id);
+            if (!orig) return l;
+            return { ...l, x: orig.x + dx, y: orig.y + dy };
+          })
+        );
       } else if (drag.kind === "resize") {
         const scale = clientToCanvasScale();
         const dx = (e.clientX - drag.startX) * scale;
@@ -992,30 +1445,75 @@ function CanvasEditorDesktop({
         let newY = drag.origY;
         let newW = drag.origW;
         let newH = drag.origH;
+        const aspect = drag.origW / Math.max(1, drag.origH);
 
-        // Right / southeast: grow rightward, top-left anchored. Clamp to
+        const east = drag.edge === "e" || drag.edge === "se" || drag.edge === "ne";
+        const west = drag.edge === "w" || drag.edge === "sw" || drag.edge === "nw";
+        const south = drag.edge === "s" || drag.edge === "se" || drag.edge === "sw";
+        const north = drag.edge === "n" || drag.edge === "ne" || drag.edge === "nw";
+
+        // Right side: grow rightward, top-left anchored. Clamp to
         // canvas so the layer can't silently extend past the clip.
-        if (drag.edge === "e" || drag.edge === "se") {
+        if (east) {
           const maxW = CANVAS_SIZE - drag.origX;
           newW = Math.max(20, Math.min(maxW, drag.origW + dx));
         }
-        // Bottom / southeast: grow downward, top-left anchored.
-        if (drag.edge === "s" || drag.edge === "se") {
+        // Bottom: grow downward, top-left anchored.
+        if (south) {
           const maxH = CANVAS_SIZE - drag.origY;
           newH = Math.max(20, Math.min(maxH, drag.origH + dy));
         }
-        // Left: grow leftward. Width grows by -dx, x shrinks by same.
-        // Clamp so x >= 0 (no going past the canvas left edge).
-        if (drag.edge === "w") {
-          const maxW = drag.origX + drag.origW; // x=0 → width = origRight
+        // Left: grow leftward.
+        if (west) {
+          const maxW = drag.origX + drag.origW;
           newW = Math.max(20, Math.min(maxW, drag.origW - dx));
           newX = drag.origX + drag.origW - newW;
         }
-        // Top: grow upward. Height grows by -dy, y shrinks.
-        if (drag.edge === "n") {
+        // Top: grow upward.
+        if (north) {
           const maxH = drag.origY + drag.origH;
           newH = Math.max(20, Math.min(maxH, drag.origH - dy));
           newY = drag.origY + drag.origH - newH;
+        }
+
+        // Shift = keep aspect ratio. We prefer the larger of the two
+        // newly-proposed dimensions and rebuild the other from the
+        // original aspect so corner drags feel natural in both
+        // directions.
+        if (e.shiftKey && (east || west) && (north || south)) {
+          // For a corner drag, prefer width; derive height.
+          newH = newW / aspect;
+          if (south && !north) {
+            // keep top anchor: y stays put
+          } else if (north && !south) {
+            newY = drag.origY + drag.origH - newH;
+          }
+        } else if (e.shiftKey && (east || west)) {
+          newH = newW / aspect;
+          newY = drag.origY + drag.origH / 2 - newH / 2;
+        } else if (e.shiftKey && (north || south)) {
+          newW = newH * aspect;
+          newX = drag.origX + drag.origW / 2 - newW / 2;
+        }
+
+        // Alt = resize from the center: the opposite edge mirrors the
+        // dragged edge so the layer grows/shrinks symmetrically. Skip
+        // canvas-edge clamping in this mode to preserve the symmetry.
+        if (e.altKey) {
+          if (east) {
+            newW = Math.max(20, drag.origW + dx * 2);
+            newX = drag.origX - dx;
+          } else if (west) {
+            newW = Math.max(20, drag.origW - dx * 2);
+            newX = drag.origX + dx;
+          }
+          if (south) {
+            newH = Math.max(20, drag.origH + dy * 2);
+            newY = drag.origY - dy;
+          } else if (north) {
+            newH = Math.max(20, drag.origH - dy * 2);
+            newY = drag.origY + dy;
+          }
         }
 
         updateLayer(drag.layerId, {
@@ -1026,13 +1524,53 @@ function CanvasEditorDesktop({
         });
       } else if (drag.kind === "rotate") {
         const angle = Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx);
-        const delta = ((angle - drag.startAngle) * 180) / Math.PI;
+        let delta = ((angle - drag.startAngle) * 180) / Math.PI;
+        let next = drag.origRot + delta;
+        // Shift = snap to 15° increments. This matches Canva and lets
+        // users grab perfectly horizontal/vertical without fiddling.
+        if (e.shiftKey) {
+          next = Math.round(next / 15) * 15;
+          delta = next - drag.origRot;
+        }
         updateLayer(drag.layerId, {
-          rotation: drag.origRot + delta,
+          rotation: next,
         });
+      } else if (drag.kind === "marquee") {
+        const scale = clientToCanvasScale();
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const localX = (e.clientX - rect.left) * scale;
+        const localY = (e.clientY - rect.top) * scale;
+        setDrag({ ...drag, curX: localX, curY: localY });
       }
     }
     function onUp() {
+      // On marquee end, commit the selection.
+      if (drag && drag.kind === "marquee") {
+        const x0 = Math.min(drag.startX, drag.curX);
+        const y0 = Math.min(drag.startY, drag.curY);
+        const x1 = Math.max(drag.startX, drag.curX);
+        const y1 = Math.max(drag.startY, drag.curY);
+        const marqueeRect = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+        if (marqueeRect.width > 4 && marqueeRect.height > 4 && currentPage) {
+          const hits = (currentPage.overlays ?? []).filter(
+            (l) => isLayerSelectable(l) && rectsIntersect(layerAABB(l), marqueeRect)
+          );
+          const expanded = expandToGroups(
+            currentPage.overlays ?? [],
+            hits.map((l) => l.id)
+          );
+          setSelectedIds((prev) => {
+            if (drag.additive) {
+              const merged = new Set(prev);
+              for (const id of expanded) merged.add(id);
+              return merged;
+            }
+            return expanded;
+          });
+        }
+      }
+      setSnapGuides([]);
       setDrag(null);
     }
     window.addEventListener("pointermove", onMove);
@@ -1388,6 +1926,60 @@ function CanvasEditorDesktop({
           {saveError && (
             <span className="text-xs font-medium text-clay-500">{saveError}</span>
           )}
+          {/* Zoom control. ⌘+/-/0 also bound. Resets to fit on click. */}
+          <div className="flex items-center gap-0.5 rounded-full border border-linen-200 bg-paper px-1.5 py-0.5">
+            <button
+              type="button"
+              onClick={() =>
+                setZoom((z) => Math.max(0.25, Number((z - 0.1).toFixed(2))))
+              }
+              title="Zoom out (⌘−)"
+              aria-label="Zoom out"
+              className="px-1 text-[14px] leading-none text-sage-700 hover:text-bark-900"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom(1)}
+              title="Fit to screen (⌘0)"
+              className="w-[42px] text-center text-[10px] font-medium tabular-nums text-sage-700 hover:text-bark-900"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setZoom((z) => Math.min(4, Number((z + 0.1).toFixed(2))))
+              }
+              title="Zoom in (⌘=)"
+              aria-label="Zoom in"
+              className="px-1 text-[14px] leading-none text-sage-700 hover:text-bark-900"
+            >
+              +
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFindOpen(true)}
+            title="Find & replace (⌘F)"
+            aria-label="Find and replace"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-linen-200 bg-paper text-sage-700 transition-colors hover:border-stone-500/30"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShortcutsOpen(true)}
+            title="Keyboard shortcuts (?)"
+            aria-label="Keyboard shortcuts"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-linen-200 bg-paper text-[12px] font-semibold text-sage-700 transition-colors hover:border-stone-500/30"
+          >
+            ?
+          </button>
           <button
             type="button"
             onClick={handleUndo}
@@ -1455,6 +2047,7 @@ function CanvasEditorDesktop({
                 "text",
                 "shapes",
                 "images",
+                "layers",
               ] as Exclude<SidebarTab, "assistant">[]
             ).map((t) => (
               <button
@@ -1722,6 +2315,42 @@ function CanvasEditorDesktop({
                 onInsertImage={(url) => addLayer(makeUploadImage(url))}
               />
             )}
+
+            {tab === "layers" && (
+              <div>
+                <div className="mb-2 text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+                  Layer order
+                </div>
+                <p className="mb-2 text-[10px] leading-snug text-stone-500">
+                  Top of list = top of canvas. Drag to reorder, double-click
+                  to rename. Toggle the eye or lock per row.
+                </p>
+                <LayersPanel
+                  layers={layers}
+                  selectedIds={selectedIds}
+                  onSelect={(ids, additive) => {
+                    setSelectedIds((prev) => {
+                      if (!additive) return ids;
+                      const next = new Set(prev);
+                      for (const id of ids) {
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                      }
+                      return next;
+                    });
+                  }}
+                  onRename={renameLayer}
+                  onToggleVisible={toggleLayerVisible}
+                  onToggleLocked={toggleLayerLocked}
+                  onReorder={(next) => {
+                    if (!currentPage) return;
+                    snapshotPages();
+                    updatePageLayers(currentPage.pageNumber, () => next);
+                  }}
+                  onDelete={deleteLayer}
+                />
+              </div>
+            )}
           </div>
         </aside>
 
@@ -1737,6 +2366,77 @@ function CanvasEditorDesktop({
               Drag and resize the boxes to design your layout
             </div>
           )}
+          {/* Alignment + z-order + group toolbar. Always rendered so the
+              user can find the controls; buttons disable themselves when
+              the current selection makes them meaningless. */}
+          {!defineMode && (
+            <AlignToolbar
+              onAlign={doAlign}
+              onDistribute={doDistribute}
+              canDistribute={selectedIds.size >= 3}
+              extras={
+                <>
+                  <ToolbarBtn
+                    title="Bring to front (⌘])"
+                    onClick={() => reorderSelected("front")}
+                    disabled={selectedIds.size === 0}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="13" height="13" rx="1" />
+                      <rect x="8" y="8" width="13" height="13" rx="1" fill="currentColor" fillOpacity="0.2" />
+                    </svg>
+                  </ToolbarBtn>
+                  <ToolbarBtn
+                    title="Send to back (⌘[)"
+                    onClick={() => reorderSelected("back")}
+                    disabled={selectedIds.size === 0}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="8" y="8" width="13" height="13" rx="1" />
+                      <rect x="3" y="3" width="13" height="13" rx="1" fill="currentColor" fillOpacity="0.2" />
+                    </svg>
+                  </ToolbarBtn>
+                  <div className="mx-1 h-4 w-px bg-linen-200" aria-hidden="true" />
+                  <ToolbarBtn
+                    title="Group (⌘G)"
+                    onClick={groupSelected}
+                    disabled={selectedIds.size < 2}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="7" height="7" />
+                      <rect x="14" y="3" width="7" height="7" />
+                      <rect x="3" y="14" width="7" height="7" />
+                      <rect x="14" y="14" width="7" height="7" />
+                    </svg>
+                  </ToolbarBtn>
+                  <ToolbarBtn
+                    title="Ungroup (⌘⇧G)"
+                    onClick={ungroupSelected}
+                    disabled={
+                      selectedLayers.length === 0 ||
+                      !selectedLayers.some((l) => l.groupId)
+                    }
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="6" height="6" />
+                      <rect x="15" y="15" width="6" height="6" />
+                    </svg>
+                  </ToolbarBtn>
+                  <div className="mx-1 h-4 w-px bg-linen-200" aria-hidden="true" />
+                  <ToolbarBtn
+                    title="Duplicate (⌘D)"
+                    onClick={handleDuplicate}
+                    disabled={selectedIds.size === 0}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </ToolbarBtn>
+                </>
+              }
+            />
+          )}
           <div
             ref={canvasRef}
             // tabIndex makes the canvas keyboard-focusable so screen-
@@ -1749,7 +2449,7 @@ function CanvasEditorDesktop({
             // fits in whatever the smaller dimension is. `min(...)` so
             // it doesn't have to grow to fill — keeps the page centered
             // in the column with breathing room.
-            className="relative aspect-square shrink overflow-hidden rounded-[4px] bg-paper focus:outline-none focus-visible:ring-2 focus-visible:ring-moss-700 focus-visible:ring-offset-2"
+            className="relative aspect-square shrink rounded-[4px] bg-paper focus:outline-none focus-visible:ring-2 focus-visible:ring-moss-700 focus-visible:ring-offset-2"
             style={{
               width: "min(100%, 640px)",
               height: "min(100%, 640px)",
@@ -1757,14 +2457,47 @@ function CanvasEditorDesktop({
               maxHeight: "min(100%, 640px)",
               boxShadow:
                 "0 24px 48px -16px rgba(30,20,10,.25), 0 2px 6px rgba(30,20,10,.08)",
+              // Zoom is applied via CSS transform so the layout math
+              // doesn't need to change — coordinates remain logical px
+              // and pointer scale conversions still match.
+              transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+              transformOrigin: "center center",
+              overflow: zoom > 1 ? "visible" : "hidden",
             }}
-            onPointerDown={() => {
+            onContextMenu={(e) => {
+              // Right-click anywhere on the canvas opens the layer
+              // context menu (positioned at the cursor). The dedicated
+              // per-layer handler stops propagation, so this only fires
+              // for clicks on empty canvas — in which case the menu
+              // exposes paste / select-all / page-wide actions.
+              e.preventDefault();
+              setContextMenu({ x: e.clientX, y: e.clientY });
+            }}
+            onPointerDown={(e) => {
               if (defineMode) {
                 setDefineMode((m) => (m ? { ...m, active: null } : m));
                 return;
               }
-              setSelectedId(null);
+              // Right-click is handled by onContextMenu, not pointer.
+              if (e.button === 2) return;
               setEditingTextId(null);
+              // Only start a marquee for primary (left) button drags on
+              // the canvas itself. Shift = additive marquee.
+              const rect = canvasRef.current?.getBoundingClientRect();
+              if (!rect) return;
+              const scale = CANVAS_SIZE / rect.width;
+              const lx = (e.clientX - rect.left) * scale;
+              const ly = (e.clientY - rect.top) * scale;
+              const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+              if (!additive) setSelectedIds(new Set());
+              setDrag({
+                kind: "marquee",
+                startX: lx,
+                startY: ly,
+                curX: lx,
+                curY: ly,
+                additive,
+              });
             }}
           >
             {/* Page layers. Dimmed while the user is defining a new layout
@@ -1776,28 +2509,137 @@ function CanvasEditorDesktop({
                   : "contents"
               }
             >
-              {layers.map((layer) => (
-                <LayerView
-                  key={layer.id}
-                  layer={layer}
-                  selected={selectedId === layer.id}
-                  editingText={editingTextId === layer.id}
-                  onPointerDown={(e) => startMove(e, layer)}
-                  onStartResize={(e, edge) => startResize(e, layer, edge)}
-                  onStartRotate={(e) => startRotate(e, layer)}
-                  onChangeText={(text) => updateLayer(layer.id, { text })}
-                  onDoubleClickText={() => {
-                    // Snapshot once at edit start so the whole typing
-                    // session is a single undo step.
-                    snapshotPages();
-                    setEditingTextId(layer.id);
-                  }}
-                  onBlurText={() => setEditingTextId(null)}
-                  onImageDrop={(src) => updateLayer(layer.id, { src })}
-                  onChooseImage={() => setPickingLayerId(layer.id)}
-                />
-              ))}
+              {layers.map((layer) => {
+                if (layer.hidden) return null;
+                const isSelected = selectedIds.has(layer.id);
+                const isSingle = isSelected && selectedIds.size === 1;
+                const isCropping = croppingId === layer.id;
+                return (
+                  <LayerView
+                    key={layer.id}
+                    layer={layer}
+                    selected={isSelected}
+                    primarySelected={isSingle && !isCropping}
+                    cropping={isCropping}
+                    editingText={editingTextId === layer.id}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!isSelected) setSelectedId(layer.id);
+                      setContextMenu({ x: e.clientX, y: e.clientY });
+                    }}
+                    onPointerDown={(e) => {
+                      if (e.button === 2) return;
+                      if (isCropping) return;
+                      startMove(e, layer);
+                    }}
+                    onStartResize={(e, edge) => startResize(e, layer, edge)}
+                    onStartRotate={(e) => startRotate(e, layer)}
+                    onChangeText={(text) => updateLayer(layer.id, { text })}
+                    onDoubleClickText={() => {
+                      // Snapshot once at edit start so the whole typing
+                      // session is a single undo step.
+                      snapshotPages();
+                      setEditingTextId(layer.id);
+                    }}
+                    onBlurText={() => setEditingTextId(null)}
+                    onDoubleClickImage={() => {
+                      // Double-click an image to enter crop mode (Canva /
+                      // PowerPoint behavior). Esc cancels.
+                      if (layer.type === "image" && layer.src) {
+                        setCroppingId(layer.id);
+                      }
+                    }}
+                    onImageDrop={(src) => updateLayer(layer.id, { src })}
+                    onChooseImage={() => setPickingLayerId(layer.id)}
+                    onCropChange={(crop) =>
+                      updateLayer(layer.id, { crop } as Partial<Layer>)
+                    }
+                  />
+                );
+              })}
             </div>
+
+            {/* Snap guides — thin moss-700 lines at snapped coordinates.
+                Rendered above layers but below the selection chrome so
+                they read as scaffolding, not content. */}
+            {snapGuides.length > 0 && (
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+                style={{ width: "100%", height: "100%", zIndex: 50 }}
+                viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
+                preserveAspectRatio="none"
+              >
+                {snapGuides.map((g, i) =>
+                  g.axis === "x" ? (
+                    <line
+                      key={i}
+                      x1={g.position}
+                      y1={0}
+                      x2={g.position}
+                      y2={CANVAS_SIZE}
+                      stroke="#7c3aed"
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ) : (
+                    <line
+                      key={i}
+                      x1={0}
+                      y1={g.position}
+                      x2={CANVAS_SIZE}
+                      y2={g.position}
+                      stroke="#7c3aed"
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )
+                )}
+              </svg>
+            )}
+
+            {/* Marquee selection rectangle. */}
+            {drag && drag.kind === "marquee" && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute border border-moss-700 bg-moss-700/10"
+                style={{
+                  left: `${(Math.min(drag.startX, drag.curX) / CANVAS_SIZE) * 100}%`,
+                  top: `${(Math.min(drag.startY, drag.curY) / CANVAS_SIZE) * 100}%`,
+                  width: `${(Math.abs(drag.curX - drag.startX) / CANVAS_SIZE) * 100}%`,
+                  height: `${(Math.abs(drag.curY - drag.startY) / CANVAS_SIZE) * 100}%`,
+                  zIndex: 60,
+                }}
+              />
+            )}
+
+            {/* Multi-selection bounding box — drawn around the union of
+                all selected layers so the user sees what "move/align"
+                will operate on. Hidden when only one layer is selected
+                (its own selection chrome already shows the box). */}
+            {selectedIds.size > 1 &&
+              (() => {
+                const bounds = unionRect(
+                  layers.filter((l) => selectedIds.has(l.id)).map(layerAABB)
+                );
+                if (!bounds) return null;
+                return (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute border-2 border-dashed border-moss-700"
+                    style={{
+                      left: `${(bounds.x / CANVAS_SIZE) * 100}%`,
+                      top: `${(bounds.y / CANVAS_SIZE) * 100}%`,
+                      width: `${(bounds.width / CANVAS_SIZE) * 100}%`,
+                      height: `${(bounds.height / CANVAS_SIZE) * 100}%`,
+                      zIndex: 55,
+                    }}
+                  />
+                );
+              })()}
 
             {defineMode && (
               <>
@@ -1897,7 +2739,19 @@ function CanvasEditorDesktop({
             the floating dock at bottom-right, not inside this panel. */}
         <aside className="flex flex-col overflow-hidden rounded-[10px] border border-linen-200 bg-cream-50 p-[18px]">
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-            {selectedLayer ? (
+            {selectedLayers.length > 1 ? (
+              <MultiSelectPanel
+                layers={selectedLayers}
+                onAlign={doAlign}
+                onDistribute={doDistribute}
+                onGroup={groupSelected}
+                onUngroup={ungroupSelected}
+                onDelete={deleteSelected}
+                onOpacityChange={(opacity) =>
+                  updateSelectedLayers((l) => ({ ...l, opacity }))
+                }
+              />
+            ) : selectedLayer ? (
               <PropertiesPanel
                 layer={selectedLayer}
                 showRegenerate={selectedIsLayoutText}
@@ -1905,6 +2759,46 @@ function CanvasEditorDesktop({
                 onRegenerate={regenerateLayoutText}
                 onChange={(patch) => updateLayer(selectedLayer.id, patch)}
                 onDelete={() => deleteLayer(selectedLayer.id)}
+                onDuplicate={handleDuplicate}
+                onStartCrop={
+                  selectedLayer.type === "image" && selectedLayer.src
+                    ? () => setCroppingId(selectedLayer.id)
+                    : undefined
+                }
+                cropping={croppingId === selectedLayer.id}
+                onExitCrop={() => setCroppingId(null)}
+                recentColors={recentColors}
+                onColorUsed={pushRecentColor}
+                rightPanel={rightPanel}
+                onTogglePanel={() =>
+                  setRightPanel((p) => (p === "inspector" ? "layers" : "inspector"))
+                }
+                layersPanel={
+                  <LayersPanel
+                    layers={layers}
+                    selectedIds={selectedIds}
+                    onSelect={(ids, additive) =>
+                      setSelectedIds((prev) => {
+                        if (!additive) return ids;
+                        const next = new Set(prev);
+                        for (const id of ids) {
+                          if (next.has(id)) next.delete(id);
+                          else next.add(id);
+                        }
+                        return next;
+                      })
+                    }
+                    onRename={renameLayer}
+                    onToggleVisible={toggleLayerVisible}
+                    onToggleLocked={toggleLayerLocked}
+                    onReorder={(next) => {
+                      if (!currentPage) return;
+                      snapshotPages();
+                      updatePageLayers(currentPage.pageNumber, () => next);
+                    }}
+                    onDelete={deleteLayer}
+                  />
+                }
               />
             ) : currentPage ? (
               <div>
@@ -2131,9 +3025,198 @@ function CanvasEditorDesktop({
           onClose={() => setPickingLayerId(null)}
         />
       )}
+
+      {shortcutsOpen && (
+        <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />
+      )}
+
+      {findOpen && (
+        <FindReplaceModal
+          pages={story.pages}
+          onClose={() => setFindOpen(false)}
+          onJump={(pageIndex, layerId) => {
+            setPageIdx(pageIndex);
+            setSelectedId(layerId);
+            setFindOpen(false);
+          }}
+          onApplyAll={(updates) => {
+            snapshotPages();
+            setStory((prev) => {
+              const byNum = new Map(updates.map((u) => [u.pageNumber, u.overlays]));
+              return {
+                ...prev,
+                pages: prev.pages.map((p) => {
+                  const next = byNum.get(p.pageNumber);
+                  if (!next) return p;
+                  return {
+                    ...p,
+                    overlays: next,
+                    // Keep page.text in sync with the layout-tagged
+                    // text layer if we touched it. Most pages have one
+                    // such layer; we pick the first to mirror.
+                    text:
+                      (next.find(
+                        (l) => l.source === "layout" && l.type === "text"
+                      ) as TextLayer | undefined)?.text ?? p.text,
+                  };
+                }),
+              };
+            });
+            setDirty((d) => {
+              const next = { ...d };
+              for (const u of updates) next[u.pageNumber] = true;
+              return next;
+            });
+            setFindOpen(false);
+          }}
+        />
+      )}
+
+      {/* Right-click context menu. The items list is built from the
+          current selection state so locked-/empty-selection scenarios
+          surface different verbs. */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          items={buildContextMenuItems({
+            hasSelection: selectedIds.size > 0,
+            anyGroup: selectedLayers.some((l) => l.groupId),
+            canPaste: hasClipboard(),
+            onCopy: handleCopy,
+            onCut: handleCut,
+            onPaste: handlePaste,
+            onDuplicate: handleDuplicate,
+            onSelectAll: selectAll,
+            onDelete: deleteSelected,
+            onBringForward: () => reorderSelected("forward"),
+            onSendBackward: () => reorderSelected("backward"),
+            onBringToFront: () => reorderSelected("front"),
+            onSendToBack: () => reorderSelected("back"),
+            onLock: () => selectedIds.forEach(toggleLayerLocked),
+            onGroup: groupSelected,
+            onUngroup: ungroupSelected,
+            onCrop:
+              selectedLayer?.type === "image" && selectedLayer.src
+                ? () => setCroppingId(selectedLayer.id)
+                : undefined,
+          })}
+        />
+      )}
     </div>
     </>
   );
+}
+
+// Build a context-menu item list from the current selection state. Factored
+// out of CanvasEditorDesktop so the JSX above stays readable.
+function buildContextMenuItems(opts: {
+  hasSelection: boolean;
+  anyGroup: boolean;
+  canPaste: boolean;
+  onCopy: () => void;
+  onCut: () => void;
+  onPaste: () => void;
+  onDuplicate: () => void;
+  onSelectAll: () => void;
+  onDelete: () => void;
+  onBringForward: () => void;
+  onSendBackward: () => void;
+  onBringToFront: () => void;
+  onSendToBack: () => void;
+  onLock: () => void;
+  onGroup: () => void;
+  onUngroup: () => void;
+  onCrop?: () => void;
+}): ContextMenuItem[] {
+  return [
+    {
+      label: "Cut",
+      shortcut: "⌘X",
+      onSelect: opts.onCut,
+      disabled: !opts.hasSelection,
+    },
+    {
+      label: "Copy",
+      shortcut: "⌘C",
+      onSelect: opts.onCopy,
+      disabled: !opts.hasSelection,
+    },
+    {
+      label: "Paste",
+      shortcut: "⌘V",
+      onSelect: opts.onPaste,
+      disabled: !opts.canPaste,
+      separator: true,
+    },
+    {
+      label: "Duplicate",
+      shortcut: "⌘D",
+      onSelect: opts.onDuplicate,
+      disabled: !opts.hasSelection,
+    },
+    {
+      label: "Select all",
+      shortcut: "⌘A",
+      onSelect: opts.onSelectAll,
+      separator: true,
+    },
+    {
+      label: "Bring forward",
+      shortcut: "]",
+      onSelect: opts.onBringForward,
+      disabled: !opts.hasSelection,
+    },
+    {
+      label: "Send backward",
+      shortcut: "[",
+      onSelect: opts.onSendBackward,
+      disabled: !opts.hasSelection,
+    },
+    {
+      label: "Bring to front",
+      shortcut: "⌘]",
+      onSelect: opts.onBringToFront,
+      disabled: !opts.hasSelection,
+    },
+    {
+      label: "Send to back",
+      shortcut: "⌘[",
+      onSelect: opts.onSendToBack,
+      disabled: !opts.hasSelection,
+      separator: true,
+    },
+    {
+      label: opts.anyGroup ? "Ungroup" : "Group",
+      shortcut: opts.anyGroup ? "⌘⇧G" : "⌘G",
+      onSelect: opts.anyGroup ? opts.onUngroup : opts.onGroup,
+      disabled: !opts.hasSelection,
+    },
+    {
+      label: "Lock",
+      onSelect: opts.onLock,
+      disabled: !opts.hasSelection,
+      separator: true,
+    },
+    ...(opts.onCrop
+      ? [
+          {
+            label: "Crop image",
+            shortcut: "⏎",
+            onSelect: opts.onCrop,
+            separator: true,
+          } satisfies ContextMenuItem,
+        ]
+      : []),
+    {
+      label: "Delete",
+      shortcut: "Del",
+      onSelect: opts.onDelete,
+      disabled: !opts.hasSelection,
+      destructive: true,
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -2215,29 +3298,42 @@ function LayoutThumbnail({ layout }: { layout: Layout }) {
 interface LayerViewProps {
   layer: Layer;
   selected: boolean;
+  // True when this is the only selected layer (controls whether to show
+  // resize/rotate handles — multi-select disables individual handles and
+  // shows the shared bounding box via the parent).
+  primarySelected: boolean;
+  cropping: boolean;
   editingText: boolean;
   onPointerDown: (e: React.PointerEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   onStartResize: (e: React.PointerEvent, edge: ResizeEdge) => void;
   onStartRotate: (e: React.PointerEvent) => void;
   onChangeText: (t: string) => void;
   onDoubleClickText: () => void;
   onBlurText: () => void;
+  onDoubleClickImage: () => void;
   onImageDrop: (src: string) => void;
   onChooseImage: () => void;
+  onCropChange: (crop: ImageLayer["crop"]) => void;
 }
 
 function LayerView({
   layer,
   selected,
+  primarySelected,
+  cropping,
   editingText,
   onPointerDown,
+  onContextMenu,
   onStartResize,
   onStartRotate,
   onChangeText,
   onDoubleClickText,
   onBlurText,
+  onDoubleClickImage,
   onImageDrop,
   onChooseImage,
+  onCropChange,
 }: LayerViewProps) {
   const [dropActive, setDropActive] = useState(false);
   const isImage = layer.type === "image";
@@ -2274,10 +3370,27 @@ function LayerView({
     transform: `rotate(${layer.rotation}deg)`,
     transformOrigin: "center center",
     cursor: selected ? "move" : "pointer",
+    opacity: layer.opacity ?? 1,
   };
 
+  // Locked layers don't participate in pointer interactions — clicks
+  // pass through to the canvas (where they can start a marquee). Lock
+  // is read-only in the editor; the Layers panel exposes the toggle.
+  if (layer.locked) {
+    style.pointerEvents = "none";
+  }
+
+  // Render handles only when this is the sole selected layer. Multi-
+  // selection draws a single bounding box at the parent level instead.
+  const showHandles = primarySelected && !cropping;
+
   return (
-    <div style={style} onPointerDown={onPointerDown} {...dragProps}>
+    <div
+      style={style}
+      onPointerDown={onPointerDown}
+      onContextMenu={onContextMenu}
+      {...dragProps}
+    >
       {layer.type === "text" && (
         <TextLayerContent
           layer={layer}
@@ -2292,11 +3405,22 @@ function LayerView({
         <ImageLayerContent
           layer={layer}
           dropActive={dropActive}
+          cropping={cropping}
           onChooseImage={onChooseImage}
+          onDoubleClick={onDoubleClickImage}
+          onCropChange={onCropChange}
         />
       )}
 
-      {selected && (
+      {selected && !primarySelected && (
+        // Solid sub-selection box for multi-select members.
+        <div
+          className="pointer-events-none absolute inset-0 border border-moss-700"
+          style={{ zIndex: 1 }}
+        />
+      )}
+
+      {showHandles && (
         <>
           {/* Dashed selection outline (non-interactive). */}
           <div
@@ -2375,18 +3499,24 @@ function LayerView({
             style={{ top: -5, zIndex: 11 }}
           />
 
-          {/* Southeast corner — both axes. Sits above the edge hit zones. */}
-          <div
+          {/* Four corner handles. Each supports aspect-locked drag with
+              Shift, and from-center resize with Alt — handled in the
+              drag effect. */}
+          <CornerHandle
+            corner="nw"
+            onPointerDown={(e) => onStartResize(e, "nw")}
+          />
+          <CornerHandle
+            corner="ne"
+            onPointerDown={(e) => onStartResize(e, "ne")}
+          />
+          <CornerHandle
+            corner="sw"
+            onPointerDown={(e) => onStartResize(e, "sw")}
+          />
+          <CornerHandle
+            corner="se"
             onPointerDown={(e) => onStartResize(e, "se")}
-            className="cursor-nwse-resize rounded-full border-2 border-moss-700 bg-cream-50"
-            style={{
-              position: "absolute",
-              bottom: -9,
-              right: -9,
-              width: 18,
-              height: 18,
-              zIndex: 12,
-            }}
           />
 
           {/* Rotate */}
@@ -2406,6 +3536,68 @@ function LayerView({
         </>
       )}
     </div>
+  );
+}
+
+// Tiny shared button matching the AlignToolbar's visual rhythm. Used by
+// the extras slot to render bring-to-front / group / duplicate icons that
+// don't naturally fit inside the AlignToolbar's vocabulary.
+function ToolbarBtn({
+  title,
+  onClick,
+  children,
+  disabled,
+}: {
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-6 w-6 items-center justify-center rounded text-stone-500 transition-colors hover:bg-cream-100 hover:text-bark-900 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function CornerHandle({
+  corner,
+  onPointerDown,
+}: {
+  corner: "nw" | "ne" | "sw" | "se";
+  onPointerDown: (e: React.PointerEvent) => void;
+}) {
+  const pos: React.CSSProperties = (() => {
+    switch (corner) {
+      case "nw":
+        return { top: -9, left: -9, cursor: "nwse-resize" };
+      case "ne":
+        return { top: -9, right: -9, cursor: "nesw-resize" };
+      case "sw":
+        return { bottom: -9, left: -9, cursor: "nesw-resize" };
+      case "se":
+        return { bottom: -9, right: -9, cursor: "nwse-resize" };
+    }
+  })();
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      className="rounded-full border-2 border-moss-700 bg-cream-50"
+      style={{
+        position: "absolute",
+        width: 18,
+        height: 18,
+        zIndex: 12,
+        ...pos,
+      }}
+    />
   );
 }
 
@@ -2434,6 +3626,48 @@ function TextLayerContent({
     fontWeight: layer.fontWeight,
   });
 
+  // Build a text-shadow string for the layer's optional drop shadow +
+  // (more rarely) a CSS stroke approximation. Real text-stroke is poorly
+  // supported on Chromium so we layer four offset-shadows to produce an
+  // outline effect. Both stack into the same CSS property.
+  const shadowParts: string[] = [];
+  if (layer.shadow) {
+    shadowParts.push(
+      `${layer.shadow.offsetX}px ${layer.shadow.offsetY}px ${layer.shadow.blur}px ${layer.shadow.color}`
+    );
+  }
+  if (layer.stroke && layer.stroke.width > 0) {
+    const w = layer.stroke.width;
+    const c = layer.stroke.color;
+    // Eight cardinal directions for a cleaner outline at larger widths.
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI / 4) * i;
+      const dx = Math.cos(a) * w;
+      const dy = Math.sin(a) * w;
+      shadowParts.push(`${dx}px ${dy}px 0 ${c}`);
+    }
+  }
+  const textShadow = shadowParts.join(", ") || undefined;
+
+  const textStyles: React.CSSProperties = {
+    color: layer.color,
+    fontFamily: layer.fontFamily,
+    fontWeight: layer.fontWeight,
+    fontStyle: layer.italic ? "italic" : "normal",
+    textDecoration: layer.underline ? "underline" : "none",
+    lineHeight: layer.lineHeight ?? 1.15,
+    textAlign: layer.textAlign ?? "center",
+    letterSpacing:
+      typeof layer.letterSpacing === "number"
+        ? `${layer.letterSpacing}em`
+        : undefined,
+    wordBreak: "break-word",
+    whiteSpace: "pre-wrap",
+    width: "100%",
+    fontSize: `${fontSizePx}px`,
+    textShadow,
+  };
+
   return (
     <div
       ref={containerRef}
@@ -2455,38 +3689,17 @@ function TextLayerContent({
           onBlur={onBlur}
           onPointerDown={(e) => e.stopPropagation()}
           style={{
-            width: "100%",
-            height: "100%",
-            color: layer.color,
-            fontFamily: layer.fontFamily,
-            fontWeight: layer.fontWeight,
-            fontSize: `${fontSizePx}px`,
-            lineHeight: 1.15,
-            textAlign: "center",
-            wordBreak: "break-word",
+            ...textStyles,
             background: "rgba(255,255,255,0.6)",
             border: "none",
             outline: "2px solid #7c3aed",
             resize: "none",
             padding: 0,
+            height: "100%",
           }}
         />
       ) : (
-        <div
-          style={{
-            color: layer.color,
-            fontFamily: layer.fontFamily,
-            fontWeight: layer.fontWeight,
-            lineHeight: 1.15,
-            textAlign: "center",
-            wordBreak: "break-word",
-            whiteSpace: "pre-wrap",
-            width: "100%",
-            fontSize: `${fontSizePx}px`,
-          }}
-        >
-          {layer.text}
-        </div>
+        <div style={textStyles}>{layer.text}</div>
       )}
     </div>
   );
@@ -2495,16 +3708,39 @@ function TextLayerContent({
 function ImageLayerContent({
   layer,
   dropActive,
+  cropping,
   onChooseImage,
+  onDoubleClick,
+  onCropChange,
 }: {
   layer: ImageLayer;
   dropActive: boolean;
+  cropping: boolean;
   onChooseImage: () => void;
+  onDoubleClick: () => void;
+  onCropChange: (crop: ImageLayer["crop"]) => void;
 }) {
   // Explicit fit wins (set by makeImageBox → cover). Otherwise fall back to
   // the old source-based default: layout-images cover, user-images contain.
   const fit =
     layer.fit ?? (layer.source === "layout" ? "cover" : "contain");
+
+  // CSS filter() string built from optional brightness/contrast/saturation/
+  // blur values. Undefined values are skipped so legacy images render
+  // bit-for-bit unchanged.
+  const parts: string[] = [];
+  if (typeof layer.brightness === "number") parts.push(`brightness(${layer.brightness})`);
+  if (typeof layer.contrast === "number") parts.push(`contrast(${layer.contrast})`);
+  if (typeof layer.saturation === "number") parts.push(`saturate(${layer.saturation})`);
+  if (typeof layer.blur === "number" && layer.blur > 0)
+    parts.push(`blur(${layer.blur}px)`);
+  const filter = parts.length > 0 ? parts.join(" ") : undefined;
+
+  // Crop is expressed as a normalized rect inside the source. We
+  // implement it via background-image so the CSS scales the natural
+  // image into the layer box; alternative would be CSS mask + size, but
+  // the background-image path is the most browser-stable.
+  const crop = layer.crop ?? undefined;
 
   // Empty image boxes show a drop target and a "Choose image" affordance
   // instead of a broken <img>. The outer wrapper stays pointer-events-none
@@ -2538,9 +3774,34 @@ function ImageLayerContent({
     );
   }
 
-  return (
-    <>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
+  // Crop overlay shown while cropping=true.
+  const renderImage = () => {
+    if (crop) {
+      // Use background-image trick: scale the natural image such that
+      // the crop region fills 100% of the box.
+      const bgSizeX = 100 / Math.max(0.001, crop.width);
+      const bgSizeY = 100 / Math.max(0.001, crop.height);
+      const bgPosX = (crop.x / Math.max(0.001, 1 - crop.width)) * 100;
+      const bgPosY = (crop.y / Math.max(0.001, 1 - crop.height)) * 100;
+      return (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            backgroundImage: `url(${JSON.stringify(layer.src)})`,
+            backgroundSize: `${bgSizeX}% ${bgSizeY}%`,
+            backgroundPosition: `${Number.isFinite(bgPosX) ? bgPosX : 0}% ${
+              Number.isFinite(bgPosY) ? bgPosY : 0
+            }%`,
+            backgroundRepeat: "no-repeat",
+            filter,
+            pointerEvents: "none",
+          }}
+        />
+      );
+    }
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={layer.src}
         alt=""
@@ -2551,12 +3812,150 @@ function ImageLayerContent({
           objectFit: fit,
           userSelect: "none",
           pointerEvents: "none",
+          filter,
         }}
       />
+    );
+  };
+
+  return (
+    <div
+      onDoubleClick={onDoubleClick}
+      style={{ width: "100%", height: "100%" }}
+    >
+      {renderImage()}
       {dropActive && (
         <div className="pointer-events-none absolute inset-0 rounded-xl border-4 border-dashed border-moss-700 bg-moss-700/10" />
       )}
-    </>
+      {cropping && (
+        <CropOverlay
+          crop={crop ?? { x: 0, y: 0, width: 1, height: 1 }}
+          onChange={onCropChange}
+        />
+      )}
+    </div>
+  );
+}
+
+// CropOverlay — semi-transparent backdrop + a draggable rectangle showing
+// the crop window. All values are in 0..1 normalized space relative to the
+// layer's box. The user can drag the rect to reposition or grab a corner
+// to resize.
+function CropOverlay({
+  crop,
+  onChange,
+}: {
+  crop: NonNullable<ImageLayer["crop"]>;
+  onChange: (crop: ImageLayer["crop"]) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    kind: "move" | "n" | "e" | "s" | "w" | "ne" | "nw" | "se" | "sw";
+    startCX: number;
+    startCY: number;
+    orig: NonNullable<ImageLayer["crop"]>;
+  } | null>(null);
+
+  function onDown(
+    e: React.PointerEvent,
+    kind: NonNullable<typeof dragRef.current>["kind"]
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = {
+      kind,
+      startCX: e.clientX,
+      startCY: e.clientY,
+      orig: { ...crop },
+    };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  }
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      const d = dragRef.current;
+      if (!d || !ref.current) return;
+      const r = ref.current.getBoundingClientRect();
+      const dx = (e.clientX - d.startCX) / r.width;
+      const dy = (e.clientY - d.startCY) / r.height;
+      const clamp = (v: number) => Math.max(0, Math.min(1, v));
+      let { x, y, width, height } = d.orig;
+      if (d.kind === "move") {
+        x = clamp(d.orig.x + dx);
+        y = clamp(d.orig.y + dy);
+        if (x + width > 1) x = 1 - width;
+        if (y + height > 1) y = 1 - height;
+      } else {
+        const east = d.kind.includes("e");
+        const west = d.kind.includes("w");
+        const south = d.kind.includes("s");
+        const north = d.kind.includes("n");
+        const MIN = 0.05;
+        if (east) width = Math.max(MIN, Math.min(1 - d.orig.x, d.orig.width + dx));
+        if (south) height = Math.max(MIN, Math.min(1 - d.orig.y, d.orig.height + dy));
+        if (west) {
+          const w = Math.max(MIN, Math.min(d.orig.x + d.orig.width, d.orig.width - dx));
+          x = d.orig.x + d.orig.width - w;
+          width = w;
+        }
+        if (north) {
+          const h = Math.max(MIN, Math.min(d.orig.y + d.orig.height, d.orig.height - dy));
+          y = d.orig.y + d.orig.height - h;
+          height = h;
+        }
+      }
+      onChange({ x, y, width, height });
+    }
+    function onUp() {
+      dragRef.current = null;
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [onChange]);
+
+  return (
+    <div ref={ref} className="absolute inset-0" style={{ zIndex: 20 }}>
+      {/* Dim outside the crop rect */}
+      <div className="absolute inset-0 bg-black/40" />
+      {/* Cropped sub-rect window */}
+      <div
+        onPointerDown={(e) => onDown(e, "move")}
+        className="absolute cursor-move border-2 border-moss-700"
+        style={{
+          left: `${crop.x * 100}%`,
+          top: `${crop.y * 100}%`,
+          width: `${crop.width * 100}%`,
+          height: `${crop.height * 100}%`,
+          background: "transparent",
+          boxShadow: "0 0 0 9999px rgba(0,0,0,0)",
+        }}
+      >
+        {(["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const).map((k) => {
+          const positions: Record<typeof k, React.CSSProperties> = {
+            nw: { top: -6, left: -6, cursor: "nwse-resize" },
+            n: { top: -6, left: "50%", transform: "translateX(-50%)", cursor: "ns-resize" },
+            ne: { top: -6, right: -6, cursor: "nesw-resize" },
+            e: { top: "50%", right: -6, transform: "translateY(-50%)", cursor: "ew-resize" },
+            se: { bottom: -6, right: -6, cursor: "nwse-resize" },
+            s: { bottom: -6, left: "50%", transform: "translateX(-50%)", cursor: "ns-resize" },
+            sw: { bottom: -6, left: -6, cursor: "nesw-resize" },
+            w: { top: "50%", left: -6, transform: "translateY(-50%)", cursor: "ew-resize" },
+          };
+          return (
+            <div
+              key={k}
+              onPointerDown={(e) => onDown(e, k)}
+              className="absolute h-3 w-3 border-2 border-moss-700 bg-paper"
+              style={positions[k]}
+            />
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -2571,6 +3970,15 @@ function PropertiesPanel({
   onRegenerate,
   onChange,
   onDelete,
+  onDuplicate,
+  onStartCrop,
+  cropping,
+  onExitCrop,
+  recentColors,
+  onColorUsed,
+  rightPanel,
+  onTogglePanel,
+  layersPanel,
 }: {
   layer: Layer;
   showRegenerate: boolean;
@@ -2578,6 +3986,15 @@ function PropertiesPanel({
   onRegenerate: () => void;
   onChange: (patch: Partial<Layer>) => void;
   onDelete: () => void;
+  onDuplicate: () => void;
+  onStartCrop?: () => void;
+  cropping: boolean;
+  onExitCrop: () => void;
+  recentColors: string[];
+  onColorUsed: (c: string) => void;
+  rightPanel: "inspector" | "layers";
+  onTogglePanel: () => void;
+  layersPanel: React.ReactNode;
 }) {
   // Map raw layer type to a humane heading that matches the mockup
   // ("Story text" for a layout-bound caption, "Text" for a user layer,
@@ -2586,154 +4003,668 @@ function PropertiesPanel({
     layer.type === "text" && layer.source === "layout" ? "Story text" : layer.type;
   return (
     <div className="space-y-4">
-      <div>
-        <div className="flex items-center justify-between text-[11px] text-stone-500">
-          <span>
-            {layer.type}
-            {layer.source === "layout" && " layer"}
-          </span>
-          <div className="flex items-center gap-3 text-[12px] font-medium">
-            <button
-              type="button"
-              className="text-bark-900 hover:text-moss-700"
-              title="Duplicate (not yet)"
-              disabled
-            >
-              Duplicate
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              className="text-clay-500 hover:text-clay-500/80"
-            >
-              Delete
-            </button>
+      {/* Pill toggle to switch the right column between the inspector
+          (this view) and the Layers panel (z-order list). Keeps both
+          one click away without consuming sidebar space. */}
+      <div className="flex rounded-lg border border-linen-200 bg-paper p-0.5">
+        <button
+          type="button"
+          onClick={rightPanel === "inspector" ? undefined : onTogglePanel}
+          className={`flex-1 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[.08em] transition-colors ${
+            rightPanel === "inspector"
+              ? "bg-cream-50 text-bark-900 shadow-sm"
+              : "text-stone-500 hover:text-sage-700"
+          }`}
+        >
+          Inspect
+        </button>
+        <button
+          type="button"
+          onClick={rightPanel === "layers" ? undefined : onTogglePanel}
+          className={`flex-1 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[.08em] transition-colors ${
+            rightPanel === "layers"
+              ? "bg-cream-50 text-bark-900 shadow-sm"
+              : "text-stone-500 hover:text-sage-700"
+          }`}
+        >
+          Layers
+        </button>
+      </div>
+
+      {rightPanel === "layers" ? (
+        layersPanel
+      ) : (
+        <>
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-stone-500">
+              <span>
+                {layer.type}
+                {layer.source === "layout" && " layer"}
+              </span>
+              <div className="flex items-center gap-3 text-[12px] font-medium">
+                <button
+                  type="button"
+                  className="text-bark-900 hover:text-moss-700"
+                  title="Duplicate (⌘D)"
+                  onClick={onDuplicate}
+                >
+                  Duplicate
+                </button>
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  className="text-clay-500 hover:text-clay-500/80"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+            <h3 className="mt-1 font-[family-name:var(--font-display)] text-[22px] font-semibold capitalize text-bark-900">
+              {layer.name ?? headingType}
+            </h3>
+            {layer.locked && (
+              <p className="mt-1 text-[10px] text-clay-500">
+                Layer is locked. Unlock in the Layers panel to edit.
+              </p>
+            )}
           </div>
+
+          {/* Common: size + rotation */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <NumberField
+              label="W"
+              value={Math.round(layer.width)}
+              onChange={(v) => onChange({ width: v })}
+            />
+            <NumberField
+              label="H"
+              value={Math.round(layer.height)}
+              onChange={(v) => onChange({ height: v })}
+            />
+            <NumberField
+              label="X"
+              value={Math.round(layer.x)}
+              onChange={(v) => onChange({ x: v })}
+            />
+            <NumberField
+              label="Y"
+              value={Math.round(layer.y)}
+              onChange={(v) => onChange({ y: v })}
+            />
+            <NumberField
+              label="Rot"
+              value={Math.round(layer.rotation)}
+              onChange={(v) => onChange({ rotation: v })}
+            />
+          </div>
+
+          {/* Opacity slider — universal to every layer type. Stored on
+              LayerBase.opacity (0..1). */}
+          <Field label="Opacity">
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((layer.opacity ?? 1) * 100)}
+                onChange={(e) =>
+                  onChange({ opacity: Number(e.target.value) / 100 })
+                }
+                className="flex-1"
+              />
+              <span className="w-9 text-right text-[10px] tabular-nums text-stone-500">
+                {Math.round((layer.opacity ?? 1) * 100)}%
+              </span>
+            </div>
+          </Field>
+
+          {layer.type === "text" && (
+            <>
+              {showRegenerate && (
+                <button
+                  type="button"
+                  onClick={onRegenerate}
+                  disabled={regenPending}
+                  className="w-full rounded-xl bg-gradient-to-r from-moss-700 to-moss-700 px-3 py-2 text-xs font-black uppercase text-cream-50 shadow-md disabled:cursor-wait disabled:opacity-60"
+                >
+                  {regenPending ? "Thinking..." : "Regenerate with AI"}
+                </button>
+              )}
+              <Field label="Text">
+                <textarea
+                  value={layer.text}
+                  onChange={(e) =>
+                    (onChange as (p: Partial<TextLayer>) => void)({
+                      text: e.target.value,
+                    })
+                  }
+                  rows={3}
+                  className="w-full rounded-lg border-2 border-cream-300 bg-cream-200/40 px-2 py-1 text-xs font-medium text-ink-900"
+                />
+              </Field>
+              <Field label="Font">
+                <FontPicker
+                  value={layer.fontFamily}
+                  onChange={(family) =>
+                    (onChange as (p: Partial<TextLayer>) => void)({
+                      fontFamily: family,
+                    })
+                  }
+                />
+              </Field>
+              <NumberField
+                label="Size"
+                value={layer.fontSize}
+                onChange={(v) =>
+                  (onChange as (p: Partial<TextLayer>) => void)({ fontSize: v })
+                }
+              />
+              {/* Weight / italic / underline as a button row. */}
+              <Field label="Style">
+                <div className="flex items-center gap-1">
+                  <StyleToggle
+                    active={layer.fontWeight === "bold"}
+                    onClick={() =>
+                      (onChange as (p: Partial<TextLayer>) => void)({
+                        fontWeight:
+                          layer.fontWeight === "bold" ? "normal" : "bold",
+                      })
+                    }
+                    title="Bold"
+                  >
+                    <b>B</b>
+                  </StyleToggle>
+                  <StyleToggle
+                    active={!!layer.italic}
+                    onClick={() =>
+                      (onChange as (p: Partial<TextLayer>) => void)({
+                        italic: !layer.italic,
+                      })
+                    }
+                    title="Italic"
+                  >
+                    <i>I</i>
+                  </StyleToggle>
+                  <StyleToggle
+                    active={!!layer.underline}
+                    onClick={() =>
+                      (onChange as (p: Partial<TextLayer>) => void)({
+                        underline: !layer.underline,
+                      })
+                    }
+                    title="Underline"
+                  >
+                    <u>U</u>
+                  </StyleToggle>
+                  <div className="mx-0.5 h-4 w-px bg-cream-300" aria-hidden="true" />
+                  {(["left", "center", "right"] as const).map((a) => (
+                    <StyleToggle
+                      key={a}
+                      active={(layer.textAlign ?? "center") === a}
+                      onClick={() =>
+                        (onChange as (p: Partial<TextLayer>) => void)({
+                          textAlign: a,
+                        })
+                      }
+                      title={`Align ${a}`}
+                    >
+                      <AlignIcon dir={a} />
+                    </StyleToggle>
+                  ))}
+                </div>
+              </Field>
+              <ColorField
+                label="Color"
+                value={layer.color}
+                onChange={(v) => {
+                  (onChange as (p: Partial<TextLayer>) => void)({ color: v });
+                  onColorUsed(v);
+                }}
+                recentColors={recentColors}
+              />
+              <Field label="Letter spacing">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={-10}
+                    max={50}
+                    value={Math.round((layer.letterSpacing ?? 0) * 100)}
+                    onChange={(e) =>
+                      (onChange as (p: Partial<TextLayer>) => void)({
+                        letterSpacing: Number(e.target.value) / 100,
+                      })
+                    }
+                    className="flex-1"
+                  />
+                  <span className="w-9 text-right text-[10px] tabular-nums text-stone-500">
+                    {((layer.letterSpacing ?? 0) * 100).toFixed(0)}
+                  </span>
+                </div>
+              </Field>
+              <Field label="Line height">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={80}
+                    max={250}
+                    value={Math.round((layer.lineHeight ?? 1.15) * 100)}
+                    onChange={(e) =>
+                      (onChange as (p: Partial<TextLayer>) => void)({
+                        lineHeight: Number(e.target.value) / 100,
+                      })
+                    }
+                    className="flex-1"
+                  />
+                  <span className="w-9 text-right text-[10px] tabular-nums text-stone-500">
+                    {(layer.lineHeight ?? 1.15).toFixed(2)}
+                  </span>
+                </div>
+              </Field>
+              {/* Drop shadow toggle + simple controls. We collapse the
+                  detail to a single "amount" slider for now since most
+                  users just want "yes, with a little blur". */}
+              <Field label="Drop shadow">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!layer.shadow}
+                    onChange={(e) =>
+                      (onChange as (p: Partial<TextLayer>) => void)({
+                        shadow: e.target.checked
+                          ? {
+                              color: "rgba(0,0,0,0.35)",
+                              blur: 6,
+                              offsetX: 2,
+                              offsetY: 2,
+                            }
+                          : null,
+                      })
+                    }
+                  />
+                  <span className="text-[11px] text-stone-500">On</span>
+                </div>
+              </Field>
+              <Field label="Outline">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!layer.stroke && layer.stroke.width > 0}
+                    onChange={(e) =>
+                      (onChange as (p: Partial<TextLayer>) => void)({
+                        stroke: e.target.checked
+                          ? { color: "#ffffff", width: 2 }
+                          : null,
+                      })
+                    }
+                  />
+                  {layer.stroke && layer.stroke.width > 0 && (
+                    <>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={layer.stroke.width}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          if (Number.isFinite(n) && layer.stroke) {
+                            (onChange as (p: Partial<TextLayer>) => void)({
+                              stroke: { ...layer.stroke, width: n },
+                            });
+                          }
+                        }}
+                        className="w-12 rounded border border-cream-300 bg-paper px-1 py-0.5 text-[11px]"
+                      />
+                      <input
+                        type="color"
+                        value={layer.stroke.color}
+                        onChange={(e) => {
+                          if (layer.stroke) {
+                            (onChange as (p: Partial<TextLayer>) => void)({
+                              stroke: { ...layer.stroke, color: e.target.value },
+                            });
+                          }
+                        }}
+                        className="h-6 w-8 cursor-pointer rounded border border-cream-300"
+                      />
+                    </>
+                  )}
+                </div>
+              </Field>
+            </>
+          )}
+
+          {layer.type === "shape" && (
+            <>
+              <ColorField
+                label="Fill"
+                value={layer.fill}
+                onChange={(v) => {
+                  (onChange as (p: Partial<ShapeLayer>) => void)({ fill: v });
+                  onColorUsed(v);
+                }}
+                recentColors={recentColors}
+              />
+              <ColorField
+                label="Stroke"
+                value={layer.stroke}
+                onChange={(v) => {
+                  (onChange as (p: Partial<ShapeLayer>) => void)({ stroke: v });
+                  onColorUsed(v);
+                }}
+                recentColors={recentColors}
+              />
+              <NumberField
+                label="Stroke W"
+                value={layer.strokeWidth}
+                onChange={(v) =>
+                  (onChange as (p: Partial<ShapeLayer>) => void)({
+                    strokeWidth: v,
+                  })
+                }
+              />
+              <Field label="Dash pattern">
+                <select
+                  value={layer.strokeDash ?? ""}
+                  onChange={(e) =>
+                    (onChange as (p: Partial<ShapeLayer>) => void)({
+                      strokeDash: e.target.value || undefined,
+                    })
+                  }
+                  className="w-full rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1 text-xs text-ink-900"
+                >
+                  <option value="">Solid</option>
+                  <option value="2 4">Dotted</option>
+                  <option value="8 4">Dashed</option>
+                  <option value="12 4 2 4">Dash-dot</option>
+                </select>
+              </Field>
+              {layer.shape === "rect" && (
+                <Field label="Corner radius">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0}
+                      max={80}
+                      value={layer.cornerRadius ?? 12}
+                      onChange={(e) =>
+                        (onChange as (p: Partial<ShapeLayer>) => void)({
+                          cornerRadius: Number(e.target.value),
+                        })
+                      }
+                      className="flex-1"
+                    />
+                    <span className="w-9 text-right text-[10px] tabular-nums text-stone-500">
+                      {layer.cornerRadius ?? 12}
+                    </span>
+                  </div>
+                </Field>
+              )}
+            </>
+          )}
+
+          {layer.type === "image" && (
+            <>
+              {onStartCrop && (
+                <div className="flex gap-2">
+                  {cropping ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Reset to no crop, exit mode.
+                          (onChange as (p: Partial<ImageLayer>) => void)({
+                            crop: null,
+                          });
+                          onExitCrop();
+                        }}
+                        className="flex-1 rounded-lg border border-linen-200 bg-paper px-2 py-1.5 text-[11px] font-medium text-bark-900 hover:bg-cream-100"
+                      >
+                        Reset crop
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onExitCrop}
+                        className="flex-1 rounded-lg bg-moss-700 px-2 py-1.5 text-[11px] font-semibold text-cream-50 hover:bg-moss-900"
+                      >
+                        Done
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={onStartCrop}
+                      className="w-full rounded-lg border border-linen-200 bg-paper px-2 py-1.5 text-[11px] font-medium text-bark-900 hover:bg-cream-100"
+                    >
+                      Crop image
+                    </button>
+                  )}
+                </div>
+              )}
+              <Field label="Fit">
+                <select
+                  value={layer.fit ?? "contain"}
+                  onChange={(e) =>
+                    (onChange as (p: Partial<ImageLayer>) => void)({
+                      fit: e.target.value as "cover" | "contain",
+                    })
+                  }
+                  className="w-full rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1 text-xs text-ink-900"
+                >
+                  <option value="contain">Contain</option>
+                  <option value="cover">Cover</option>
+                </select>
+              </Field>
+              <Field label="Brightness">
+                <RangeSlider
+                  value={layer.brightness ?? 1}
+                  onChange={(v) =>
+                    (onChange as (p: Partial<ImageLayer>) => void)({
+                      brightness: v,
+                    })
+                  }
+                  min={0}
+                  max={2}
+                  step={0.05}
+                />
+              </Field>
+              <Field label="Contrast">
+                <RangeSlider
+                  value={layer.contrast ?? 1}
+                  onChange={(v) =>
+                    (onChange as (p: Partial<ImageLayer>) => void)({
+                      contrast: v,
+                    })
+                  }
+                  min={0}
+                  max={2}
+                  step={0.05}
+                />
+              </Field>
+              <Field label="Saturation">
+                <RangeSlider
+                  value={layer.saturation ?? 1}
+                  onChange={(v) =>
+                    (onChange as (p: Partial<ImageLayer>) => void)({
+                      saturation: v,
+                    })
+                  }
+                  min={0}
+                  max={2}
+                  step={0.05}
+                />
+              </Field>
+              <Field label="Blur">
+                <RangeSlider
+                  value={layer.blur ?? 0}
+                  onChange={(v) =>
+                    (onChange as (p: Partial<ImageLayer>) => void)({ blur: v })
+                  }
+                  min={0}
+                  max={20}
+                  step={0.5}
+                />
+              </Field>
+              <button
+                type="button"
+                onClick={() =>
+                  (onChange as (p: Partial<ImageLayer>) => void)({
+                    brightness: undefined,
+                    contrast: undefined,
+                    saturation: undefined,
+                    blur: undefined,
+                  })
+                }
+                className="w-full rounded-lg border border-linen-200 bg-paper px-2 py-1.5 text-[11px] font-medium text-stone-500 hover:bg-cream-100"
+              >
+                Reset filters
+              </button>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function StyleToggle({
+  active,
+  onClick,
+  children,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      className={`flex h-7 w-7 items-center justify-center rounded text-[12px] transition-colors ${
+        active
+          ? "bg-moss-700 text-cream-50"
+          : "border border-cream-300 bg-cream-50 text-ink-900 hover:bg-cream-200"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function AlignIcon({ dir }: { dir: "left" | "center" | "right" }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      {dir === "left" && <line x1="3" y1="12" x2="15" y2="12" />}
+      {dir === "center" && <line x1="6" y1="12" x2="18" y2="12" />}
+      {dir === "right" && <line x1="9" y1="12" x2="21" y2="12" />}
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+function RangeSlider({
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step: number;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1"
+      />
+      <span className="w-10 text-right text-[10px] tabular-nums text-stone-500">
+        {value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+// Compact panel shown when 2+ layers are selected: align/distribute,
+// group/ungroup, opacity sweep, and delete. The single-layer inspector
+// fields don't make sense here (different layers, different schemas).
+function MultiSelectPanel({
+  layers,
+  onAlign,
+  onDistribute,
+  onGroup,
+  onUngroup,
+  onDelete,
+  onOpacityChange,
+}: {
+  layers: Layer[];
+  onAlign: (axis: AlignAxis) => void;
+  onDistribute: (axis: DistributeAxis) => void;
+  onGroup: () => void;
+  onUngroup: () => void;
+  onDelete: () => void;
+  onOpacityChange: (opacity: number) => void;
+}) {
+  const anyGrouped = layers.some((l) => l.groupId);
+  const minOpacity = Math.min(...layers.map((l) => l.opacity ?? 1));
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-[11px] text-stone-500">
+          {layers.length} layers
         </div>
-        <h3 className="mt-1 font-[family-name:var(--font-display)] text-[22px] font-semibold capitalize text-bark-900">
-          {headingType}
+        <h3 className="mt-1 font-[family-name:var(--font-display)] text-[20px] font-semibold capitalize text-bark-900">
+          Multi-select
         </h3>
       </div>
-
-      {/* Common: size + rotation */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <NumberField
-          label="W"
-          value={Math.round(layer.width)}
-          onChange={(v) => onChange({ width: v })}
-        />
-        <NumberField
-          label="H"
-          value={Math.round(layer.height)}
-          onChange={(v) => onChange({ height: v })}
-        />
-        <NumberField
-          label="X"
-          value={Math.round(layer.x)}
-          onChange={(v) => onChange({ x: v })}
-        />
-        <NumberField
-          label="Y"
-          value={Math.round(layer.y)}
-          onChange={(v) => onChange({ y: v })}
-        />
-        <NumberField
-          label="Rot"
-          value={Math.round(layer.rotation)}
-          onChange={(v) => onChange({ rotation: v })}
-        />
+      <AlignToolbar
+        onAlign={onAlign}
+        onDistribute={onDistribute}
+        canDistribute={layers.length >= 3}
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={anyGrouped ? onUngroup : onGroup}
+          className="flex-1 rounded-lg border border-linen-200 bg-paper px-2 py-1.5 text-[11px] font-medium text-bark-900 hover:bg-cream-100"
+        >
+          {anyGrouped ? "Ungroup" : "Group"}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="flex-1 rounded-lg border border-clay-500/20 bg-paper px-2 py-1.5 text-[11px] font-medium text-clay-500 hover:bg-clay-50"
+        >
+          Delete
+        </button>
       </div>
-
-      {layer.type === "text" && (
-        <>
-          {showRegenerate && (
-            <button
-              type="button"
-              onClick={onRegenerate}
-              disabled={regenPending}
-              className="w-full rounded-xl bg-gradient-to-r from-moss-700 to-moss-700 px-3 py-2 text-xs font-black uppercase text-cream-50 shadow-md disabled:cursor-wait disabled:opacity-60"
-            >
-              {regenPending ? "Thinking..." : "Regenerate with AI"}
-            </button>
-          )}
-          <Field label="Text">
-            <textarea
-              value={layer.text}
-              onChange={(e) =>
-                (onChange as (p: Partial<TextLayer>) => void)({
-                  text: e.target.value,
-                })
-              }
-              rows={3}
-              className="w-full rounded-lg border-2 border-cream-300 bg-cream-200/40 px-2 py-1 text-xs font-medium text-ink-900"
-            />
-          </Field>
-          <Field label="Font">
-            <FontPicker
-              value={layer.fontFamily}
-              onChange={(family) =>
-                (onChange as (p: Partial<TextLayer>) => void)({
-                  fontFamily: family,
-                })
-              }
-            />
-          </Field>
-          <NumberField
-            label="Size"
-            value={layer.fontSize}
-            onChange={(v) =>
-              (onChange as (p: Partial<TextLayer>) => void)({ fontSize: v })
-            }
+      <Field label="Opacity (apply to all)">
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(minOpacity * 100)}
+            onChange={(e) => onOpacityChange(Number(e.target.value) / 100)}
+            className="flex-1"
           />
-          <Field label="Weight">
-            <select
-              value={layer.fontWeight}
-              onChange={(e) =>
-                (onChange as (p: Partial<TextLayer>) => void)({
-                  fontWeight: e.target.value as TextLayer["fontWeight"],
-                })
-              }
-              className="w-full rounded-lg border-2 border-cream-300 bg-cream-50 px-2 py-1 text-xs font-bold text-ink-900"
-            >
-              <option value="normal">Normal</option>
-              <option value="bold">Bold</option>
-            </select>
-          </Field>
-          <ColorField
-            label="Color"
-            value={layer.color}
-            onChange={(v) =>
-              (onChange as (p: Partial<TextLayer>) => void)({ color: v })
-            }
-          />
-        </>
-      )}
-
-      {layer.type === "shape" && (
-        <>
-          <ColorField
-            label="Fill"
-            value={layer.fill}
-            onChange={(v) =>
-              (onChange as (p: Partial<ShapeLayer>) => void)({ fill: v })
-            }
-          />
-          <ColorField
-            label="Stroke"
-            value={layer.stroke}
-            onChange={(v) =>
-              (onChange as (p: Partial<ShapeLayer>) => void)({ stroke: v })
-            }
-          />
-          <NumberField
-            label="Stroke W"
-            value={layer.strokeWidth}
-            onChange={(v) =>
-              (onChange as (p: Partial<ShapeLayer>) => void)({ strokeWidth: v })
-            }
-          />
-        </>
-      )}
+          <span className="w-9 text-right text-[10px] tabular-nums text-stone-500">
+            {Math.round(minOpacity * 100)}%
+          </span>
+        </div>
+      </Field>
     </div>
   );
 }
@@ -2786,11 +4717,40 @@ function ColorField({
   label,
   value,
   onChange,
+  recentColors,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  recentColors?: string[];
 }) {
+  // Feature-detect the native EyeDropper API. Available in recent Chrome
+  // / Edge; we hide the button when unavailable rather than implementing
+  // a fallback pixel sampler.
+  const eyedropperAvailable =
+    typeof window !== "undefined" &&
+    "EyeDropper" in window &&
+    typeof (window as unknown as { EyeDropper?: unknown }).EyeDropper ===
+      "function";
+
+  async function pickWithEyedropper() {
+    if (!eyedropperAvailable) return;
+    type EyeDropperLike = {
+      open: () => Promise<{ sRGBHex: string }>;
+    };
+    type EyeDropperCtor = new () => EyeDropperLike;
+    try {
+      const Ctor = (window as unknown as { EyeDropper: EyeDropperCtor })
+        .EyeDropper;
+      const inst = new Ctor();
+      const result = await inst.open();
+      if (result?.sRGBHex) onChange(result.sRGBHex);
+    } catch {
+      // User pressed Escape or browser rejected — silent abort matches
+      // the platform contract.
+    }
+  }
+
   return (
     <Field label={label}>
       <div className="flex items-center gap-2">
@@ -2807,6 +4767,17 @@ function ColorField({
         >
           None
         </button>
+        {eyedropperAvailable && (
+          <button
+            type="button"
+            onClick={pickWithEyedropper}
+            title="Pick a color from the screen"
+            aria-label="Pick a color from the screen"
+            className="rounded-md border border-cream-300 px-2 py-0.5 text-[10px] font-black uppercase text-ink-300 hover:bg-cream-200"
+          >
+            ↧
+          </button>
+        )}
       </div>
       <div className="mt-1 flex flex-wrap gap-1">
         {SWATCHES.map((c) => (
@@ -2820,6 +4791,26 @@ function ColorField({
           />
         ))}
       </div>
+      {recentColors && recentColors.length > 0 && (
+        <div className="mt-1 border-t border-cream-300 pt-1">
+          <div className="text-[9px] uppercase tracking-wider text-ink-300">
+            Recent
+          </div>
+          <div className="mt-0.5 flex flex-wrap gap-1">
+            {recentColors.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => onChange(c)}
+                className="h-5 w-5 rounded border border-cream-300"
+                style={{ background: c }}
+                aria-label={c}
+                title={c}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </Field>
   );
 }

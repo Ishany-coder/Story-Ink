@@ -7,7 +7,39 @@ import { getIcon } from "@/lib/shapeIcons";
 // (uploaded SVG). Used by both the editor canvas and the read-only slide
 // reader so a shape looks identical in both places.
 export default function ShapeRenderer({ layer }: { layer: ShapeLayer }) {
+  // Optional dash pattern, supported on rect / circle / line via the SVG
+  // path when set. Falls back to the legacy CSS border render when
+  // strokeDash is undefined/empty.
+  const dash = layer.strokeDash && layer.strokeDash.trim().length > 0;
+
   if (layer.shape === "rect") {
+    const radius = typeof layer.cornerRadius === "number" ? layer.cornerRadius : 12;
+    if (dash) {
+      // Use SVG so we can dash the stroke. Inset the rect by half the
+      // stroke width so the dashes stay inside the layer bounds.
+      const sw = layer.strokeWidth;
+      return (
+        <svg
+          width="100%"
+          height="100%"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+        >
+          <rect
+            x={sw / 2}
+            y={sw / 2}
+            width={100 - sw}
+            height={100 - sw}
+            rx={radius}
+            fill={layer.fill === "transparent" ? "none" : layer.fill}
+            stroke={layer.stroke}
+            strokeWidth={sw}
+            strokeDasharray={layer.strokeDash}
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      );
+    }
     return (
       <div
         style={{
@@ -15,13 +47,36 @@ export default function ShapeRenderer({ layer }: { layer: ShapeLayer }) {
           height: "100%",
           background: layer.fill,
           border: `${layer.strokeWidth}px solid ${layer.stroke}`,
-          borderRadius: 12,
+          borderRadius: radius,
         }}
       />
     );
   }
 
   if (layer.shape === "circle") {
+    if (dash) {
+      const sw = layer.strokeWidth;
+      return (
+        <svg
+          width="100%"
+          height="100%"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+        >
+          <ellipse
+            cx={50}
+            cy={50}
+            rx={50 - sw / 2}
+            ry={50 - sw / 2}
+            fill={layer.fill === "transparent" ? "none" : layer.fill}
+            stroke={layer.stroke}
+            strokeWidth={sw}
+            strokeDasharray={layer.strokeDash}
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      );
+    }
     return (
       <div
         style={{
@@ -36,6 +91,27 @@ export default function ShapeRenderer({ layer }: { layer: ShapeLayer }) {
   }
 
   if (layer.shape === "line") {
+    if (dash) {
+      return (
+        <svg
+          width="100%"
+          height="100%"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+        >
+          <line
+            x1={0}
+            y1={50}
+            x2={100}
+            y2={50}
+            stroke={layer.stroke}
+            strokeWidth={layer.strokeWidth}
+            strokeDasharray={layer.strokeDash}
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      );
+    }
     return (
       <div
         style={{
