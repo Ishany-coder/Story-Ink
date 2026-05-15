@@ -51,6 +51,7 @@ import ContextMenu, { type ContextMenuItem } from "./studio/ContextMenu";
 import AlignToolbar from "./studio/AlignToolbar";
 import { getRecentColors, recordRecentColor } from "./studio/recentColors";
 import FindReplaceModal from "./studio/FindReplaceModal";
+import ShortcutsHelp from "./studio/ShortcutsHelp";
 
 interface CanvasEditorProps {
   story: Story;
@@ -409,19 +410,19 @@ function CanvasEditorDesktop({
     const restored = history.undo(current);
     if (!restored) return;
     setStory((s) => ({ ...s, pages: restored }));
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setEditingTextId(null);
     markChangedPagesDirty(current, restored);
-  }, [history, story.pages, markChangedPagesDirty, setSelectedId]);
+  }, [history, story.pages, markChangedPagesDirty]);
   const handleRedo = useCallback(() => {
     const current = story.pages;
     const restored = history.redo(current);
     if (!restored) return;
     setStory((s) => ({ ...s, pages: restored }));
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setEditingTextId(null);
     markChangedPagesDirty(current, restored);
-  }, [history, story.pages, markChangedPagesDirty, setSelectedId]);
+  }, [history, story.pages, markChangedPagesDirty]);
   // Built-in layouts are filtered by mode: memorial-only layouts only
   // show when the story's pet is in memorial mode. Custom layouts are
   // never filtered (user can always reuse their own presets).
@@ -472,6 +473,8 @@ function CanvasEditorDesktop({
 
   // Find & replace modal.
   const [findOpen, setFindOpen] = useState(false);
+  // Keyboard-shortcuts cheatsheet.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Canvas zoom level (multiplier). 1 = fit-to-frame; user-controlled via
   // ⌘+ / ⌘- / ⌘0 / pinch. Clamped to [0.25, 4]. Stored here (not in a
@@ -1142,6 +1145,13 @@ function CanvasEditorDesktop({
       if (meta && (e.key === "f" || e.key === "F")) {
         e.preventDefault();
         setFindOpen(true);
+        return;
+      }
+      // Shortcut: "?" opens the cheatsheet. Works at any focus location
+      // since shortcuts are a meta-level affordance.
+      if (e.key === "?" && !meta) {
+        e.preventDefault();
+        setShortcutsOpen(true);
         return;
       }
       // Zoom: ⌘+, ⌘-, ⌘0 (reset). The default browser zoom is also
@@ -1960,6 +1970,15 @@ function CanvasEditorDesktop({
               <circle cx="11" cy="11" r="7" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShortcutsOpen(true)}
+            title="Keyboard shortcuts (?)"
+            aria-label="Keyboard shortcuts"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-linen-200 bg-paper text-[12px] font-semibold text-sage-700 transition-colors hover:border-stone-500/30"
+          >
+            ?
           </button>
           <button
             type="button"
@@ -3005,6 +3024,10 @@ function CanvasEditorDesktop({
           onUpload={handlePickerUpload}
           onClose={() => setPickingLayerId(null)}
         />
+      )}
+
+      {shortcutsOpen && (
+        <ShortcutsHelp onClose={() => setShortcutsOpen(false)} />
       )}
 
       {findOpen && (
