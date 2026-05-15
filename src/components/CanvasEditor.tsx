@@ -50,6 +50,7 @@ import LayersPanel from "./studio/LayersPanel";
 import ContextMenu, { type ContextMenuItem } from "./studio/ContextMenu";
 import AlignToolbar from "./studio/AlignToolbar";
 import { getRecentColors, recordRecentColor } from "./studio/recentColors";
+import FindReplaceModal from "./studio/FindReplaceModal";
 
 interface CanvasEditorProps {
   story: Story;
@@ -411,7 +412,7 @@ function CanvasEditorDesktop({
     setSelectedId(null);
     setEditingTextId(null);
     markChangedPagesDirty(current, restored);
-  }, [history, story.pages, markChangedPagesDirty]);
+  }, [history, story.pages, markChangedPagesDirty, setSelectedId]);
   const handleRedo = useCallback(() => {
     const current = story.pages;
     const restored = history.redo(current);
@@ -420,7 +421,7 @@ function CanvasEditorDesktop({
     setSelectedId(null);
     setEditingTextId(null);
     markChangedPagesDirty(current, restored);
-  }, [history, story.pages, markChangedPagesDirty]);
+  }, [history, story.pages, markChangedPagesDirty, setSelectedId]);
   // Built-in layouts are filtered by mode: memorial-only layouts only
   // show when the story's pet is in memorial mode. Custom layouts are
   // never filtered (user can always reuse their own presets).
@@ -468,6 +469,14 @@ function CanvasEditorDesktop({
   // Image crop mode. When set, the canvas suppresses the normal selection
   // chrome for the targeted image and shows crop handles instead.
   const [croppingId, setCroppingId] = useState<string | null>(null);
+
+  // Find & replace modal.
+  const [findOpen, setFindOpen] = useState(false);
+
+  // Canvas zoom level (multiplier). 1 = fit-to-frame; user-controlled via
+  // ⌘+ / ⌘- / ⌘0 / pinch. Clamped to [0.25, 4]. Stored here (not in a
+  // ref) so the canvas re-renders the scale on changes.
+  const [zoom, setZoom] = useState(1);
 
   // Recent-color palette persisted to localStorage so the user's hues
   // come back across sessions.
@@ -601,7 +610,7 @@ function CanvasEditorDesktop({
       updatePageLayers(currentPage.pageNumber, (ls) => [...ls, layer]);
       setSelectedId(layer.id);
     },
-    [currentPage, updatePageLayers, snapshotPages]
+    [currentPage, updatePageLayers, snapshotPages, setSelectedId]
   );
 
   const updateLayer = useCallback(
@@ -914,7 +923,7 @@ function CanvasEditorDesktop({
     setSaveLayoutError(null);
     setSelectedId(null);
     setEditingTextId(null);
-  }, [currentLayoutId, customLayouts]);
+  }, [currentLayoutId, customLayouts, setSelectedId]);
 
   const cancelDefineLayout = useCallback(() => {
     setDefineMode(null);
@@ -1127,6 +1136,29 @@ function CanvasEditorDesktop({
         e.preventDefault();
         selectAll();
         canvasRef.current?.focus();
+        return;
+      }
+      // Find & replace
+      if (meta && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      // Zoom: ⌘+, ⌘-, ⌘0 (reset). The default browser zoom is also
+      // bound to these so we always preventDefault.
+      if (meta && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        setZoom((z) => Math.min(4, Number((z + 0.1).toFixed(2))));
+        return;
+      }
+      if (meta && e.key === "-") {
+        e.preventDefault();
+        setZoom((z) => Math.max(0.25, Number((z - 0.1).toFixed(2))));
+        return;
+      }
+      if (meta && e.key === "0") {
+        e.preventDefault();
+        setZoom(1);
         return;
       }
       // Group / ungroup
@@ -1884,6 +1916,51 @@ function CanvasEditorDesktop({
           {saveError && (
             <span className="text-xs font-medium text-clay-500">{saveError}</span>
           )}
+          {/* Zoom control. ⌘+/-/0 also bound. Resets to fit on click. */}
+          <div className="flex items-center gap-0.5 rounded-full border border-linen-200 bg-paper px-1.5 py-0.5">
+            <button
+              type="button"
+              onClick={() =>
+                setZoom((z) => Math.max(0.25, Number((z - 0.1).toFixed(2))))
+              }
+              title="Zoom out (⌘−)"
+              aria-label="Zoom out"
+              className="px-1 text-[14px] leading-none text-sage-700 hover:text-bark-900"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom(1)}
+              title="Fit to screen (⌘0)"
+              className="w-[42px] text-center text-[10px] font-medium tabular-nums text-sage-700 hover:text-bark-900"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setZoom((z) => Math.min(4, Number((z + 0.1).toFixed(2))))
+              }
+              title="Zoom in (⌘=)"
+              aria-label="Zoom in"
+              className="px-1 text-[14px] leading-none text-sage-700 hover:text-bark-900"
+            >
+              +
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFindOpen(true)}
+            title="Find & replace (⌘F)"
+            aria-label="Find and replace"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-linen-200 bg-paper text-sage-700 transition-colors hover:border-stone-500/30"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
           <button
             type="button"
             onClick={handleUndo}
@@ -2353,7 +2430,7 @@ function CanvasEditorDesktop({
             // fits in whatever the smaller dimension is. `min(...)` so
             // it doesn't have to grow to fill — keeps the page centered
             // in the column with breathing room.
-            className="relative aspect-square shrink overflow-hidden rounded-[4px] bg-paper focus:outline-none focus-visible:ring-2 focus-visible:ring-moss-700 focus-visible:ring-offset-2"
+            className="relative aspect-square shrink rounded-[4px] bg-paper focus:outline-none focus-visible:ring-2 focus-visible:ring-moss-700 focus-visible:ring-offset-2"
             style={{
               width: "min(100%, 640px)",
               height: "min(100%, 640px)",
@@ -2361,6 +2438,12 @@ function CanvasEditorDesktop({
               maxHeight: "min(100%, 640px)",
               boxShadow:
                 "0 24px 48px -16px rgba(30,20,10,.25), 0 2px 6px rgba(30,20,10,.08)",
+              // Zoom is applied via CSS transform so the layout math
+              // doesn't need to change — coordinates remain logical px
+              // and pointer scale conversions still match.
+              transform: zoom !== 1 ? `scale(${zoom})` : undefined,
+              transformOrigin: "center center",
+              overflow: zoom > 1 ? "visible" : "hidden",
             }}
             onContextMenu={(e) => {
               // Right-click anywhere on the canvas opens the layer
@@ -2921,6 +3004,48 @@ function CanvasEditorDesktop({
           onPick={resolvePick}
           onUpload={handlePickerUpload}
           onClose={() => setPickingLayerId(null)}
+        />
+      )}
+
+      {findOpen && (
+        <FindReplaceModal
+          pages={story.pages}
+          onClose={() => setFindOpen(false)}
+          onJump={(pageIndex, layerId) => {
+            setPageIdx(pageIndex);
+            setSelectedId(layerId);
+            setFindOpen(false);
+          }}
+          onApplyAll={(updates) => {
+            snapshotPages();
+            setStory((prev) => {
+              const byNum = new Map(updates.map((u) => [u.pageNumber, u.overlays]));
+              return {
+                ...prev,
+                pages: prev.pages.map((p) => {
+                  const next = byNum.get(p.pageNumber);
+                  if (!next) return p;
+                  return {
+                    ...p,
+                    overlays: next,
+                    // Keep page.text in sync with the layout-tagged
+                    // text layer if we touched it. Most pages have one
+                    // such layer; we pick the first to mirror.
+                    text:
+                      (next.find(
+                        (l) => l.source === "layout" && l.type === "text"
+                      ) as TextLayer | undefined)?.text ?? p.text,
+                  };
+                }),
+              };
+            });
+            setDirty((d) => {
+              const next = { ...d };
+              for (const u of updates) next[u.pageNumber] = true;
+              return next;
+            });
+            setFindOpen(false);
+          }}
         />
       )}
 
