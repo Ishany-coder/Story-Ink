@@ -14,6 +14,7 @@ import {
   IMAGE_STYLES,
   type ImageStyleId,
 } from "@/lib/image-styles";
+import { STORY_TEMPLATES, type StoryTemplate } from "@/lib/story-templates";
 import type { Pet } from "@/lib/types";
 
 // Page-count options. 6 is the practical story floor; 800 is the cap.
@@ -50,11 +51,26 @@ export default function HomeCreate({ pets }: Props) {
     }
     return pets[0]?.id ?? null;
   }, [pets, requestedPetId]);
-  // Default to pet mode in both cases. With zero pets we still show
-  // the empty PetPicker (which carries the "Add a pet to get started"
-  // CTA) and surface Generic as a small text-link escape hatch below
-  // it — that way the primary funnel for new users is the pet path.
-  const [kind, setKind] = useState<"pet" | "generic">("pet");
+
+  // Template chooser state. Null means show the chooser (step 1);
+  // non-null means show the creation form (step 2). Auto-advances to
+  // the pet template when arriving from a ?petId= redirect so the
+  // "just added a pet" flow lands directly in the form.
+  const [selectedTemplate, setSelectedTemplate] =
+    useState<StoryTemplate | null>(() => {
+      if (requestedPetId && pets.some((p) => p.id === requestedPetId)) {
+        return STORY_TEMPLATES.find((t) => t.id === "pet") ?? null;
+      }
+      return null;
+    });
+
+  // Default to pet kind if arriving from a petId redirect (template
+  // auto-selected above), otherwise "pet" is just the initial state
+  // before the user picks a template — it gets overwritten by
+  // handleTemplateSelect before any submit can happen.
+  const [kind, setKind] = useState<"pet" | "generic">(
+    selectedTemplate?.kind ?? "pet"
+  );
   const [petId, setPetId] = useState<string | null>(initialPetId);
   const [prompt, setPrompt] = useState("");
   const [pageCount, setPageCount] = useState(MIN_PAGES);
@@ -117,6 +133,20 @@ export default function HomeCreate({ pets }: Props) {
       }
     }
   }, [state, router]);
+
+  function handleTemplateSelect(template: StoryTemplate) {
+    setSelectedTemplate(template);
+    setKind(template.kind);
+    setPrompt(template.starterPrompt ?? "");
+    setError("");
+  }
+
+  function handleBackToTemplates() {
+    setSelectedTemplate(null);
+    setPrompt("");
+    setKind("pet");
+    setError("");
+  }
 
   function applyStarter(id: string) {
     if (!selectedPet) return;
@@ -192,210 +222,189 @@ export default function HomeCreate({ pets }: Props) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="w-full space-y-6">
-        {/* Mode toggle. Hidden entirely when the user has no pets —
-            with zero pets the primary funnel should be "add a pet";
-            we offer Generic as a small text link below the empty
-            picker instead so the toggle isn't a coin-flip a first-time
-            visitor has to make before doing anything else. */}
-        {pets.length > 0 && (
-          <div className="mx-auto flex w-fit rounded-full border border-cream-300 bg-cream-50 p-1">
-            <ModeToggleButton
-              active={kind === "pet"}
-              onClick={() => setKind("pet")}
-              label="Pet story"
-            />
-            <ModeToggleButton
-              active={kind === "generic"}
-              onClick={() => setKind("generic")}
-              label="Generic story"
-            />
-          </div>
-        )}
+      {/* Step 1: template chooser. Shown until the user picks a template. */}
+      {!selectedTemplate && (
+        <TemplateChooserPanel onSelect={handleTemplateSelect} />
+      )}
 
-        {kind === "pet" && (
-          <>
-            <PetPicker
-              pets={pets}
-              selectedId={petId}
-              onSelect={setPetId}
+      {/* Step 2: creation form, shown after a template is chosen. */}
+      {selectedTemplate && (
+        <form onSubmit={handleSubmit} className="w-full space-y-6">
+          {/* Template header + back link */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBackToTemplates}
+              className="flex items-center gap-1 rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-500 transition-colors hover:border-cream-400 hover:text-ink-900"
+            >
+              ← All templates
+            </button>
+            <span className="text-sm font-medium text-ink-700">
+              {selectedTemplate.emoji} {selectedTemplate.label}
+            </span>
+          </div>
+
+          {kind === "pet" && (
+            <>
+              <PetPicker
+                pets={pets}
+                selectedId={petId}
+                onSelect={setPetId}
+              />
+              {pets.length === 0 && (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={handleBackToTemplates}
+                    className="text-xs font-medium text-ink-500 underline decoration-cream-400 underline-offset-2 transition-colors hover:text-moss-700 hover:decoration-moss-300"
+                  >
+                    Choose a different template →
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {kind === "pet" && selectedPet && (
+            <StarterPicker starters={starters} onPick={applyStarter} />
+          )}
+
+          {/* Prompt + page count */}
+          <div className="overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)] transition focus-within:border-moss-700 focus-within:ring-4 focus-within:ring-moss-100/60">
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={
+                kind === "pet" && selectedPet
+                  ? `What should ${selectedPet.name}'s story be about?`
+                  : selectedTemplate.promptPlaceholder
+              }
+              rows={4}
+              maxLength={1000}
+              className="w-full resize-none bg-transparent px-5 py-4 text-base leading-relaxed text-ink-900 placeholder-ink-300 focus:outline-none"
             />
-            {pets.length === 0 && (
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={() => setKind("generic")}
-                  className="text-xs font-medium text-ink-500 underline decoration-cream-400 underline-offset-2 transition-colors hover:text-moss-700 hover:decoration-moss-300"
-                >
-                  Just want to test the AI? Try a generic story →
-                </button>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-cream-200 bg-cream-100/60 px-5 py-3">
+              <span className="text-xs text-ink-300">
+                {prompt.length} / 1000
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-ink-500">Pages</span>
+                <div className="flex flex-wrap items-center gap-1">
+                  {PAGE_OPTIONS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => {
+                        setPageCount(n);
+                        setCustomMode(false);
+                      }}
+                      title={
+                        n < PRINT_MIN_PAGES
+                          ? `${n} pages — digital only (hardcover needs at least ${PRINT_MIN_PAGES})`
+                          : `${n} pages`
+                      }
+                      className={`h-8 min-w-[2.25rem] rounded-lg px-2 text-sm font-medium transition-colors ${
+                        !customMode && pageCount === n
+                          ? "bg-ink-900 text-cream-50"
+                          : "bg-cream-50 text-ink-500 hover:bg-cream-200 hover:text-ink-900"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                  {customMode ? (
+                    <input
+                      type="number"
+                      min={MIN_PAGES}
+                      max={MAX_PAGES}
+                      step={1}
+                      value={pageCount}
+                      onChange={(e) => {
+                        const raw = parseInt(e.target.value, 10);
+                        if (Number.isNaN(raw)) return;
+                        setPageCount(
+                          Math.max(MIN_PAGES, Math.min(MAX_PAGES, raw))
+                        );
+                      }}
+                      onBlur={() => {
+                        // Snap back to a preset if the user typed one.
+                        if (PAGE_OPTIONS.includes(pageCount)) {
+                          setCustomMode(false);
+                        }
+                      }}
+                      className="h-8 w-20 rounded-lg border border-ink-900 bg-cream-50 px-2 text-sm font-medium text-ink-900 focus:outline-none focus:ring-2 focus:ring-moss-100"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomMode(true);
+                        // Seed with current value so the input shows it.
+                        if (!PAGE_OPTIONS.includes(pageCount)) return;
+                      }}
+                      className="h-8 rounded-lg bg-cream-50 px-3 text-xs font-medium text-ink-500 hover:bg-cream-200 hover:text-ink-900"
+                    >
+                      Custom
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            {pageCount < PRINT_MIN_PAGES && (
+              <div className="flex items-start gap-2 border-t border-cream-200 bg-amber-50/60 px-5 py-2 text-[11px] font-medium text-amber-900">
+                <span aria-hidden="true">ⓘ</span>
+                <span>
+                  Stories under {PRINT_MIN_PAGES} pages can be read online or
+                  downloaded as a PDF, but can&rsquo;t be ordered as a
+                  hardcover.
+                </span>
               </div>
             )}
-          </>
-        )}
-
-        {kind === "pet" && selectedPet && (
-          <StarterPicker starters={starters} onPick={applyStarter} />
-        )}
-
-        {/* Prompt + page count */}
-        <div className="overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)] transition focus-within:border-moss-700 focus-within:ring-4 focus-within:ring-moss-100/60">
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={
-              kind === "pet" && selectedPet
-                ? `What should ${selectedPet.name}'s story be about?`
-                : "Describe the story you'd like to make…"
-            }
-            rows={4}
-            maxLength={1000}
-            className="w-full resize-none bg-transparent px-5 py-4 text-base leading-relaxed text-ink-900 placeholder-ink-300 focus:outline-none"
-          />
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-cream-200 bg-cream-100/60 px-5 py-3">
-            <span className="text-xs text-ink-300">
-              {prompt.length} / 1000
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-ink-500">Pages</span>
-              <div className="flex flex-wrap items-center gap-1">
-                {PAGE_OPTIONS.map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => {
-                      setPageCount(n);
-                      setCustomMode(false);
-                    }}
-                    title={
-                      n < PRINT_MIN_PAGES
-                        ? `${n} pages — digital only (hardcover needs at least ${PRINT_MIN_PAGES})`
-                        : `${n} pages`
-                    }
-                    className={`h-8 min-w-[2.25rem] rounded-lg px-2 text-sm font-medium transition-colors ${
-                      !customMode && pageCount === n
-                        ? "bg-ink-900 text-cream-50"
-                        : "bg-cream-50 text-ink-500 hover:bg-cream-200 hover:text-ink-900"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-                {customMode ? (
-                  <input
-                    type="number"
-                    min={MIN_PAGES}
-                    max={MAX_PAGES}
-                    step={1}
-                    value={pageCount}
-                    onChange={(e) => {
-                      const raw = parseInt(e.target.value, 10);
-                      if (Number.isNaN(raw)) return;
-                      setPageCount(
-                        Math.max(MIN_PAGES, Math.min(MAX_PAGES, raw))
-                      );
-                    }}
-                    onBlur={() => {
-                      // Snap back to a preset if the user typed one.
-                      if (PAGE_OPTIONS.includes(pageCount)) {
-                        setCustomMode(false);
-                      }
-                    }}
-                    className="h-8 w-20 rounded-lg border border-ink-900 bg-cream-50 px-2 text-sm font-medium text-ink-900 focus:outline-none focus:ring-2 focus:ring-moss-100"
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomMode(true);
-                      // Seed with current value so the input shows it.
-                      if (!PAGE_OPTIONS.includes(pageCount)) return;
-                    }}
-                    className="h-8 rounded-lg bg-cream-50 px-3 text-xs font-medium text-ink-500 hover:bg-cream-200 hover:text-ink-900"
-                  >
-                    Custom
-                  </button>
-                )}
+            {pageCount >= PRINT_MIN_PAGES && pageCount % 4 !== 0 && (
+              <div className="flex items-start gap-2 border-t border-cream-200 bg-amber-50/60 px-5 py-2 text-[11px] font-medium text-amber-900">
+                <span aria-hidden="true">ⓘ</span>
+                <span>
+                  Printed books are bound in signatures of 4 pages — picking a
+                  count not divisible by 4 adds 1&ndash;3 blank pages at the
+                  back. Pick a multiple of 4 (24, 28, 32, 36, &hellip;) to
+                  avoid this.
+                </span>
               </div>
-            </div>
+            )}
           </div>
-          {pageCount < PRINT_MIN_PAGES && (
-            <div className="flex items-start gap-2 border-t border-cream-200 bg-amber-50/60 px-5 py-2 text-[11px] font-medium text-amber-900">
-              <span aria-hidden="true">ⓘ</span>
-              <span>
-                Stories under {PRINT_MIN_PAGES} pages can be read online or
-                downloaded as a PDF, but can&rsquo;t be ordered as a hardcover.
-              </span>
-            </div>
-          )}
-          {pageCount >= PRINT_MIN_PAGES && pageCount % 4 !== 0 && (
-            <div className="flex items-start gap-2 border-t border-cream-200 bg-amber-50/60 px-5 py-2 text-[11px] font-medium text-amber-900">
-              <span aria-hidden="true">ⓘ</span>
-              <span>
-                Printed books are bound in signatures of 4 pages — picking a
-                count not divisible by 4 adds 1&ndash;3 blank pages at the
-                back. Pick a multiple of 4 (24, 28, 32, 36, &hellip;) to avoid
-                this.
-              </span>
-            </div>
-          )}
-        </div>
 
-        <StylePicker value={imageStyle} onChange={setImageStyle} />
+          <StylePicker value={imageStyle} onChange={setImageStyle} />
 
-        {kind === "pet" && (
-          <ImageModePicker mode={imageMode} onChange={setImageMode} />
-        )}
-
-        <div className="flex flex-col items-center gap-3">
-          <button
-            type="submit"
-            disabled={!ready || generating}
-            className="rounded-full bg-moss-700 px-8 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-moss-700"
-          >
-            Create my story
-          </button>
-
-          {/* Pricing disclosure below the CTA. Hidden entirely during
-              closed beta — reading is auto-unlocked and hardcover is
-              paused, so quoting either price would be misleading. */}
-          {!betaOn && (
-            <p className="text-center text-xs text-ink-500">
-              Read online or download for $9.99. Hardcover keepsakes from
-              $34.99.
-            </p>
+          {kind === "pet" && (
+            <ImageModePicker mode={imageMode} onChange={setImageMode} />
           )}
 
-          {error && (
-            <p className="text-center text-sm text-rose-600">{error}</p>
-          )}
-        </div>
-      </form>
+          <div className="flex flex-col items-center gap-3">
+            <button
+              type="submit"
+              disabled={!ready || generating}
+              className="rounded-full bg-moss-700 px-8 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-moss-700"
+            >
+              Create my story
+            </button>
+
+            {/* Pricing disclosure below the CTA. Hidden entirely during
+                closed beta — reading is auto-unlocked and hardcover is
+                paused, so quoting either price would be misleading. */}
+            {!betaOn && (
+              <p className="text-center text-xs text-ink-500">
+                Read online or download for $9.99. Hardcover keepsakes from
+                $34.99.
+              </p>
+            )}
+
+            {error && (
+              <p className="text-center text-sm text-rose-600">{error}</p>
+            )}
+          </div>
+        </form>
+      )}
     </>
-  );
-}
-
-function ModeToggleButton({
-  active,
-  onClick,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
-        active
-          ? "bg-ink-900 text-cream-50"
-          : "text-ink-500 hover:text-ink-900"
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -574,6 +583,43 @@ function ImageModePicker({
           ? "Each page anchors to page 1 + the previous page so the character stays identical. ~3–4 minutes for a 10-page book."
           : "All pages render in parallel using your pet's reference photos. ~30 seconds for a 10-page book."}
       </p>
+    </div>
+  );
+}
+
+// Grid of template cards shown as step 1 of the creation flow. Lets
+// users declare their intent before the form appears, replacing the
+// pet-only empty state with a broad set of story occasions.
+function TemplateChooserPanel({
+  onSelect,
+}: {
+  onSelect: (t: StoryTemplate) => void;
+}) {
+  return (
+    <div className="w-full space-y-4">
+      <p className="text-center text-sm font-medium text-ink-500">
+        What kind of story would you like to make?
+      </p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {STORY_TEMPLATES.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onSelect(t)}
+            className="group flex flex-col items-start gap-2 rounded-2xl border border-cream-300 bg-cream-50 px-4 py-4 text-left transition-all hover:-translate-y-0.5 hover:border-moss-500 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-moss-500"
+          >
+            <span className="text-2xl leading-none" aria-hidden="true">
+              {t.emoji}
+            </span>
+            <span className="text-sm font-semibold text-ink-900">
+              {t.label}
+            </span>
+            <span className="text-xs leading-relaxed text-ink-500">
+              {t.description}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
