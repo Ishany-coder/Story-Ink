@@ -271,7 +271,7 @@ export default function PetForm({ initial = null }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="animate-rise-in mx-auto max-w-2xl space-y-6 px-4 sm:px-6 lg:px-8 py-10"
+      className="animate-rise-in mx-auto max-w-5xl space-y-6 px-4 py-10 sm:px-6 lg:px-8"
     >
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
@@ -285,100 +285,129 @@ export default function PetForm({ initial = null }: Props) {
         )}
       </div>
 
-      <Field label="Name">
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={80}
-          required
-          className={inputCls}
-        />
-      </Field>
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-12 md:items-start">
+        <div className="space-y-4 md:col-span-7">
+          <Field label="Name">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              required
+              className={inputCls}
+            />
+          </Field>
 
-      <Field
-        label={`Reference photos (${photos.length}/${MAX_PHOTOS})`}
-        hint="Clear, well-lit, full body or face — this is what your pet will look like in every illustration. Upload 3–5 photos in different poses for the best results."
-      >
-        <div className="space-y-3">
-          {photos.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {photos.map((url) => (
-                <div
-                  key={url}
-                  className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={url}
-                    alt={
-                      name.trim()
-                        ? `Reference photo of ${name.trim()}`
-                        : "Pet reference photo"
-                    }
-                    className="h-full w-full object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removePhoto(url)}
-                    className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          {photos.length < MAX_PHOTOS && (
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-sm font-medium text-ink-500 transition-colors hover:border-moss-500 hover:bg-cream-100">
-              {uploading ? "Uploading…" : "+ Upload photos"}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Field label="Species">
+              <select
+                value={species}
+                onChange={(e) => setSpecies(e.target.value as PetSpecies)}
+                className={inputCls}
+              >
+                {PET_SPECIES.map((s) => (
+                  <option key={s} value={s}>
+                    {s.charAt(0).toUpperCase() + s.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Breed (optional)">
               <input
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={uploading}
-                onChange={handlePhotoPick}
-                className="hidden"
+                type="text"
+                value={breed ?? ""}
+                onChange={(e) => setBreed(e.target.value)}
+                maxLength={80}
+                className={inputCls}
               />
-            </label>
-          )}
+            </Field>
+
+            <Field label="Age (optional)">
+              <input
+                type="text"
+                value={age ?? ""}
+                onChange={(e) => setAge(e.target.value)}
+                maxLength={40}
+                placeholder="e.g. 7 years"
+                className={inputCls}
+              />
+            </Field>
+          </div>
+
+          <Field label="Mode">
+            <div className="flex rounded-full border border-cream-300 bg-cream-50 p-1">
+              <ModeButton
+                value="living"
+                current={mode}
+                onClick={() => setMode("living")}
+                label="Living"
+              />
+              <ModeButton
+                value="memorial"
+                current={mode}
+                onClick={() => setMode("memorial")}
+                label="In memory"
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-ink-500">
+              Living — playful adventures starring your pet. In memory —
+              gentle recollections or a Rainbow Bridge story for a pet
+              who has passed.
+            </p>
+          </Field>
         </div>
-      </Field>
 
-      <Field label="Species">
-        <select
-          value={species}
-          onChange={(e) => setSpecies(e.target.value as PetSpecies)}
-          className={inputCls}
-        >
-          {PET_SPECIES.map((s) => (
-            <option key={s} value={s}>
-              {s.charAt(0).toUpperCase() + s.slice(1)}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Breed (optional)">
-          <input
-            type="text"
-            value={breed ?? ""}
-            onChange={(e) => setBreed(e.target.value)}
-            maxLength={80}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Age (optional)">
-          <input
-            type="text"
-            value={age ?? ""}
-            onChange={(e) => setAge(e.target.value)}
-            maxLength={40}
-            placeholder="e.g. 7 years"
-            className={inputCls}
-          />
-        </Field>
+        <div className="md:col-span-5">
+          <Field
+            label={`Reference photos (${photos.length}/${MAX_PHOTOS})`}
+            hint="The AI uses these on every page so the pet looks like the pet. 3–5 clear photos in different poses works best."
+          >
+            <div className="space-y-3">
+              {photos.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {photos.map((url) => (
+                    <div
+                      key={url}
+                      className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt={
+                          name.trim()
+                            ? `Reference photo of ${name.trim()}`
+                            : "Pet reference photo"
+                        }
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(url)}
+                        className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {photos.length < MAX_PHOTOS && (
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-sm font-medium text-ink-500 transition-colors hover:border-moss-500 hover:bg-cream-100">
+                  {uploading ? "Uploading…" : "+ Upload photos"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    disabled={uploading}
+                    onChange={handlePhotoPick}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
+          </Field>
+        </div>
       </div>
 
       <Field
@@ -416,104 +445,104 @@ export default function PetForm({ initial = null }: Props) {
           </span>
         </div>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {quirkRows.map((row, idx) => {
             const bankEntry = QUIRK_BANK.find((b) => b.prompt === row.prompt);
             const pills = row.fromBank ? (bankEntry?.pills ?? []) : [];
             return (
-            <div key={idx} className="space-y-1">
-              {row.fromBank ? (
-                <label className="block text-xs font-medium text-ink-700">
-                  {row.prompt}
-                </label>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={row.prompt}
-                    onChange={(e) =>
-                      updateQuirk(idx, { prompt: e.target.value })
-                    }
-                    maxLength={200}
-                    placeholder="Your own question (e.g. How does she greet you?)"
-                    className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeCustomQuirk(idx)}
-                    aria-label="Remove this question"
-                    className="shrink-0 rounded-lg border border-cream-300 bg-cream-50 px-2 py-1 text-[10px] font-medium text-ink-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
-
-              {/* Pill suggestions for bank rows */}
-              {pills.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {pills.map((pill) => {
-                    const active = row.selectedPills.includes(pill);
-                    return (
-                      <button
-                        key={pill}
-                        type="button"
-                        onClick={() => togglePill(idx, pill)}
-                        className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                          active
-                            ? "border-moss-700 bg-moss-700 text-cream-50"
-                            : "border-cream-300 bg-cream-50 text-ink-600 hover:border-moss-500 hover:text-ink-900"
-                        }`}
-                      >
-                        {active ? `✕ ${pill}` : `+ ${pill}`}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Selected pill chips */}
-              {row.selectedPills.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {row.selectedPills.map((pill) => (
-                    <span
-                      key={pill}
-                      className="inline-flex items-center gap-1 rounded-full border border-moss-300 bg-moss-100/60 px-2.5 py-0.5 text-[11px] font-medium text-moss-900"
+              <div key={idx} className="space-y-1">
+                {row.fromBank ? (
+                  <label className="block text-xs font-medium text-ink-700">
+                    {row.prompt}
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={row.prompt}
+                      onChange={(e) =>
+                        updateQuirk(idx, { prompt: e.target.value })
+                      }
+                      maxLength={200}
+                      placeholder="Your own question (e.g. How does she greet you?)"
+                      className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeCustomQuirk(idx)}
+                      aria-label="Remove this question"
+                      className="shrink-0 rounded-lg border border-cream-300 bg-cream-50 px-2 py-1 text-[10px] font-medium text-ink-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
                     >
-                      {pill}
-                      <button
-                        type="button"
-                        onClick={() => togglePill(idx, pill)}
-                        aria-label={`Remove ${pill}`}
-                        className="ml-0.5 text-moss-600 hover:text-moss-900"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+                      Remove
+                    </button>
+                  </div>
+                )}
 
-              <input
-                type="text"
-                value={row.answer}
-                onChange={(e) => updateQuirk(idx, { answer: e.target.value })}
-                maxLength={400}
-                placeholder={
-                  row.fromBank
-                    ? bankEntry?.placeholder ?? "Your answer"
-                    : "Your answer"
-                }
-                className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-sm text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
-              />
-            </div>
+                {/* Pill suggestions for bank rows */}
+                {pills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {pills.map((pill) => {
+                      const active = row.selectedPills.includes(pill);
+                      return (
+                        <button
+                          key={pill}
+                          type="button"
+                          onClick={() => togglePill(idx, pill)}
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                            active
+                              ? "border-moss-700 bg-moss-700 text-cream-50"
+                              : "border-cream-300 bg-cream-50 text-ink-600 hover:border-moss-500 hover:text-ink-900"
+                          }`}
+                        >
+                          {active ? `✕ ${pill}` : `+ ${pill}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Selected pill chips */}
+                {row.selectedPills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {row.selectedPills.map((pill) => (
+                      <span
+                        key={pill}
+                        className="inline-flex items-center gap-1 rounded-full border border-moss-300 bg-moss-100/60 px-2.5 py-0.5 text-[11px] font-medium text-moss-900"
+                      >
+                        {pill}
+                        <button
+                          type="button"
+                          onClick={() => togglePill(idx, pill)}
+                          aria-label={`Remove ${pill}`}
+                          className="ml-0.5 text-moss-600 hover:text-moss-900"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={row.answer}
+                  onChange={(e) => updateQuirk(idx, { answer: e.target.value })}
+                  maxLength={400}
+                  placeholder={
+                    row.fromBank
+                      ? bankEntry?.placeholder ?? "Your answer"
+                      : "Your answer"
+                  }
+                  className="w-full rounded-lg border border-cream-300 bg-cream-50 px-3 py-1.5 text-sm text-ink-900 placeholder-ink-300 transition focus:border-moss-700 focus:outline-none focus:ring-4 focus:ring-moss-100/60"
+                />
+              </div>
             );
           })}
 
           <button
             type="button"
             onClick={addCustomQuirk}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream-400 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-500 transition-colors hover:border-moss-500 hover:text-ink-900"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream-400 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-500 transition-colors hover:border-moss-500 hover:text-ink-900 md:col-span-2"
           >
             <span aria-hidden="true" className="text-base leading-none">
               +
@@ -523,30 +552,8 @@ export default function PetForm({ initial = null }: Props) {
         </div>
       </section>
 
-      <Field label="Mode">
-        <div className="flex rounded-full border border-cream-300 bg-cream-50 p-1">
-          <ModeButton
-            value="living"
-            current={mode}
-            onClick={() => setMode("living")}
-            label="Living"
-          />
-          <ModeButton
-            value="memorial"
-            current={mode}
-            onClick={() => setMode("memorial")}
-            label="In memory"
-          />
-        </div>
-        <p className="mt-1.5 text-xs text-ink-500">
-          Living — playful adventures starring your pet. In memory —
-          gentle recollections or a Rainbow Bridge story for a pet who
-          has passed.
-        </p>
-      </Field>
-
       {mode === "memorial" && (
-        <>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field
             label="Passed away on"
             hint="Used for the memorial dedication page on printed books."
@@ -571,9 +578,8 @@ export default function PetForm({ initial = null }: Props) {
               className={`${inputCls} resize-none`}
             />
           </Field>
-        </>
+        </div>
       )}
-
 
       {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
 
