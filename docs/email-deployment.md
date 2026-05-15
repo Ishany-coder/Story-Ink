@@ -139,7 +139,7 @@ Repeat with a gmail address, an outlook address, and an icloud
 address if you want broader confidence — each receiver does mild
 reputation scoring of its own.
 
-## 6b. Configure Supabase Auth SMTP + branded templates
+## 7. Configure Supabase Auth SMTP + branded templates
 
 This app's `sendEmail()` helper does **not** send auth confirmation
 emails — Supabase Auth sends those directly. Configure Supabase to use
@@ -150,7 +150,7 @@ the same Resend domain so those emails come from StoryInk branding.
    - Host: `smtp.resend.com`
    - Port: `587`
    - Username: `resend`
-   - Password: your Resend API key (`SUPABASE_AUTH_SMTP_PASS` in `.env.local`)
+   - Password: your Resend API key (see `SUPABASE_AUTH_SMTP_PASS` in `.env.example`)
    - Sender name/email: `SUPABASE_AUTH_EMAIL_FROM` (for example
      `"StoryInk <noreply@storyink.ai>"`).
 3. Save and send a test email from the Supabase panel.
@@ -160,7 +160,7 @@ the same Resend domain so those emails come from StoryInk branding.
 5. Verify delivery for each template type with at least one Gmail and
    one Outlook inbox.
 
-## 7. Follow-up: bounce + complaint monitoring
+## 8. Follow-up: bounce + complaint monitoring
 
 Resend can webhook your app on `email.bounced`, `email.complained`,
 and `email.delivery_delayed` events. Subscribing to those lets you:
