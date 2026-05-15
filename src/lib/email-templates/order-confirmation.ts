@@ -7,6 +7,8 @@
 // desktop) strip <style> blocks. The cream / moss palette mirrors the
 // site's so the brand stays recognizable.
 
+import { emailBrandMark } from "./_brand";
+
 export interface OrderConfirmationArgs {
   storyTitle: string;
   orderId: string;
@@ -37,6 +39,7 @@ export function orderConfirmation(args: OrderConfirmationArgs): RenderedEmail {
           <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#fffaf2;border:1px solid #e6dfd1;border-radius:16px;overflow:hidden;">
             <tr>
               <td style="padding:32px 32px 16px 32px;">
+                ${emailBrandMark()}
                 <p style="margin:0;font-size:11px;letter-spacing:0.3em;text-transform:uppercase;color:#4a6b3a;font-weight:500;">StoryInk</p>
                 <h1 style="margin:8px 0 0 0;font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:600;color:#1a1814;line-height:1.3;">
                   Thank you — your order is confirmed.
