@@ -2,6 +2,7 @@ import Link from "next/link";
 import HeroSection from "@/components/HeroSection";
 import HomeCreate from "@/components/HomeCreate";
 import BookCard from "@/components/BookCard";
+import LandingPage from "@/components/LandingPage";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import type { Pet } from "@/lib/types";
 
@@ -237,15 +238,5 @@ function SectionHeading({
 }
 
 function SignedOutHero() {
-  return (
-    <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-2xl flex-col items-center justify-center gap-8 px-4 sm:px-6 lg:px-8 py-16 text-center">
-      <HeroSection />
-      <Link
-        href="/login"
-        className="rounded-full bg-moss-700 px-8 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
-      >
-        Get started
-      </Link>
-    </div>
-  );
+  return <LandingPage />;
 }
