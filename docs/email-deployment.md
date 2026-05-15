@@ -1,15 +1,21 @@
 # Email deployment (Resend)
 
 StoryInk sends transactional email (order confirmations, shipping updates,
-support replies) via [Resend](https://resend.com). Resend will refuse to
-send mail from any domain you have not verified — by design — so the
-first time you boot the app in a real environment, you have to do the
-DNS work below before the `From:` line on outgoing mail will be
-accepted.
+support replies) via [Resend](https://resend.com). Supabase Auth emails
+(signup confirmation, password reset, magic link, email change) should
+also be routed through the same verified sender domain via Supabase SMTP
+settings. Resend will refuse to send mail from any domain you have not
+verified — by design — so the first time you boot the app in a real
+environment, you have to do the DNS work below before the `From:` line
+on outgoing mail will be accepted.
 
 This is a one-time setup per sending domain. After that, switching
 inbox prefixes (`orders@`, `support@`, `noreply@`) on the same verified
 domain just means changing `EMAIL_FROM` in env.
+
+For Supabase Auth email branding, keep helper values in `.env.example`
+under the "Supabase Auth email branding" section and copy them into
+Supabase Dashboard → Authentication → Email.
 
 ## 1. Create a Resend account and API key
 
@@ -132,6 +138,27 @@ The simplest end-to-end check:
 Repeat with a gmail address, an outlook address, and an icloud
 address if you want broader confidence — each receiver does mild
 reputation scoring of its own.
+
+## 6b. Configure Supabase Auth SMTP + branded templates
+
+This app's `sendEmail()` helper does **not** send auth confirmation
+emails — Supabase Auth sends those directly. Configure Supabase to use
+the same Resend domain so those emails come from StoryInk branding.
+
+1. Open Supabase Dashboard → **Authentication → Email → SMTP Settings**.
+2. Enable custom SMTP and set:
+   - Host: `smtp.resend.com`
+   - Port: `587`
+   - Username: `resend`
+   - Password: your Resend API key (`SUPABASE_AUTH_SMTP_PASS` in `.env.local`)
+   - Sender name/email: `SUPABASE_AUTH_EMAIL_FROM` (for example
+     `"StoryInk <noreply@storyink.ai>"`).
+3. Save and send a test email from the Supabase panel.
+4. Open **Authentication → Email Templates** and customize all auth
+   templates (confirm signup, magic link, reset password, email change)
+   with StoryInk copy/branding.
+5. Verify delivery for each template type with at least one Gmail and
+   one Outlook inbox.
 
 ## 7. Follow-up: bounce + complaint monitoring
 
