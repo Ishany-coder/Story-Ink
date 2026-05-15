@@ -143,7 +143,7 @@ function DashboardHeader() {
     <div className="animate-rise-in mb-12 flex flex-col items-center gap-4 text-center sm:mb-14 sm:flex-row sm:items-end sm:justify-between sm:text-left">
       <div>
         <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
-          The fine art of pet storytelling
+          The fine art of personalized storytelling
         </span>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-ink-900 sm:text-5xl">
           Your library
