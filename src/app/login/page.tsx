@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import Link from "next/link";
 
 // Email + password auth. Single page with a sign-in / sign-up / forgot-password toggle.
 //
@@ -188,11 +189,10 @@ function LoginPageInner() {
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  // COPPA age gate. Signup is contractually 13+ per our Terms — we ask
-  // for explicit affirmation at the only place a new account can be
-  // created. This is a self-attestation, not verification; that's the
-  // standard SaaS posture. Reset every time the user flips into signup.
-  const [confirmedAdult, setConfirmedAdult] = useState(false);
+  // Terms & Privacy acceptance. Signup requires agreement to our Terms of
+  // Service (which include the 13+ eligibility requirement) and Privacy
+  // Policy. Reset every time the user flips into signup mode.
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [pending, setPending] = useState(false);
   const [googlePending, setGooglePending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -227,8 +227,8 @@ function LoginPageInner() {
     // Belt-and-suspenders: the submit button is also disabled when this
     // is false in signup mode, but guard here too in case a future edit
     // forgets the disabled prop.
-    if (mode === "signup" && !confirmedAdult) {
-      setError("Please confirm you're 13 or older to create an account.");
+    if (mode === "signup" && !agreedToTerms) {
+      setError("Please agree to the Terms of Service and Privacy Policy to create an account.");
       return;
     }
     setPending(true);
@@ -295,9 +295,9 @@ function LoginPageInner() {
     setError(null);
     setConfirmEmailNotice(false);
     setResetEmailSent(false);
-    // Don't carry the 13+ tick across modes — flipping back to signup
-    // should re-prompt for the affirmation.
-    setConfirmedAdult(false);
+    // Reset terms acceptance when flipping back to signup so the user
+    // must re-affirm if they switch modes.
+    setAgreedToTerms(false);
   }
 
   const headings: Record<Mode, string> = {
@@ -423,14 +423,32 @@ function LoginPageInner() {
                   <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-cream-300 bg-cream-100/60 px-4 py-3 text-sm text-ink-700 transition-colors hover:border-cream-400">
                     <input
                       type="checkbox"
-                      checked={confirmedAdult}
-                      onChange={(e) => setConfirmedAdult(e.target.checked)}
+                      checked={agreedToTerms}
+                      onChange={(e) => setAgreedToTerms(e.target.checked)}
                       className="mt-0.5 h-4 w-4 shrink-0 accent-moss-700"
                     />
                     <span>
-                      I confirm I&rsquo;m at least 13 years old. StoryInk
-                      isn&rsquo;t available to children under 13. Under-13
-                      accounts may be removed without notice.
+                      I agree to the{" "}
+                      <Link
+                        href="/terms"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-moss-700 underline hover:text-ink-900"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Terms of Service
+                      </Link>{" "}
+                      and{" "}
+                      <Link
+                        href="/privacy"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-moss-700 underline hover:text-ink-900"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Privacy Policy
+                      </Link>
+                      .
                     </span>
                   </label>
                 )}
@@ -441,7 +459,7 @@ function LoginPageInner() {
                     googlePending ||
                     !email.trim() ||
                     (mode !== "forgot" && !password) ||
-                    (mode === "signup" && !confirmedAdult)
+                    (mode === "signup" && !agreedToTerms)
                   }
                   className="w-full rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
                 >
