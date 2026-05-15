@@ -129,6 +129,8 @@ export default function HomeCreate({ pets }: Props) {
     e.preventDefault();
     if (!prompt.trim()) return;
     if (kind === "pet" && !petId) return;
+    // Legal acceptance is handled outside /create; keep this submit path
+    // frictionless and avoid per-story re-acceptance prompts.
     await runGenerate();
   }
 
