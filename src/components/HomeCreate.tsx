@@ -53,9 +53,10 @@ export default function HomeCreate({ pets }: Props) {
     return pets[0]?.id ?? null;
   }, [pets, requestedPetId]);
 
-  // Template chooser state. Start in pet template mode when arriving
-  // from a ?petId= redirect (e.g. just added a pet); otherwise show
-  // the template chooser as step 1.
+  // Template chooser state. Null means show the chooser (step 1);
+  // non-null means show the creation form (step 2). Auto-advances to
+  // the pet template when arriving from a ?petId= redirect so the
+  // "just added a pet" flow lands directly in the form.
   const [selectedTemplate, setSelectedTemplate] =
     useState<StoryTemplate | null>(() => {
       if (requestedPetId && pets.some((p) => p.id === requestedPetId)) {
@@ -64,10 +65,10 @@ export default function HomeCreate({ pets }: Props) {
       return null;
     });
 
-  // Default to pet mode in both cases. With zero pets we still show
-  // the empty PetPicker (which carries the "Add a pet to get started"
-  // CTA) and surface Generic as a small text-link escape hatch below
-  // it — that way the primary funnel for new users is the pet path.
+  // Default to pet kind if arriving from a petId redirect (template
+  // auto-selected above), otherwise "pet" is just the initial state
+  // before the user picks a template — it gets overwritten by
+  // handleTemplateSelect before any submit can happen.
   const [kind, setKind] = useState<"pet" | "generic">(
     selectedTemplate?.kind ?? "pet"
   );

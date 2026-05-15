@@ -54,6 +54,12 @@ export const STORY_TEMPLATES: StoryTemplate[] = [
     label: "Memorial / tribute",
     description: "A loving tribute to someone who meant the world to you",
     kind: "generic",
+    // This template covers memorials for people (not pets). Pet
+    // memorials are handled by the "pet" template with mode="memorial"
+    // which activates the dedicated guardrails in pet-prompt.ts
+    // (Rainbow Bridge, no peril, celebratory-recollection framing).
+    // Human memorials use the generic path intentionally — the pet
+    // system prompt is species-specific and would be a poor fit.
     starterPrompt:
       "A celebratory tribute storybook honoring [name]. [Describe who they were and what made them special — their laugh, their hobbies, a memory that captures them perfectly.] Focus on joy, love, and the light they brought — celebratory, not sad.",
     promptPlaceholder:
