@@ -664,7 +664,107 @@ export async function buildCoverPdf(story: Story): Promise<Uint8Array> {
     rgb(1, 1, 1)
   );
 
+  // Back cover colophon: logo mark + "StoryInk" wordmark + URL, set
+  // bottom-center inside the safe area on the left half of the spread.
+  // The back cover is intentionally quiet — this is a children's
+  // keepsake, not packaging — but a brand mark on the back is what
+  // makes a hardcover feel like a real published book rather than a
+  // print-on-demand experiment.
+  const backX = COVER_EDGE_IN * PT_PER_IN;
+  const backY = COVER_EDGE_IN * PT_PER_IN;
+  await drawBackCoverColophon(pdf, page, fonts, {
+    x: backX,
+    y: backY,
+    width: trimPts,
+    height: trimPts,
+  });
+
   return pdf.save();
+}
+
+// Cached logo bytes so multiple cover builds in the same worker don't
+// re-read from disk. Loaded lazily — the file might not be present in
+// every dev/test environment, so we soft-fail (no logo) rather than
+// blowing up the cover build.
+let _logoMarkBytes: Uint8Array | null | undefined = undefined;
+async function loadLogoMark(): Promise<Uint8Array | null> {
+  if (_logoMarkBytes !== undefined) return _logoMarkBytes;
+  try {
+    const buf = await readFile(
+      path.join(process.cwd(), "public", "logo-mark.png")
+    );
+    _logoMarkBytes = new Uint8Array(buf);
+  } catch (err) {
+    console.warn("[print-pdf] logo-mark.png not found, skipping:", err);
+    _logoMarkBytes = null;
+  }
+  return _logoMarkBytes;
+}
+
+async function drawBackCoverColophon(
+  pdf: PDFDocument,
+  page: PDFPage,
+  fonts: EmbeddedFonts,
+  back: { x: number; y: number; width: number; height: number }
+): Promise<void> {
+  const bytes = await loadLogoMark();
+  // Vertically: place colophon ~1" up from the trim edge (inside the
+  // 0.75" safe margin), so the wordmark baseline lands around 1.2"
+  // from the bottom. Looks like a real book imprint mark.
+  const inset = 1.0 * PT_PER_IN;
+  const colorInk = rgb(0.1, 0.07, 0.13);
+  const colorMuted = rgb(0.36, 0.31, 0.4);
+
+  // Logo mark — 0.85" tall, centered horizontally. If the asset is
+  // missing we still draw the wordmark below; the cover just lacks the
+  // book-with-flame icon. Better than failing the whole print build.
+  let logoBottom = back.y + inset;
+  if (bytes) {
+    try {
+      const logo = await pdf.embedPng(bytes);
+      const logoSizeIn = 0.85;
+      const logoSize = logoSizeIn * PT_PER_IN;
+      const logoX = back.x + back.width / 2 - logoSize / 2;
+      const logoY = back.y + inset + 0.55 * PT_PER_IN;
+      page.drawImage(logo, {
+        x: logoX,
+        y: logoY,
+        width: logoSize,
+        height: logoSize,
+      });
+      logoBottom = logoY + logoSize;
+    } catch (err) {
+      console.warn("[print-pdf] embed logo failed:", err);
+    }
+  }
+
+  // "StoryInk" wordmark below the logo. Bold, sized so it sits well
+  // under the icon without dominating it.
+  const wordmark = "StoryInk";
+  const wordmarkSize = 18;
+  const wordmarkWidth = fonts.bold.widthOfTextAtSize(wordmark, wordmarkSize);
+  const wordmarkY = bytes
+    ? logoBottom + 0.25 * PT_PER_IN
+    : back.y + inset + 0.5 * PT_PER_IN;
+  page.drawText(wordmark, {
+    x: back.x + back.width / 2 - wordmarkWidth / 2,
+    y: wordmarkY,
+    size: wordmarkSize,
+    font: fonts.bold,
+    color: colorInk,
+  });
+
+  // Site URL. Small, muted, regular weight — the "imprint" line.
+  const url = "storyink.ai";
+  const urlSize = 9;
+  const urlWidth = fonts.regular.widthOfTextAtSize(url, urlSize);
+  page.drawText(url, {
+    x: back.x + back.width / 2 - urlWidth / 2,
+    y: wordmarkY - 0.22 * PT_PER_IN,
+    size: urlSize,
+    font: fonts.regular,
+    color: colorMuted,
+  });
 }
 
 // Convenience: build both + upload + return the two URLs. Uses the same

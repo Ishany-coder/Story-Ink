@@ -45,7 +45,10 @@ alter table public.pets add column if not exists dedication_text text;
 
 -- The pet `is_public` flag was removed (pets are always private now —
 -- story-level sharing via stories.is_public is the only shareable
--- axis). Drop the column from deployed DBs when ready.
+-- axis). The old "pets visible to owner or public" policy referenced
+-- this column, so drop the policy first or the column drop errors with
+-- "cannot drop column is_public ... policy depends on column".
+drop policy if exists "pets visible to owner or public" on public.pets;
 alter table public.pets drop column if exists is_public;
 
 -- Structured "personality DNA" — a list of {prompt, answer} entries

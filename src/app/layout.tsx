@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { Nunito, Playfair_Display } from "next/font/google";
 import Navbar from "@/components/Navbar";
@@ -28,12 +29,10 @@ const playfair = Playfair_Display({
 });
 
 // Centralised site descriptors so the same strings populate <title>,
-// description, Open Graph, and Twitter cards without drift.
-//
-// NOTE: /og.png, /favicon.ico, and /apple-touch-icon.png are
-// REFERENCED here but the bitmap assets don't yet live in public/.
-// Drop the designed PNGs into that folder before launch; the routes
-// will just 404 until then. See the commit body for the asset list.
+// description, Open Graph, and Twitter cards without drift. Favicon
+// (`icon.png`), Apple touch icon (`apple-icon.png`), and the dynamic
+// Open Graph image (`opengraph-image.tsx`) are picked up automatically
+// from the app/ directory via Next.js file-based metadata conventions.
 const SITE_NAME = "StoryInk";
 const SITE_TITLE = "StoryInk — The fine art of pet storytelling";
 const SITE_DESCRIPTION =
@@ -46,12 +45,6 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_BASE_URL),
   title: SITE_TITLE,
   description: SITE_DESCRIPTION,
-  // TODO(launch): drop the designed bitmaps into /public — see the
-  // commit body. Until then these URLs 404, which is harmless.
-  icons: {
-    icon: "/favicon.ico",
-    apple: "/apple-touch-icon.png",
-  },
   openGraph: {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
@@ -59,13 +52,11 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     type: "website",
     locale: "en_US",
-    images: ["/og.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    images: ["/og.png"],
   },
 };
 
@@ -135,7 +126,24 @@ export default function RootLayout({
               </Link>
             </nav>
             <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-              <span>&copy; {new Date().getFullYear()} StoryInk</span>
+              <Link
+                href="/"
+                aria-label="StoryInk home"
+                className="flex items-center gap-1.5 font-[family-name:var(--font-display)] text-sm font-semibold text-ink-700 transition-colors hover:text-moss-700"
+              >
+                <Image
+                  src="/logo.png"
+                  alt=""
+                  width={20}
+                  height={20}
+                  className="h-5 w-5 shrink-0 object-contain"
+                />
+                <span>
+                  <span>Story</span>
+                  <span className="text-moss-700">Ink</span>
+                </span>
+              </Link>
+              <span>&copy; {new Date().getFullYear()}</span>
               <Link href="/blog" className="hover:text-moss-700">
                 Blog
               </Link>
