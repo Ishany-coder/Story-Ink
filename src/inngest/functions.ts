@@ -33,6 +33,11 @@ import {
   buildPetDescription,
   composePetStoryPrompt,
 } from "@/lib/pet-prompt";
+import {
+  isValidStoryPageCount,
+  MAX_STORY_PAGES,
+  MIN_STORY_PAGES,
+} from "@/lib/story-page-count";
 import type { Layer, Pet, Story, StoryPage } from "@/lib/types";
 
 const TEXT_RETRIES = 2;
@@ -71,6 +76,14 @@ function isSafetyBlockError(err: unknown): boolean {
 // message verbatim.
 const SAFETY_BLOCK_USER_MESSAGE =
   "Your prompt was blocked by the safety filter. Please try a gentler wording — for example, avoid graphic injuries or distressing content.";
+
+function isPageCountConstraintError(err: { message?: string } | null): boolean {
+  const message = err?.message?.toLowerCase() ?? "";
+  return (
+    message.includes("stories_page_count_check") ||
+    (message.includes("page_count") && message.includes("check constraint"))
+  );
+}
 
 async function onInngestFailure(
   wrappedEvent: unknown,
@@ -307,17 +320,48 @@ export const generateStoryFn = inngest.createFunction(
       );
     }
 
-    const storyRow = await step.run("save-story", async () => {
-      const pages: StoryPage[] = scriptData.pages.map((page, i) => {
-        const imageUrl = imageUrls[i];
+    const pages: StoryPage[] = scriptData.pages.map((page, i) => {
+      const imageUrl = imageUrls[i];
+      return {
+        pageNumber: page.pageNumber,
+        text: page.text,
+        imageUrl,
+        layoutId: DEFAULT_LAYOUT_ID,
+        overlays: buildInitialOverlays(imageUrl, page.text),
+      };
+    });
+
+    await step.run("save-recovery-payload", () =>
+      markProgress(jobId, {
+        phase: "save",
+        generatedStory: {
+          title: scriptData.title,
+          prompt,
+          pageCount,
+          pages,
+          coverImage: pages[0]?.imageUrl || null,
+          kind,
+          petId,
+          imageStyle,
+          isPublic,
+        },
+      })
+    );
+
+    const saveResult = await step.run("save-story", async () => {
+      if (!isValidStoryPageCount(pageCount)) {
         return {
-          pageNumber: page.pageNumber,
-          text: page.text,
-          imageUrl,
-          layoutId: DEFAULT_LAYOUT_ID,
-          overlays: buildInitialOverlays(imageUrl, page.text),
+          storyId: null,
+          fatalError: `Story generation requested ${pageCount} pages, but supported range is ${MIN_STORY_PAGES}-${MAX_STORY_PAGES}.`,
         };
-      });
+      }
+      if (pages.length !== pageCount) {
+        return {
+          storyId: null,
+          fatalError: `Story generation produced ${pages.length} pages, expected ${pageCount}.`,
+        };
+      }
+
       const { data, error } = await supabaseAdmin()
         .from("stories")
         .insert({
@@ -334,16 +378,30 @@ export const generateStoryFn = inngest.createFunction(
         })
         .select("id")
         .single();
+
       if (error || !data) {
+        if (isPageCountConstraintError(error)) {
+          return {
+            storyId: null,
+            fatalError:
+              "Your story was generated, but saving failed because the database page-count rule is out of date. Please ask support to rerun supabase/schema.sql and retry save.",
+          };
+        }
         throw new Error(`Supabase insert failed: ${error?.message}`);
       }
-      return { storyId: data.id as string };
+
+      return { storyId: data.id as string, fatalError: null };
     });
 
-    await step.run("mark-done", () =>
-      markDone(jobId, { storyId: storyRow.storyId })
-    );
-    return storyRow;
+    if (!saveResult.storyId) {
+      await step.run("mark-save-failed", () =>
+        markFailed(jobId, new Error(saveResult.fatalError))
+      );
+      return { storyId: null, error: saveResult.fatalError };
+    }
+
+    await step.run("mark-done", () => markDone(jobId, { storyId: saveResult.storyId }));
+    return { storyId: saveResult.storyId };
   }
 );
 
