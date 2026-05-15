@@ -405,7 +405,7 @@ export const generateStoryFn = inngest.createFunction(
           return {
             storyId: null,
             fatalError:
-              "Your story was generated, but saving failed because the database page-count rule is out of date. Please ask support to rerun supabase/schema.sql and retry save.",
+              "Your story was generated, but saving failed because the database page-count rule is out of date. Please contact support with your job ID so they can rerun supabase/schema.sql and recover/retry save from the stored job payload.",
           };
         }
         throw new Error(`Supabase insert failed: ${error?.message}`);
