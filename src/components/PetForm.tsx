@@ -223,7 +223,7 @@ export default function PetForm({ initial = null }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="animate-rise-in mx-auto max-w-2xl space-y-6 px-4 sm:px-6 lg:px-8 py-10"
+      className="animate-rise-in mx-auto max-w-5xl space-y-6 px-4 py-10 sm:px-6 lg:px-8"
     >
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
@@ -237,51 +237,129 @@ export default function PetForm({ initial = null }: Props) {
         )}
       </div>
 
-      <Field label="Name">
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={80}
-          required
-          className={inputCls}
-        />
-      </Field>
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-12 md:items-start">
+        <div className="space-y-4 md:col-span-7">
+          <Field label="Name">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              required
+              className={inputCls}
+            />
+          </Field>
 
-      <Field label="Species">
-        <select
-          value={species}
-          onChange={(e) => setSpecies(e.target.value as PetSpecies)}
-          className={inputCls}
-        >
-          {PET_SPECIES.map((s) => (
-            <option key={s} value={s}>
-              {s.charAt(0).toUpperCase() + s.slice(1)}
-            </option>
-          ))}
-        </select>
-      </Field>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Species">
+              <select
+                value={species}
+                onChange={(e) => setSpecies(e.target.value as PetSpecies)}
+                className={inputCls}
+              >
+                {PET_SPECIES.map((s) => (
+                  <option key={s} value={s}>
+                    {s.charAt(0).toUpperCase() + s.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </Field>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Breed (optional)">
-          <input
-            type="text"
-            value={breed ?? ""}
-            onChange={(e) => setBreed(e.target.value)}
-            maxLength={80}
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Age (optional)">
-          <input
-            type="text"
-            value={age ?? ""}
-            onChange={(e) => setAge(e.target.value)}
-            maxLength={40}
-            placeholder="e.g. 7 years"
-            className={inputCls}
-          />
-        </Field>
+            <Field label="Breed (optional)">
+              <input
+                type="text"
+                value={breed ?? ""}
+                onChange={(e) => setBreed(e.target.value)}
+                maxLength={80}
+                className={inputCls}
+              />
+            </Field>
+
+            <Field label="Age (optional)">
+              <input
+                type="text"
+                value={age ?? ""}
+                onChange={(e) => setAge(e.target.value)}
+                maxLength={40}
+                placeholder="e.g. 7 years"
+                className={inputCls}
+              />
+            </Field>
+          </div>
+
+          <Field label="Mode">
+            <div className="flex rounded-full border border-cream-300 bg-cream-50 p-1">
+              <ModeButton
+                value="living"
+                current={mode}
+                onClick={() => setMode("living")}
+                label="Living"
+              />
+              <ModeButton
+                value="memorial"
+                current={mode}
+                onClick={() => setMode("memorial")}
+                label="In memory"
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-ink-500">
+              Living — playful adventures starring your pet. In memory —
+              gentle recollections or a Rainbow Bridge story for a pet
+              who has passed.
+            </p>
+          </Field>
+        </div>
+
+        <div className="md:col-span-5">
+          <Field
+            label={`Reference photos (${photos.length}/${MAX_PHOTOS})`}
+            hint="The AI uses these on every page so the pet looks like the pet. 3–5 clear photos in different poses works best."
+          >
+            <div className="space-y-3">
+              {photos.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {photos.map((url) => (
+                    <div
+                      key={url}
+                      className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt={
+                          name.trim()
+                            ? `Reference photo of ${name.trim()}`
+                            : "Pet reference photo"
+                        }
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(url)}
+                        className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {photos.length < MAX_PHOTOS && (
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-sm font-medium text-ink-500 transition-colors hover:border-moss-500 hover:bg-cream-100">
+                  {uploading ? "Uploading…" : "+ Upload photos"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    disabled={uploading}
+                    onChange={handlePhotoPick}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
+          </Field>
+        </div>
       </div>
 
       <Field
@@ -319,7 +397,7 @@ export default function PetForm({ initial = null }: Props) {
           </span>
         </div>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {quirkRows.map((row, idx) => (
             <div key={idx} className="space-y-1">
               {row.fromBank ? (
@@ -367,7 +445,7 @@ export default function PetForm({ initial = null }: Props) {
           <button
             type="button"
             onClick={addCustomQuirk}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream-400 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-500 transition-colors hover:border-moss-500 hover:text-ink-900"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream-400 bg-cream-50 px-3 py-2 text-xs font-medium text-ink-500 transition-colors hover:border-moss-500 hover:text-ink-900 md:col-span-2"
           >
             <span aria-hidden="true" className="text-base leading-none">
               +
@@ -377,30 +455,8 @@ export default function PetForm({ initial = null }: Props) {
         </div>
       </section>
 
-      <Field label="Mode">
-        <div className="flex rounded-full border border-cream-300 bg-cream-50 p-1">
-          <ModeButton
-            value="living"
-            current={mode}
-            onClick={() => setMode("living")}
-            label="Living"
-          />
-          <ModeButton
-            value="memorial"
-            current={mode}
-            onClick={() => setMode("memorial")}
-            label="In memory"
-          />
-        </div>
-        <p className="mt-1.5 text-xs text-ink-500">
-          Living — playful adventures starring your pet. In memory —
-          gentle recollections or a Rainbow Bridge story for a pet who
-          has passed.
-        </p>
-      </Field>
-
       {mode === "memorial" && (
-        <>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field
             label="Passed away on"
             hint="Used for the memorial dedication page on printed books."
@@ -425,58 +481,8 @@ export default function PetForm({ initial = null }: Props) {
               className={`${inputCls} resize-none`}
             />
           </Field>
-        </>
-      )}
-
-      <Field
-        label={`Reference photos (${photos.length}/${MAX_PHOTOS})`}
-        hint="The AI uses these on every page so the pet looks like the pet. 3–5 clear photos in different poses works best."
-      >
-        <div className="space-y-3">
-          {photos.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {photos.map((url) => (
-                <div
-                  key={url}
-                  className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={url}
-                    alt={
-                      name.trim()
-                        ? `Reference photo of ${name.trim()}`
-                        : "Pet reference photo"
-                    }
-                    className="h-full w-full object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removePhoto(url)}
-                    className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          {photos.length < MAX_PHOTOS && (
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-sm font-medium text-ink-500 transition-colors hover:border-moss-500 hover:bg-cream-100">
-              {uploading ? "Uploading…" : "+ Upload photos"}
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={uploading}
-                onChange={handlePhotoPick}
-                className="hidden"
-              />
-            </label>
-          )}
         </div>
-      </Field>
-
+      )}
 
       {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
 
