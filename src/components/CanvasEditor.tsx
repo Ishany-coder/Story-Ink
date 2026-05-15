@@ -2,7 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   CANVAS_SIZE,
   type CustomLayout,
@@ -25,7 +32,22 @@ import { useAutoFitFontSize } from "./useAutoFitFontSize";
 import { useUndoableHistory } from "./useUndoableHistory";
 import ShapeRenderer from "./ShapeRenderer";
 import { ICONS, ICON_CATEGORIES, getIcon } from "@/lib/shapeIcons";
-import { Undo2, Redo2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Grid3X3,
+  Image as ImageIcon,
+  Layers,
+  LayoutTemplate,
+  Magnet,
+  Move,
+  Redo2,
+  Shapes,
+  Type,
+  Undo2,
+} from "lucide-react";
 import AIAssistantPanel from "./AIAssistantPanel";
 import {
   FONT_CATEGORY_LABELS,
@@ -42,7 +64,7 @@ import {
   type AlignAxis,
   type DistributeAxis,
 } from "./studio/align";
-import { snapForDrag, type SnapGuide } from "./studio/snapping";
+import { snapForGroupDrag, type SnapGuide } from "./studio/snapping";
 import { copyLayers, hasClipboard, pasteLayers, duplicateLayers } from "./studio/clipboard";
 import { reorderLayers } from "./studio/zorder";
 import { expandToGroups, isLayerSelectable, unionRect, rectsIntersect, layerAABB } from "./studio/selection";
@@ -62,6 +84,18 @@ interface CanvasEditorProps {
 }
 
 type SidebarTab = "layouts" | "text" | "shapes" | "images" | "layers" | "assistant";
+
+const TOOL_TABS: Array<{
+  id: Exclude<SidebarTab, "assistant">;
+  label: string;
+  Icon: typeof LayoutTemplate;
+}> = [
+  { id: "layouts", label: "Layouts", Icon: LayoutTemplate },
+  { id: "text", label: "Text", Icon: Type },
+  { id: "shapes", label: "Shapes", Icon: Shapes },
+  { id: "images", label: "Images", Icon: ImageIcon },
+  { id: "layers", label: "Layers", Icon: Layers },
+];
 
 // Compass points for resize handles. The edge the user grabs determines
 // which corner stays anchored and whether width/height grows positive or
@@ -391,7 +425,7 @@ function CanvasEditorDesktop({
   // action keep their previous reference, so a reference compare
   // tells us exactly which pages need re-saving.
   const markChangedPagesDirty = useCallback(
-    (current: typeof story.pages, restored: typeof story.pages) => {
+    (current: Story["pages"], restored: Story["pages"]) => {
       setDirty((d) => {
         const next = { ...d };
         for (let i = 0; i < restored.length; i++) {
@@ -450,6 +484,8 @@ function CanvasEditorDesktop({
   const [tab, setTab] = useState<SidebarTab>("layouts");
   const [drag, setDrag] = useState<Drag | null>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [gridVisible, setGridVisible] = useState(false);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [dirty, setDirty] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
@@ -786,6 +822,21 @@ function CanvasEditorDesktop({
     updatePageLayers(currentPage.pageNumber, (ls) => [...ls, ...dups]);
     setSelectedIds(new Set(dups.map((l) => l.id)));
   }, [currentPage, selectedLayers, snapshotPages, updatePageLayers]);
+
+  const nudgeSelected = useCallback(
+    (dx: number, dy: number) => {
+      if (!currentPage) return;
+      if (selectedIds.size === 0) return;
+      snapshotPages();
+      updatePageLayers(currentPage.pageNumber, (ls) =>
+        ls.map((l) =>
+          selectedIds.has(l.id) ? { ...l, x: l.x + dx, y: l.y + dy } : l
+        )
+      );
+      canvasRef.current?.focus();
+    },
+    [currentPage, selectedIds, snapshotPages, updatePageLayers]
+  );
 
   const selectAll = useCallback(() => {
     setSelectedIds(new Set(layers.filter(isLayerSelectable).map((l) => l.id)));
@@ -1402,9 +1453,10 @@ function CanvasEditorDesktop({
         let dy = (e.clientY - drag.startY) * scale;
         // Compute snap targets against the proposed bounding box. Skip
         // snapping when the user holds Alt (mirrors Canva: Alt = "I
-        // mean it, no snap"). Hidden / locked layers participate as
-        // anchors so users can align to them.
-        if (!e.altKey && currentPage) {
+        // mean it, no snap") or turns snapping off in the canvas
+        // controls. Hidden / locked layers participate as anchors so
+        // users can align to them.
+        if (snapEnabled && !e.altKey && currentPage) {
           const others = (currentPage.overlays ?? []).filter(
             (l) => !drag.starts.has(l.id)
           );
@@ -1414,13 +1466,7 @@ function CanvasEditorDesktop({
             width: drag.origBounds.width,
             height: drag.origBounds.height,
           };
-          const snap = snapForDrag(
-            // Use a synthetic Layer-like for snap's signature
-            { ...proposed, rotation: 0, id: "__moving__", type: "shape", shape: "rect", fill: "", stroke: "", strokeWidth: 0 } as unknown as Layer,
-            proposed.x,
-            proposed.y,
-            others
-          );
+          const snap = snapForGroupDrag(proposed, others);
           dx += snap.dx;
           dy += snap.dy;
           setSnapGuides(snap.guides);
@@ -1892,6 +1938,14 @@ function CanvasEditorDesktop({
     return "all changes saved";
   }, [saving, dirtyPageCount]);
 
+  const selectionBounds = useMemo(
+    () =>
+      selectedLayers.length > 0
+        ? unionRect(selectedLayers.map(layerAABB))
+        : null,
+    [selectedLayers]
+  );
+
   return (
     <>
       {/* The Studio is height-constrained to the viewport (minus the
@@ -2039,34 +2093,50 @@ function CanvasEditorDesktop({
           scrolling). */}
       <div className="grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)_280px] gap-3 md:gap-[14px] lg:grid-cols-[290px_minmax(0,1fr)_334px] lg:gap-[18px]">
         {/* Left: tools sidebar */}
-        <aside className="flex flex-col overflow-hidden rounded-[10px] border border-linen-200 bg-cream-50 p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-1">
-            {(
-              [
-                "layouts",
-                "text",
-                "shapes",
-                "images",
-                "layers",
-              ] as Exclude<SidebarTab, "assistant">[]
-            ).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                style={
-                  tab === t
-                    ? { background: "var(--color-bark-900)", color: "var(--color-cream-50)" }
-                    : undefined
-                }
-                className={`rounded-full px-3 py-[7px] text-[11px] font-semibold uppercase tracking-[.10em] transition-colors ${
-                  tab === t ? "" : "text-sage-700 hover:bg-cream-200"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
+        <aside className="flex overflow-hidden rounded-[10px] border border-linen-200 bg-cream-50">
+          <nav
+            aria-label="Studio tools"
+            className="flex w-[66px] shrink-0 flex-col items-center gap-1 border-r border-linen-200 bg-paper/70 px-2 py-3"
+          >
+            {TOOL_TABS.map(({ id, label, Icon }) => {
+              const active = tab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={active}
+                  style={
+                    active
+                      ? {
+                          background: "var(--color-bark-900)",
+                          color: "var(--color-cream-50)",
+                        }
+                      : undefined
+                  }
+                  className={`flex h-[54px] w-[50px] flex-col items-center justify-center gap-1 rounded-lg text-[9px] font-semibold uppercase tracking-[.04em] transition-colors ${
+                    active ? "" : "text-sage-700 hover:bg-cream-100 hover:text-bark-900"
+                  }`}
+                >
+                  <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="max-w-full truncate">{label}</span>
+                </button>
+              );
+            })}
+          </nav>
+          <div className="flex min-w-0 flex-1 flex-col p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-[.16em] text-stone-500">
+                  Tool
+                </div>
+                <h2 className="font-[family-name:var(--font-display)] text-[19px] font-semibold text-bark-900">
+                  {TOOL_TABS.find((t) => t.id === tab)?.label}
+                </h2>
+              </div>
+            </div>
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {tab === "layouts" && !defineMode && (
               <div>
@@ -2352,6 +2422,7 @@ function CanvasEditorDesktop({
               </div>
             )}
           </div>
+          </div>
         </aside>
 
         {/* Center: canvas. Plain frame, no surrounding panel — the page
@@ -2437,6 +2508,68 @@ function CanvasEditorDesktop({
               }
             />
           )}
+          {!defineMode && (
+            <div className="flex w-full max-w-[640px] flex-wrap items-center justify-between gap-2 rounded-lg border border-linen-200 bg-cream-50 px-2.5 py-2">
+              <div className="flex items-center gap-1">
+                <CanvasToggle
+                  label="Grid"
+                  title="Show grid overlay"
+                  active={gridVisible}
+                  onClick={() => setGridVisible((v) => !v)}
+                  icon={<Grid3X3 size={14} strokeWidth={1.8} />}
+                />
+                <CanvasToggle
+                  label="Snap"
+                  title="Snap while dragging"
+                  active={snapEnabled}
+                  onClick={() => setSnapEnabled((v) => !v)}
+                  icon={<Magnet size={14} strokeWidth={1.8} />}
+                />
+              </div>
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="hidden min-w-0 items-center gap-1 text-[10px] text-stone-500 lg:flex">
+                  <Move size={13} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="truncate">
+                    {selectionBounds
+                      ? `${selectedLayers.length} selected · X ${Math.round(
+                          selectionBounds.x
+                        )} · Y ${Math.round(selectionBounds.y)}`
+                      : "No selection"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-0.5 rounded-md border border-linen-200 bg-paper p-0.5">
+                  <NudgeButton
+                    title="Nudge left"
+                    disabled={selectedIds.size === 0}
+                    onClick={() => nudgeSelected(-1, 0)}
+                  >
+                    <ArrowLeft size={13} strokeWidth={1.8} />
+                  </NudgeButton>
+                  <NudgeButton
+                    title="Nudge up"
+                    disabled={selectedIds.size === 0}
+                    onClick={() => nudgeSelected(0, -1)}
+                  >
+                    <ArrowUp size={13} strokeWidth={1.8} />
+                  </NudgeButton>
+                  <NudgeButton
+                    title="Nudge down"
+                    disabled={selectedIds.size === 0}
+                    onClick={() => nudgeSelected(0, 1)}
+                  >
+                    <ArrowDown size={13} strokeWidth={1.8} />
+                  </NudgeButton>
+                  <NudgeButton
+                    title="Nudge right"
+                    disabled={selectedIds.size === 0}
+                    onClick={() => nudgeSelected(1, 0)}
+                  >
+                    <ArrowRight size={13} strokeWidth={1.8} />
+                  </NudgeButton>
+                </div>
+              </div>
+            </div>
+          )}
           <div
             ref={canvasRef}
             // tabIndex makes the canvas keyboard-focusable so screen-
@@ -2500,6 +2633,19 @@ function CanvasEditorDesktop({
               });
             }}
           >
+            {gridVisible && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  zIndex: 0,
+                  backgroundImage:
+                    "linear-gradient(to right, rgba(68,93,79,.16) 1px, transparent 1px), linear-gradient(to bottom, rgba(68,93,79,.16) 1px, transparent 1px)",
+                  backgroundSize: "6.25% 6.25%",
+                }}
+              />
+            )}
+
             {/* Page layers. Dimmed while the user is defining a new layout
                 so the two design rectangles read as the foreground. */}
             <div
@@ -3561,6 +3707,63 @@ function ToolbarBtn({
       onClick={onClick}
       disabled={disabled}
       className="flex h-6 w-6 items-center justify-center rounded text-stone-500 transition-colors hover:bg-cream-100 hover:text-bark-900 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function CanvasToggle({
+  label,
+  title,
+  active,
+  onClick,
+  icon,
+}: {
+  label: string;
+  title: string;
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold transition-colors ${
+        active
+          ? "bg-moss-700 text-cream-50"
+          : "border border-linen-200 bg-paper text-sage-700 hover:bg-cream-100 hover:text-bark-900"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function NudgeButton({
+  title,
+  onClick,
+  children,
+  disabled,
+}: {
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-6 w-6 items-center justify-center rounded text-sage-700 transition-colors hover:bg-cream-100 hover:text-bark-900 disabled:cursor-not-allowed disabled:opacity-35"
     >
       {children}
     </button>
@@ -4967,6 +5170,12 @@ function IconButton({
   onClick: () => void;
 }) {
   const Icon = getIcon(name);
+  const iconEl = Icon
+    ? createElement(Icon, {
+        strokeWidth: 2,
+        className: "h-full w-full",
+      })
+    : null;
   return (
     <button
       type="button"
@@ -4974,12 +5183,7 @@ function IconButton({
       title={name}
       className="flex aspect-square items-center justify-center rounded-lg border border-cream-300 bg-cream-50 p-1.5 text-ink-500 transition-all hover:scale-105 hover:border-moss-500 hover:bg-cream-200"
     >
-      {Icon && (
-        <Icon
-          strokeWidth={2}
-          className="h-full w-full"
-        />
-      )}
+      {iconEl}
     </button>
   );
 }

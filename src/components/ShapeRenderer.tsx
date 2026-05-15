@@ -1,5 +1,6 @@
 "use client";
 
+import { createElement } from "react";
 import type { ShapeLayer } from "@/lib/types";
 import { getIcon } from "@/lib/shapeIcons";
 
@@ -127,16 +128,14 @@ export default function ShapeRenderer({ layer }: { layer: ShapeLayer }) {
   if (layer.shape === "icon" && layer.iconName) {
     const Icon = getIcon(layer.iconName);
     if (!Icon) return null;
-    return (
-      <Icon
-        // Keep strokeWidth in a sensible range for Lucide's design grid
-        // (1–4 reads as thin–thick; anything above 8 breaks the path).
-        strokeWidth={Math.max(0.5, Math.min(8, layer.strokeWidth))}
-        color={layer.stroke}
-        fill={layer.fill === "transparent" ? "none" : layer.fill}
-        style={{ width: "100%", height: "100%" }}
-      />
-    );
+    return createElement(Icon, {
+      // Keep strokeWidth in a sensible range for Lucide's design grid
+      // (1–4 reads as thin–thick; anything above 8 breaks the path).
+      strokeWidth: Math.max(0.5, Math.min(8, layer.strokeWidth)),
+      color: layer.stroke,
+      fill: layer.fill === "transparent" ? "none" : layer.fill,
+      style: { width: "100%", height: "100%" },
+    });
   }
 
   if (layer.shape === "path" && layer.svgMarkup) {
