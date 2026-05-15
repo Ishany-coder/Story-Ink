@@ -33,6 +33,11 @@ import {
   buildPetDescription,
   composePetStoryPrompt,
 } from "@/lib/pet-prompt";
+import {
+  isValidStoryPageCount,
+  MAX_STORY_PAGES,
+  MIN_STORY_PAGES,
+} from "@/lib/story-page-count";
 import type { Layer, Pet, Story, StoryPage } from "@/lib/types";
 
 const TEXT_RETRIES = 2;
@@ -71,6 +76,29 @@ function isSafetyBlockError(err: unknown): boolean {
 // message verbatim.
 const SAFETY_BLOCK_USER_MESSAGE =
   "Your prompt was blocked by the safety filter. Please try a gentler wording — for example, avoid graphic injuries or distressing content.";
+
+function isPageCountConstraintError(err: {
+  message?: string;
+  code?: string;
+  constraint?: string;
+} | null): boolean {
+  // Postgres check-constraint violations surface as SQLSTATE 23514.
+  // We still match on constraint/message because Supabase error payloads
+  // can vary by client/runtime.
+  if (err?.constraint === "stories_page_count_check") return true;
+  if (err?.code === "23514" && err.message?.toLowerCase().includes("page_count")) {
+    return true;
+  }
+  const message = err?.message?.toLowerCase() ?? "";
+  return (
+    message.includes("stories_page_count_check") ||
+    (message.includes("page_count") && message.includes("check constraint"))
+  );
+}
+
+type SaveStoryResult =
+  | { storyId: string; fatalError: null }
+  | { storyId: null; fatalError: string };
 
 async function onInngestFailure(
   wrappedEvent: unknown,
@@ -307,17 +335,54 @@ export const generateStoryFn = inngest.createFunction(
       );
     }
 
-    const storyRow = await step.run("save-story", async () => {
-      const pages: StoryPage[] = scriptData.pages.map((page, i) => {
-        const imageUrl = imageUrls[i];
+    const pages: StoryPage[] = scriptData.pages.map((page, i) => {
+      const imageUrl = imageUrls[i];
+      return {
+        pageNumber: page.pageNumber,
+        text: page.text,
+        imageUrl,
+        layoutId: DEFAULT_LAYOUT_ID,
+        overlays: buildInitialOverlays(imageUrl, page.text),
+      };
+    });
+
+    await step.run("save-recovery-payload", async () => {
+      try {
+        await markProgress(jobId, {
+          phase: "save",
+          generatedStory: {
+            title: scriptData.title,
+            prompt,
+            pageCount,
+            pages,
+            coverImage: pages[0]?.imageUrl || null,
+            kind,
+            petId,
+            imageStyle,
+            isPublic,
+          },
+        });
+      } catch (err) {
+        // Best-effort only: save-story should still run even if this
+        // progress write fails, so we can avoid losing the story.
+        console.error("[inngest.generate] failed to persist recovery payload:", err);
+      }
+    });
+
+    const saveResult = await step.run("save-story", async (): Promise<SaveStoryResult> => {
+      if (!isValidStoryPageCount(pageCount)) {
         return {
-          pageNumber: page.pageNumber,
-          text: page.text,
-          imageUrl,
-          layoutId: DEFAULT_LAYOUT_ID,
-          overlays: buildInitialOverlays(imageUrl, page.text),
+          storyId: null,
+          fatalError: `Story generation requested ${pageCount} pages, but the current supported range is ${MIN_STORY_PAGES}-${MAX_STORY_PAGES}. This may indicate a configuration change — please contact support with job ID ${jobId}.`,
         };
-      });
+      }
+      if (pages.length !== pageCount) {
+        return {
+          storyId: null,
+          fatalError: `Story generation produced ${pages.length} pages but expected ${pageCount}. This indicates a generation bug — please contact support with job ID ${jobId}.`,
+        };
+      }
+
       const { data, error } = await supabaseAdmin()
         .from("stories")
         .insert({
@@ -334,16 +399,30 @@ export const generateStoryFn = inngest.createFunction(
         })
         .select("id")
         .single();
+
       if (error || !data) {
+        if (isPageCountConstraintError(error)) {
+          return {
+            storyId: null,
+            fatalError:
+              "Your story was generated, but saving failed because the database page-count rule is out of date. Please contact support with your job ID so they can rerun supabase/schema.sql and recover/retry save from the stored job payload.",
+          };
+        }
         throw new Error(`Supabase insert failed: ${error?.message}`);
       }
-      return { storyId: data.id as string };
+
+      return { storyId: data.id as string, fatalError: null };
     });
 
-    await step.run("mark-done", () =>
-      markDone(jobId, { storyId: storyRow.storyId })
-    );
-    return storyRow;
+    if (!saveResult.storyId) {
+      await step.run("mark-save-failed", () =>
+        markFailed(jobId, saveResult.fatalError)
+      );
+      return { storyId: null, error: saveResult.fatalError };
+    }
+
+    await step.run("mark-done", () => markDone(jobId, { storyId: saveResult.storyId }));
+    return { storyId: saveResult.storyId };
   }
 );
 

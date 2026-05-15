@@ -16,18 +16,19 @@ export default function HeroSection() {
     <div className="animate-rise-in flex flex-col items-center gap-5 text-center">
       <div className="flex flex-col items-center gap-2">
         <span className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
-          The fine art of pet storytelling
+          The fine art of personalized storytelling
         </span>
         <span className="block h-px w-12 bg-gold-500" />
       </div>
       <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold leading-[1.05] tracking-tight text-ink-900 sm:text-5xl lg:text-6xl">
         Storybooks{" "}
-        <em className="font-normal italic text-moss-700">starring your pet.</em>
+        <em className="font-normal italic text-moss-700">
+          starring the ones you love.
+        </em>
       </h1>
       <p className="max-w-xl text-sm leading-relaxed text-ink-500 sm:text-base lg:text-lg">
-        Hand-illustrated keepsakes built from your photos. Living
-        adventures or Rainbow Bridge memorials, printed as museum-grade
-        hardcovers.
+        Hand-illustrated keepsakes built from your story. Pets, kids,
+        family, milestones — printed as museum-grade hardcovers.
       </p>
       {showPricing && (
         <p className="max-w-xl text-xs leading-relaxed text-ink-300 sm:text-sm">

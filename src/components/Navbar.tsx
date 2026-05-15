@@ -3,6 +3,7 @@
 // without a flash, then hands off to the client-side tabs component
 // which uses usePathname() for active highlighting.
 
+import Image from "next/image";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
@@ -21,10 +22,20 @@ export default async function Navbar() {
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link
           href="/"
-          className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink-900 transition-colors hover:text-ink-700"
+          className="group flex items-center gap-2 font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-ink-900 transition-colors hover:text-ink-700"
         >
-          <span>Story</span>
-          <span className="text-moss-700">Ink</span>
+          <Image
+            src="/logo.png"
+            alt=""
+            width={40}
+            height={40}
+            priority
+            className="h-9 w-9 shrink-0 object-contain"
+          />
+          <span>
+            <span>Story</span>
+            <span className="text-moss-700">Ink</span>
+          </span>
         </Link>
 
         <div className="flex items-center gap-2 md:gap-4">
