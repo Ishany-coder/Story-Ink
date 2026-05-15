@@ -77,7 +77,18 @@ function isSafetyBlockError(err: unknown): boolean {
 const SAFETY_BLOCK_USER_MESSAGE =
   "Your prompt was blocked by the safety filter. Please try a gentler wording — for example, avoid graphic injuries or distressing content.";
 
-function isPageCountConstraintError(err: { message?: string } | null): boolean {
+function isPageCountConstraintError(err: {
+  message?: string;
+  code?: string;
+  constraint?: string;
+} | null): boolean {
+  // Postgres check-constraint violations surface as SQLSTATE 23514.
+  // We still match on constraint/message because Supabase error payloads
+  // can vary by client/runtime.
+  if (err?.constraint === "stories_page_count_check") return true;
+  if (err?.code === "23514" && err.message?.toLowerCase().includes("page_count")) {
+    return true;
+  }
   const message = err?.message?.toLowerCase() ?? "";
   return (
     message.includes("stories_page_count_check") ||
@@ -335,22 +346,28 @@ export const generateStoryFn = inngest.createFunction(
       };
     });
 
-    await step.run("save-recovery-payload", () =>
-      markProgress(jobId, {
-        phase: "save",
-        generatedStory: {
-          title: scriptData.title,
-          prompt,
-          pageCount,
-          pages,
-          coverImage: pages[0]?.imageUrl || null,
-          kind,
-          petId,
-          imageStyle,
-          isPublic,
-        },
-      })
-    );
+    await step.run("save-recovery-payload", async () => {
+      try {
+        await markProgress(jobId, {
+          phase: "save",
+          generatedStory: {
+            title: scriptData.title,
+            prompt,
+            pageCount,
+            pages,
+            coverImage: pages[0]?.imageUrl || null,
+            kind,
+            petId,
+            imageStyle,
+            isPublic,
+          },
+        });
+      } catch (err) {
+        // Best-effort only: save-story should still run even if this
+        // progress write fails, so we can avoid losing the story.
+        console.error("[inngest.generate] failed to persist recovery payload:", err);
+      }
+    });
 
     const saveResult = await step.run("save-story", async (): Promise<SaveStoryResult> => {
       if (!isValidStoryPageCount(pageCount)) {
@@ -399,7 +416,7 @@ export const generateStoryFn = inngest.createFunction(
 
     if (!saveResult.storyId) {
       await step.run("mark-save-failed", () =>
-        markFailed(jobId, new Error(saveResult.fatalError))
+        markFailed(jobId, saveResult.fatalError)
       );
       return { storyId: null, error: saveResult.fatalError };
     }
