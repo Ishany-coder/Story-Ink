@@ -181,102 +181,31 @@ export interface Story {
   // Auth & visibility (introduced when the app gained Supabase Auth).
   user_id?: string | null;
   is_public?: boolean;
-  // Pet vs. generic story (per-story toggle from creation form).
-  kind?: "pet" | "generic";
-  pet_id?: string | null;
-  // Art-style preset id (see src/lib/image-styles.ts). Default
-  // "watercolor". Stored so AI Assistant regenerations stay in style.
-  image_style?: string;
+  // V2 wizard outputs. Populated by /api/generate/v2 and surfaced
+  // through the Studio + Reader.
+  recipient_type?: RecipientType;
+  occasion?: Occasion;
+  art_style_id?: string;
+  story_tone?: StoryTone;
+  script?: Script;
+  cast_character_ids?: string[];
 }
 
-// ---------------------------------------------------------------------------
-// Pet types
-// ---------------------------------------------------------------------------
-
-export type PetSpecies =
-  | "dog"
-  | "cat"
-  | "bird"
-  | "rabbit"
-  | "horse"
-  | "reptile"
-  | "fish"
-  | "other";
-
-export const PET_SPECIES: PetSpecies[] = [
-  "dog",
-  "cat",
-  "bird",
-  "rabbit",
-  "horse",
-  "reptile",
-  "fish",
-  "other",
-];
-
-// "living" → playful, present-tense adventures. "memorial" → softer
-// celebratory recollection, with guardrails against jeopardy and
-// fan-fiction (per the user's spec).
-export type PetMode = "living" | "memorial";
-
-// One answered personality-DNA quirk. Stored as a question + answer
-// pair so users can pick from the curated bank in src/lib/quirk-bank.ts
-// OR write their own prompt (the "+ Add custom" path in the form).
-// The AI doesn't care which source produced the prompt — both render
-// the same way in the pet system prompt.
-export interface PetQuirk {
-  prompt: string;
-  answer: string;
-}
-
+// Pet type kept as a minimal stub for the legacy print pipeline path
+// (print-pdf.ts builds an optional memorial dedication page from a Pet
+// passed in by ship-fulfill.ts; V2 callers always pass null and the
+// dedication page is skipped). The full Pet type was removed in the
+// V2 cutover — none of these fields are populated for V2 stories.
 export interface Pet {
   id: string;
-  user_id: string;
+  user_id?: string | null;
   name: string;
-  species: PetSpecies;
-  breed: string | null;
-  age: string | null;
-  // Free-form notes seeded into every story prompt for this pet. Kept
-  // intentionally unstructured so users can write naturally.
-  personality_notes: string | null;
-  mode: PetMode;
-  passed_at: string | null; // ISO date string when mode === "memorial"
-  // Reference photo URLs (Supabase Storage). Capped at 10 in the API.
-  photos: string[];
-  // Structured personality DNA. See src/lib/quirk-bank.ts for the
-  // curated prompt list. Empty array means the user skipped this
-  // section.
-  quirks?: PetQuirk[];
-  // Optional override text for the memorial dedication page on print.
-  // Null falls back to the templated "In loving memory of {name},
-  // {dates}" when generating PDFs.
+  passed_at: string | null;
   dedication_text?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-// What the create form posts. user_id is filled in server-side from
-// the auth session, so it's not in the request body.
-export interface CreatePetInput {
-  name: string;
-  species: PetSpecies;
-  breed?: string | null;
-  age?: string | null;
-  personality_notes?: string | null;
-  mode: PetMode;
-  passed_at?: string | null;
-  photos?: string[];
-  quirks?: PetQuirk[];
-  dedication_text?: string | null;
-}
-
-export interface GenerateRequest {
-  prompt: string;
-  pageCount: number;
-}
-
-export interface GenerateResponse {
-  storyId: string;
+  // Always undefined for V2 stories; CanvasEditor uses it to gate the
+  // memorial layout preset, which V2 doesn't surface (memorial mode is
+  // per-book via stories.occasion now, not per-pet).
+  mode?: "living" | "memorial";
 }
 
 // Logical canvas dimensions used by the editor and the reader. All layer

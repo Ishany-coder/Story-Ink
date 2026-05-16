@@ -23,10 +23,8 @@ import {
   assistRegenerateText,
   classifyAssistIntent,
   generateCastPortrait,
-  generatePageImage,
   generatePageImageWithCastRefs,
   generateScript,
-  generateStoryText,
   GeminiRateLimitError,
   GeminiSafetyBlockedError,
   regeneratePageText,
@@ -38,16 +36,7 @@ import {
   uploadGeneratedImage,
 } from "@/lib/supabase";
 import { buildInitialOverlays, DEFAULT_LAYOUT_ID } from "@/lib/layouts";
-import {
-  buildPetDescription,
-  composePetStoryPrompt,
-} from "@/lib/pet-prompt";
-import {
-  isValidStoryPageCount,
-  MAX_STORY_PAGES,
-  MIN_STORY_PAGES,
-} from "@/lib/story-page-count";
-import type { Layer, Pet, Story, StoryPage } from "@/lib/types";
+import type { Layer, Story } from "@/lib/types";
 
 const TEXT_RETRIES = 2;
 const IMAGE_RETRIES = 3;
@@ -85,29 +74,6 @@ function isSafetyBlockError(err: unknown): boolean {
 // message verbatim.
 const SAFETY_BLOCK_USER_MESSAGE =
   "Your prompt was blocked by the safety filter. Please try a gentler wording — for example, avoid graphic injuries or distressing content.";
-
-function isPageCountConstraintError(err: {
-  message?: string;
-  code?: string;
-  constraint?: string;
-} | null): boolean {
-  // Postgres check-constraint violations surface as SQLSTATE 23514.
-  // We still match on constraint/message because Supabase error payloads
-  // can vary by client/runtime.
-  if (err?.constraint === "stories_page_count_check") return true;
-  if (err?.code === "23514" && err.message?.toLowerCase().includes("page_count")) {
-    return true;
-  }
-  const message = err?.message?.toLowerCase() ?? "";
-  return (
-    message.includes("stories_page_count_check") ||
-    (message.includes("page_count") && message.includes("check constraint"))
-  );
-}
-
-type SaveStoryResult =
-  | { storyId: string; fatalError: null }
-  | { storyId: null; fatalError: string };
 
 async function onInngestFailure(
   wrappedEvent: unknown,
@@ -154,7 +120,7 @@ async function fetchStoryAndPage(
   const { data, error } = await supabaseAdmin()
     .from("stories")
     .select(
-      "id, title, prompt, pages, ai_system_prompt, image_style, user_id"
+      "id, title, prompt, pages, ai_system_prompt, art_style_id, user_id"
     )
     .eq("id", storyId)
     .single<
@@ -165,7 +131,7 @@ async function fetchStoryAndPage(
         | "prompt"
         | "pages"
         | "ai_system_prompt"
-        | "image_style"
+        | "art_style_id"
       > & { user_id: string | null }
     >();
   if (error || !data) throw new Error("Story not found");
@@ -181,259 +147,6 @@ async function fetchStoryAndPage(
   return { story: data, page };
 }
 
-// --------------------------------------------------------------------------
-// story/generate.requested — full "make me a story" pipeline.
-// --------------------------------------------------------------------------
-
-export const generateStoryFn = inngest.createFunction(
-  {
-    id: "generate-story",
-    retries: IMAGE_RETRIES,
-    triggers: [{ event: EVENTS.generateStory }],
-    onFailure: async ({ event, error }) => onInngestFailure(event, error),
-  },
-  async ({ event, step }) => {
-    const {
-      jobId,
-      userId,
-      prompt,
-      pageCount,
-      kind = "generic",
-      petId = null,
-      imageMode = "quality",
-      isPublic = false,
-      imageStyle = "watercolor",
-    } = event.data as {
-      jobId: string;
-      userId: string;
-      prompt: string;
-      pageCount: number;
-      kind?: "pet" | "generic";
-      petId?: string | null;
-      imageMode?: "fast" | "quality";
-      isPublic?: boolean;
-      imageStyle?: string;
-    };
-    await step.run("mark-running", () => markRunning(jobId));
-
-    // Pet stories pull the full pet row up front so subsequent steps
-    // can reference its photos + personality without an extra fetch.
-    const pet = await step.run("fetch-pet", async (): Promise<Pet | null> => {
-      if (kind !== "pet" || !petId) return null;
-      const { data, error } = await supabaseAdmin()
-        .from("pets")
-        .select("*")
-        .eq("id", petId)
-        .eq("user_id", userId)
-        .maybeSingle<Pet>();
-      if (error) {
-        console.error("[inngest.generate] pet fetch failed:", error);
-        return null;
-      }
-      return data ?? null;
-    });
-
-    // For pet stories, prepend the pet's profile to the user prompt so
-    // the AI plans the story around the actual character. Generic
-    // stories pass the prompt through unchanged.
-    const composedPrompt = pet
-      ? composePetStoryPrompt(prompt, pet)
-      : prompt;
-    const petDescription = pet ? buildPetDescription(pet) : null;
-    const memorial = pet?.mode === "memorial";
-
-    const scriptData = await step.run("plan-story", async () => {
-      const storyText = await generateStoryText(composedPrompt, pageCount);
-      return {
-        title: storyText.title,
-        pages: storyText.pages.map((p) => ({
-          pageNumber: p.pageNumber,
-          text: p.text,
-        })),
-      };
-    });
-
-    // Image generation strategy. For a pet story in Quality mode we
-    // serialize pages so each one can pass the previous page's image
-    // AND the first page's image back to Gemini — that's how we lock
-    // the character's look across the whole book instead of letting it
-    // drift page-to-page. Fast mode (and all generic stories) fan out
-    // in parallel and only use reference photos.
-    const imageContextBase = {
-      referencePhotos: pet?.photos ?? [],
-      petDescription,
-      memorial,
-      styleId: imageStyle,
-    };
-
-    let imageUrls: string[];
-    if (kind === "pet" && imageMode === "quality") {
-      imageUrls = [];
-      let firstPageUrl: string | null = null;
-      for (const p of scriptData.pages) {
-        await step.run(`progress-${p.pageNumber}`, () =>
-          markProgress(jobId, {
-            current: p.pageNumber,
-            total: scriptData.pages.length,
-            phase: "image",
-          })
-        );
-        const previousPageUrl =
-          imageUrls.length > 0 ? imageUrls[imageUrls.length - 1] || null : null;
-        // Page 1 has no anchor yet — the photos do the grounding. Page
-        // 2..N pass page 1 (canonical) AND the immediately-previous
-        // page (style continuity), which bounds drift.
-        const isFirstPage = imageUrls.length === 0;
-        const url: string = await step
-          .run(`generate-page-image-${p.pageNumber}`, async () => {
-            const dataUri = await generatePageImage(p.text, scriptData.title, {
-              ...imageContextBase,
-              firstPageUrl: isFirstPage ? null : firstPageUrl,
-              previousPageUrl,
-            });
-            if (!dataUri) return "";
-            try {
-              return await uploadGeneratedImage(dataUri);
-            } catch (err) {
-              console.error(
-                `[inngest.generate] page ${p.pageNumber} upload failed:`,
-                err
-              );
-              return "";
-            }
-          })
-          .catch((err: unknown) => {
-            console.error(
-              `[inngest.generate] page ${p.pageNumber} gave up after retries:`,
-              err
-            );
-            return "";
-          });
-        imageUrls.push(url);
-        if (isFirstPage && url) firstPageUrl = url;
-      }
-    } else {
-      imageUrls = await Promise.all(
-        scriptData.pages.map((p) =>
-          step
-            .run(`generate-page-image-${p.pageNumber}`, async () => {
-              const dataUri = await generatePageImage(
-                p.text,
-                scriptData.title,
-                imageContextBase
-              );
-              if (!dataUri) return "";
-              try {
-                return await uploadGeneratedImage(dataUri);
-              } catch (err) {
-                console.error(
-                  `[inngest.generate] page ${p.pageNumber} upload failed:`,
-                  err
-                );
-                return "";
-              }
-            })
-            .catch((err: unknown) => {
-              console.error(
-                `[inngest.generate] page ${p.pageNumber} gave up after retries:`,
-                err
-              );
-              return "";
-            })
-        )
-      );
-    }
-
-    const pages: StoryPage[] = scriptData.pages.map((page, i) => {
-      const imageUrl = imageUrls[i];
-      return {
-        pageNumber: page.pageNumber,
-        text: page.text,
-        imageUrl,
-        layoutId: DEFAULT_LAYOUT_ID,
-        overlays: buildInitialOverlays(imageUrl, page.text),
-      };
-    });
-
-    await step.run("save-recovery-payload", async () => {
-      try {
-        await markProgress(jobId, {
-          phase: "save",
-          generatedStory: {
-            title: scriptData.title,
-            prompt,
-            pageCount,
-            pages,
-            coverImage: pages[0]?.imageUrl || null,
-            kind,
-            petId,
-            imageStyle,
-            isPublic,
-          },
-        });
-      } catch (err) {
-        // Best-effort only: save-story should still run even if this
-        // progress write fails, so we can avoid losing the story.
-        console.error("[inngest.generate] failed to persist recovery payload:", err);
-      }
-    });
-
-    const saveResult = await step.run("save-story", async (): Promise<SaveStoryResult> => {
-      if (!isValidStoryPageCount(pageCount)) {
-        return {
-          storyId: null,
-          fatalError: `Story generation requested ${pageCount} pages, but the current supported range is ${MIN_STORY_PAGES}-${MAX_STORY_PAGES}. This may indicate a configuration change — please contact support with job ID ${jobId}.`,
-        };
-      }
-      if (pages.length !== pageCount) {
-        return {
-          storyId: null,
-          fatalError: `Story generation produced ${pages.length} pages but expected ${pageCount}. This indicates a generation bug — please contact support with job ID ${jobId}.`,
-        };
-      }
-
-      const { data, error } = await supabaseAdmin()
-        .from("stories")
-        .insert({
-          title: scriptData.title,
-          prompt,
-          page_count: pageCount,
-          pages,
-          cover_image: pages[0]?.imageUrl || null,
-          user_id: userId,
-          is_public: isPublic,
-          kind,
-          pet_id: petId,
-          image_style: imageStyle,
-        })
-        .select("id")
-        .single();
-
-      if (error || !data) {
-        if (isPageCountConstraintError(error)) {
-          return {
-            storyId: null,
-            fatalError:
-              "Your story was generated, but saving failed because the database page-count rule is out of date. Please contact support with your job ID so they can rerun supabase/schema.sql and recover/retry save from the stored job payload.",
-          };
-        }
-        throw new Error(`Supabase insert failed: ${error?.message}`);
-      }
-
-      return { storyId: data.id as string, fatalError: null };
-    });
-
-    if (!saveResult.storyId) {
-      await step.run("mark-save-failed", () =>
-        markFailed(jobId, saveResult.fatalError)
-      );
-      return { storyId: null, error: saveResult.fatalError };
-    }
-
-    await step.run("mark-done", () => markDone(jobId, { storyId: saveResult.storyId }));
-    return { storyId: saveResult.storyId };
-  }
-);
 
 // --------------------------------------------------------------------------
 // story/regen-text.requested — rewrite a single page's narration.
@@ -581,7 +294,7 @@ export const assistImageFn = inngest.createFunction(
         pageText: page.text,
         userPrompt: prompt,
         currentImageUrl: page.imageUrl,
-        styleId: story.image_style ?? null,
+        styleId: story.art_style_id ?? null,
       });
       return uploadGeneratedImage(dataUri);
     });
@@ -689,7 +402,7 @@ export const assistInferFn = inngest.createFunction(
                 pageText: page.text,
                 userPrompt: prompt,
                 currentImageUrl: page.imageUrl,
-                styleId: story.image_style ?? null,
+                styleId: story.art_style_id ?? null,
               });
               return uploadGeneratedImage(dataUri);
             })
@@ -1206,7 +919,6 @@ export const regenerateCastPortraitFn = inngest.createFunction(
 );
 
 export const allFunctions = [
-  generateStoryFn,
   regenTextFn,
   assistTextFn,
   assistImageFn,

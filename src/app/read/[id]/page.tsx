@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 // serialized to the client — those leak the owning user's identity and
 // any private notes the owner has stashed in the system prompt.
 const PUBLIC_COLUMNS =
-  "id, title, page_count, pages, cover_image, image_style, is_public, digital_unlocked, created_at";
+  "id, title, page_count, pages, cover_image, art_style_id, is_public, digital_unlocked, created_at";
 
 interface StoryRowWithOwner {
   id: string;
@@ -28,7 +28,7 @@ interface StoryRowWithOwner {
   page_count: number;
   pages: Story["pages"];
   cover_image: string | null;
-  image_style: string;
+  art_style_id: string;
   is_public: boolean;
   digital_unlocked: boolean;
   created_at: string;

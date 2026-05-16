@@ -38,12 +38,6 @@ const TABS: Tab[] = [
     flag: "characters",
   },
   {
-    label: "Pets",
-    href: "/pets",
-    matches: (p) => p.startsWith("/pets"),
-    flag: "pets",
-  },
-  {
     label: "Read",
     href: "/read",
     matches: (p) => p.startsWith("/read"),

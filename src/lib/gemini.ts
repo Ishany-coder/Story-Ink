@@ -1,6 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { fetchWithTimeout, isAllowedContentUrl, withTimeout } from "@/lib/http";
-import { getImageStyle, type ImageStyleId } from "@/lib/image-styles";
 import { assertGeminiGlobalCap } from "@/lib/rate-limit";
 
 export { GeminiDailyCapExceededError } from "@/lib/rate-limit";
@@ -55,101 +54,6 @@ function parseJsonResponse(raw: string): unknown {
   }
 }
 
-export interface StoryTextResult {
-  title: string;
-  pages: { pageNumber: number; text: string }[];
-}
-
-function isStoryTextResult(v: unknown, pageCount: number): v is StoryTextResult {
-  if (!v || typeof v !== "object") return false;
-  const o = v as Record<string, unknown>;
-  if (typeof o.title !== "string" || !o.title.trim()) return false;
-  if (!Array.isArray(o.pages) || o.pages.length !== pageCount) return false;
-  for (let i = 0; i < o.pages.length; i++) {
-    const p = o.pages[i] as Record<string, unknown> | undefined;
-    if (!p || typeof p !== "object") return false;
-    if (typeof p.pageNumber !== "number") return false;
-    if (typeof p.text !== "string" || !p.text.trim()) return false;
-  }
-  return true;
-}
-
-export async function generateStoryText(
-  prompt: string,
-  pageCount: number
-): Promise<StoryTextResult> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
-    generationConfig: {
-      responseMimeType: "application/json",
-    },
-  });
-
-  const buildPrompt = (reprompt: boolean) =>
-    `You are a children's storybook author. Given the user's idea, write a storybook with exactly ${pageCount} pages.
-
-Return a JSON object with this exact structure:
-{
-  "title": "Story Title",
-  "pages": [
-    { "pageNumber": 1, "text": "Page 1 story text (2-4 vivid, whimsical sentences suitable for illustration)..." }
-  ]
-}
-
-Make the story whimsical, engaging, and rich with visual imagery. Each page should paint a clear scene.
-
-${
-  reprompt
-    ? "IMPORTANT: your previous response was not valid JSON. Respond with ONLY the raw JSON object — no code fences, no prose, no markdown. Start with { and end with }. "
-    : ""
-}User's idea: ${prompt}`;
-
-  const generate = async (reprompt: boolean) =>
-    withGeminiRetry(
-      async () => {
-        const r = await withTimeout(
-          model.generateContent(buildPrompt(reprompt)),
-          GEMINI_TEXT_TIMEOUT_MS,
-          "generateStoryText"
-        );
-        assertSafeFinish(r, "generateStoryText");
-        return r;
-      },
-      { label: "generateStoryText" }
-    );
-
-  // One retry on malformed JSON with an explicit "respond with bare JSON"
-  // reprompt. If the second pass also fails, bubble up so the Inngest
-  // function marks the job failed and the user gets a real error rather
-  // than a silently-broken story.
-  let raw: string;
-  let parsed: unknown;
-  try {
-    const res = await generate(false);
-    raw = res.response.text();
-    parsed = parseJsonResponse(raw);
-  } catch (err) {
-    if (!(err instanceof LlmJsonParseError)) throw err;
-    console.warn(
-      "[gemini] generateStoryText returned non-JSON, reprompting. head:",
-      err.raw.slice(0, 200)
-    );
-    const res = await generate(true);
-    raw = res.response.text();
-    parsed = parseJsonResponse(raw);
-  }
-
-  if (!isStoryTextResult(parsed, pageCount)) {
-    console.error(
-      "[gemini] generateStoryText schema mismatch. parsed:",
-      JSON.stringify(parsed)?.slice(0, 400)
-    );
-    throw new Error(
-      `Gemini returned a story in an unexpected shape (expected ${pageCount} pages).`
-    );
-  }
-  return parsed;
-}
 
 export async function regeneratePageText(
   storyTitle: string,
@@ -196,214 +100,6 @@ ${context}`
   return parsed.text;
 }
 
-// Reference photos for visual grounding. Used by pet stories so the
-// pet in every illustrated page actually looks like the user's pet.
-//
-// Cross-page identity lock-in:
-//  - `firstPageUrl` (page 2..N): the canonical illustration that
-//    page 1 produced. Drift accumulates a lot less if every page
-//    after page 1 is anchored to page 1, not just to its immediate
-//    predecessor.
-//  - `previousPageUrl` (page 2..N): the page just before this one,
-//    for art-style continuity inside the run.
-//
-// Both are passed only in Quality mode. Fast mode skips them and
-// just uses reference photos in parallel.
-export interface PageImageContext {
-  // Pet reference photos (Supabase Storage URLs). Up to 10.
-  referencePhotos?: string[];
-  // First page's image — passed on every page after page 1 as the
-  // canonical visual anchor for the pet. Bounds drift.
-  firstPageUrl?: string | null;
-  // Immediately preceding page's image — passed on every page after
-  // page 1 for art-style continuity.
-  previousPageUrl?: string | null;
-  // Pet description seeded into the prompt so the model knows what
-  // it's drawing even when references fail to fetch.
-  petDescription?: string | null;
-  // Memorial mode softens the visual mood.
-  memorial?: boolean;
-  // Art-style preset id (see src/lib/image-styles.ts). Defaults to
-  // watercolor when omitted.
-  styleId?: ImageStyleId | string | null;
-}
-
-export async function generatePageImage(
-  pageText: string,
-  storyTitle: string,
-  context: PageImageContext = {}
-): Promise<string> {
-  try {
-    const model = genAI.getGenerativeModel({
-      // Gemini 3.1 Flash Image — current fast image generation model.
-      model: "gemini-3.1-flash-image-preview",
-    });
-
-    // Style preset (default watercolor). The selected preset's prompt
-    // fragment is the literal sentence the model sees, so we store it
-    // verbatim — see src/lib/image-styles.ts for the canonical list.
-    const style = getImageStyle(context.styleId ?? null);
-    const memorialMoodNote = context.memorial
-      ? "Mood: tender, nostalgic, gentle, reverent."
-      : "Mood: warm, observational, full of small specific detail.";
-
-    // Identity lock-in is the difference between "AI book tools where
-    // the dog turns into a different dog by page 4" and a keepsake
-    // worth printing. We anchor the model with explicit language and,
-    // in quality mode, with the first page + previous page images.
-    const introLines: string[] = [
-      `Create a single high-fidelity, professionally illustrated children's storybook page for the book titled "${storyTitle}".`,
-      `ABSOLUTE RULE: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. Illustration only — narration is overlaid separately.`,
-    ];
-    if (context.petDescription) {
-      introLines.push(
-        `The main character is a REAL pet the user knows: ${context.petDescription}. Likeness is the most important thing in this image. Match the actual pet from the reference photos — fur color, fur pattern and markings, eye color, ear shape, body proportions, breed-specific features. Do not generalize. Do not invent a different-looking version.`
-      );
-    }
-    const hasFirst = !!context.firstPageUrl;
-    const hasPrev = !!context.previousPageUrl;
-    if (hasFirst || hasPrev) {
-      const lockLines: string[] = [];
-      if (hasFirst) {
-        lockLines.push(
-          "The FIRST attached image is the canonical illustration from page 1 of this same book — that is exactly how the character is supposed to look in this whole book. Treat it as a character sheet."
-        );
-      }
-      if (hasPrev) {
-        lockLines.push(
-          `The ${hasFirst ? "second" : "first"} attached image is the previous page's illustration — match its art style, palette, lighting, and character details exactly.`
-        );
-      }
-      lockLines.push(
-        "DO NOT redesign the character between pages. Same fur, same markings, same proportions, same coat — every page."
-      );
-      introLines.push(lockLines.join(" "));
-    }
-    introLines.push(`Scene to illustrate: ${pageText}`);
-    introLines.push(
-      `${style.prompt} ${memorialMoodNote} High-fidelity, fully resolved illustration — no rough sketches, no placeholder shapes, no watermark. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`
-    );
-    const intro = introLines.join("\n\n");
-
-    // Build the multimodal parts list. Order matters for Gemini —
-    // putting reference imagery before the text prompt makes it more
-    // likely the model treats them as authoritative grounding.
-    // We push in priority order: page 1 (canonical), previous page
-    // (style continuity), then up to a few reference photos.
-    const parts: Array<
-      | { text: string }
-      | { inlineData: { mimeType: string; data: string } }
-    > = [];
-
-    if (context.firstPageUrl) {
-      const first = await fetchImageAsInlineData(context.firstPageUrl);
-      if (first) parts.push({ inlineData: first });
-    }
-    if (context.previousPageUrl) {
-      const prev = await fetchImageAsInlineData(context.previousPageUrl);
-      if (prev) parts.push({ inlineData: prev });
-    }
-    for (const photoUrl of context.referencePhotos ?? []) {
-      const inline = await fetchImageAsInlineData(photoUrl);
-      if (inline) parts.push({ inlineData: inline });
-      // Cap parts list at ~6 images of context to keep the request
-      // reasonable — the SDK is fine with more, but token cost climbs.
-      if (parts.length >= 6) break;
-    }
-
-    parts.push({ text: intro });
-
-    const result = await withGeminiRetry(
-      async () => {
-        const r = await withTimeout(
-          model.generateContent({
-            contents: [{ role: "user", parts }],
-            generationConfig: {
-              // responseModalities isn't in @google/generative-ai@0.24.1's types,
-              // but the SDK forwards unknown generationConfig fields to the API.
-              // @ts-expect-error - field not declared in legacy SDK types
-              responseModalities: ["IMAGE", "TEXT"],
-            },
-          }),
-          GEMINI_IMAGE_TIMEOUT_MS,
-          "generatePageImage"
-        );
-        assertSafeFinish(r, "generatePageImage");
-        return r;
-      },
-      { label: "generatePageImage" }
-    );
-
-    const respParts = result.response.candidates?.[0]?.content?.parts;
-    if (respParts) {
-      for (const part of respParts) {
-        if (part.inlineData?.data) {
-          return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-        }
-      }
-    }
-
-    console.error(
-      "[gemini] image response contained no inlineData. parts:",
-      JSON.stringify(respParts, null, 2)
-    );
-    return generatePlaceholder(pageText);
-  } catch (err) {
-    // Re-throw safety blocks so the Inngest function's onFailure
-    // handler can map them to a user-facing "rewrite your prompt"
-    // message. The placeholder image fallback is only appropriate
-    // for transient infra failures — a content block is the user's
-    // fault and we want them to know.
-    if (err instanceof GeminiSafetyBlockedError) throw err;
-    console.error("[gemini] image generation failed:", err);
-    return generatePlaceholder(pageText);
-  }
-}
-
-function generatePlaceholder(pageText: string): string {
-  const colors = [
-    ["#1e3a5f", "#2d5a87"],
-    ["#3d1f56", "#5a3478"],
-    ["#1f4f3d", "#2d7a5a"],
-    ["#5f3a1e", "#875a2d"],
-    ["#4a1942", "#6b2d5a"],
-  ];
-  const [c1, c2] = colors[Math.abs(hashCode(pageText)) % colors.length];
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="768" height="768">
-    <defs>
-      <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" style="stop-color:${c1}"/>
-        <stop offset="100%" style="stop-color:${c2}"/>
-      </linearGradient>
-    </defs>
-    <rect width="768" height="768" fill="url(#g)"/>
-    <text x="384" y="384" text-anchor="middle" dominant-baseline="middle" font-family="serif" font-size="48" fill="rgba(255,255,255,0.15)">StoryInk</text>
-  </svg>`;
-
-  return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
-}
-
-// ---------------------------------------------------------------------------
-// AI Assistant helpers
-//
-// Used by the Studio's Assistant panel to regenerate a single page's text or
-// image from a freeform user prompt. The "system prompt" passed in is
-// already the composite of the user's global prompt (localStorage) and the
-// story's per-story prompt (stories.ai_system_prompt), concatenated by the
-// API route before calling these.
-// ---------------------------------------------------------------------------
-
-// Wrap a Gemini call so we automatically retry on HTTP 429 (rate limit) with
-// exponential backoff. Free-tier quotas are small and bursty — the Studio's
-// /ai/infer route fires up to 3 Gemini calls back-to-back, which can clip the
-// per-minute limit even when the user's pace is reasonable. Two retries with
-// 2s → 5s backoff recovers from those transient throttles without making the
-// user feel the app is slow.
-//
-// When all retries exhaust, the original 429 is rethrown with a clearer
-// message so the route handler can surface "please wait a minute" instead of
-// a generic failure.
 export class GeminiRateLimitError extends Error {
   constructor(message = "Gemini rate limit hit — try again in a minute.") {
     super(message);
@@ -669,7 +365,7 @@ export interface AssistRegenerateImageArgs {
   currentImageUrl?: string | null;
   // Story's chosen art style. Gets folded into the prompt so the
   // regenerated image stays in the same look as the rest of the book.
-  styleId?: ImageStyleId | string | null;
+  styleId?: string | null;
 }
 
 export async function assistRegenerateImage(
@@ -682,7 +378,14 @@ export async function assistRegenerateImage(
   const imageInline = await fetchImageAsInlineData(args.currentImageUrl);
   const hasCurrent = imageInline !== null;
 
-  const style = getImageStyle(args.styleId ?? null);
+  // styleId is a V2 art_styles.id (e.g. "whimsy_watercolor"). The
+  // assistant doesn't currently look that up — it relies on the
+  // attached image to keep the regenerated page in style. A generic
+  // style note is sufficient here; full per-style prompt scaffolds
+  // live in `public.art_styles.prompt_scaffold` and are applied by
+  // the main generator in src/inngest/functions.ts.
+  const styleNote =
+    "Painterly children's storybook illustration matching the look and feel of the attached page.";
 
   const intro = [
     `${buildAssistantPreamble(args.systemPrompt)}${
@@ -693,7 +396,7 @@ export async function assistRegenerateImage(
     `CRITICAL: The output image must contain ZERO text, ZERO letters, ZERO words, ZERO captions, ZERO writing of any kind. This is an illustration only — narration is overlaid separately.`,
     `Scene on this page: ${args.pageText}`,
     `The user's specific request for this illustration: ${args.userPrompt}`,
-    `${style.prompt} High-fidelity finished illustration. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
+    `${styleNote} High-fidelity finished illustration. REMINDER: absolutely NO text, letters, words, captions, signs, or writing anywhere in the image.`,
   ].join("\n\n");
 
   const parts = imageInline
@@ -842,16 +545,6 @@ Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "
     console.error("[gemini] classifyAssistIntent failed:", err);
     return ["text", "image"];
   }
-}
-
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return hash;
 }
 
 // ---------------------------------------------------------------------------

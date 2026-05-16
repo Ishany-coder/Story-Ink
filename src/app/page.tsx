@@ -1,12 +1,12 @@
 import Link from "next/link";
 import HeroSection from "@/components/HeroSection";
-import HomeCreate from "@/components/HomeCreate";
 import BookCard from "@/components/BookCard";
 import LandingPage from "@/components/LandingPage";
 import ResumeDraftCard from "@/components/ResumeDraftCard";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import { listDraftsForUser } from "@/lib/drafts";
-import type { Pet } from "@/lib/types";
+import { listCharactersForUser } from "@/lib/characters";
+import type { Character } from "@/lib/types";
 
 export const revalidate = 0;
 
@@ -37,12 +37,8 @@ export default async function Home() {
   }
 
   const supa = await getSupabaseServer();
-  const [petsRes, storiesRes, drafts] = await Promise.all([
-    supa
-      .from("pets")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
+  const [characters, storiesRes, drafts] = await Promise.all([
+    listCharactersForUser(user.id).catch(() => [] as Character[]),
     supa
       .from("stories")
       .select("id, title, prompt, cover_image, page_count, created_at")
@@ -51,7 +47,6 @@ export default async function Home() {
     listDraftsForUser(user.id).catch(() => []),
   ]);
 
-  const pets = (petsRes.data ?? []) as Pet[];
   const stories = (storiesRes.data ?? []) as StoryRow[];
   const dashboardMode = stories.length >= DASHBOARD_THRESHOLD;
 
@@ -62,7 +57,13 @@ export default async function Home() {
       ) : (
         <section className="animate-rise-in mx-auto flex max-w-3xl flex-col items-center gap-8">
           <HeroSection />
-          <HomeCreate pets={pets} />
+          <Link
+            href="/create/new"
+            className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-6 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+          >
+            <PlusIcon />
+            Start a book
+          </Link>
         </section>
       )}
 
@@ -124,30 +125,34 @@ export default async function Home() {
         style={{ animationDelay: "200ms" }}
       >
         <SectionHeading
-          title="Your pets"
+          title="Your characters"
           subtitle={
-            pets.length === 0
-              ? "Add a pet so the AI knows the star of the show."
-              : `${pets.length} ${pets.length === 1 ? "pet" : "pets"}`
+            characters.length === 0
+              ? "Add a person or pet — they become the stars of your books."
+              : `${characters.length} ${
+                  characters.length === 1 ? "character" : "characters"
+                }`
           }
-          actionLabel={pets.length > 0 ? "Manage pets" : "Add a pet"}
-          actionHref={pets.length > 0 ? "/pets" : "/pets/new"}
+          actionLabel={
+            characters.length > 0 ? "Manage characters" : "Add a character"
+          }
+          actionHref={
+            characters.length > 0 ? "/characters" : "/characters/new"
+          }
         />
-        {pets.length > 0 && (
+        {characters.length > 0 && (
           <div className="mt-6 flex flex-wrap gap-3">
-            {pets.map((p) => (
+            {characters.map((c) => (
               <Link
-                key={p.id}
-                href={`/pets/${p.id}`}
+                key={c.id}
+                href={`/characters/${c.id}`}
                 className="flex items-center gap-3 rounded-full border border-cream-300 bg-cream-50 px-3 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-cream-400 hover:bg-cream-100"
               >
-                <PetAvatarLite pet={p} />
-                <span>{p.name}</span>
-                {p.mode === "memorial" && (
-                  <span className="rounded-full bg-gold-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.15em] text-gold-900">
-                    In memory
-                  </span>
-                )}
+                <CharacterAvatarLite character={c} />
+                <span>{c.name}</span>
+                <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-ink-300">
+                  {c.kind}
+                </span>
               </Link>
             ))}
           </div>
@@ -202,23 +207,23 @@ function PlusIcon() {
   );
 }
 
-// Lightweight inline version of PetAvatar so the home page doesn't
-// pull a client component just to show 28px circles in the pet row.
-function PetAvatarLite({ pet }: { pet: Pet }) {
-  const photo = pet.photos[0] ?? null;
+// 28px circle avatar for the character row on the home page. Inline
+// here so the home page doesn't need a client component for it.
+function CharacterAvatarLite({ character }: { character: Character }) {
+  const photo = character.reference_photo_urls[0] ?? null;
   if (photo) {
     return (
       <div className="h-7 w-7 overflow-hidden rounded-full bg-cream-200">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={photo}
-          alt={pet.name}
+          alt={character.name}
           className="h-full w-full object-cover"
         />
       </div>
     );
   }
-  const initial = pet.name.trim().charAt(0).toUpperCase() || "?";
+  const initial = character.name.trim().charAt(0).toUpperCase() || "?";
   return (
     <div className="flex h-7 w-7 items-center justify-center rounded-full bg-moss-100 text-xs font-semibold text-moss-700">
       {initial}
