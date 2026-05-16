@@ -60,20 +60,34 @@ function occasionFrame(occasion: Occasion, hasPetOnly: boolean): string {
 
 function recipientLabel(r: RecipientType): string {
   switch (r) {
-    case "partner":
-      return "your romantic partner";
     case "child":
       return "your child";
+    case "baby":
+      return "your baby";
+    case "partner":
+      return "your romantic partner";
     case "parent":
-      return "your parent";
+      return "your mom or dad";
+    case "niece_nephew":
+      return "your niece or nephew";
     case "sibling":
       return "your sibling";
     case "friend":
       return "your friend";
-    case "self":
-      return "yourself";
+    case "grandparent":
+      return "your grandparent";
     case "pet":
       return "your pet";
+    case "aunt":
+      return "your aunt";
+    case "uncle":
+      return "your uncle";
+    case "cousin":
+      return "your cousin";
+    case "family":
+      return "your family";
+    case "self":
+      return "yourself";
     case "other":
     default:
       return "someone you love";

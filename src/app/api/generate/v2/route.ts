@@ -11,7 +11,9 @@ import type {
 } from "@/lib/types";
 
 const VALID_RECIPIENTS: RecipientType[] = [
-  "partner", "child", "parent", "sibling", "friend", "self", "pet", "other",
+  "child", "baby", "partner", "parent", "niece_nephew", "sibling",
+  "friend", "grandparent", "pet", "aunt", "uncle", "cousin",
+  "family", "self", "other",
 ];
 const VALID_OCCASIONS: Occasion[] = [
   "birthday", "anniversary", "memorial", "just_because", "graduation", "holiday", "new_baby", "other",

@@ -14,15 +14,33 @@ import type {
   WizardPayload,
 } from "@/lib/types";
 
-const RECIPIENTS: { id: RecipientType; label: string }[] = [
-  { id: "partner", label: "Partner" },
-  { id: "child", label: "Child" },
-  { id: "parent", label: "Parent" },
-  { id: "sibling", label: "Sibling" },
-  { id: "friend", label: "Friend" },
-  { id: "self", label: "Self" },
-  { id: "pet", label: "Pet" },
-  { id: "other", label: "Other" },
+interface RecipientTile {
+  id: RecipientType;
+  label: string;
+  // Relative URL into /public/recipient-samples/<id>.webp.
+  imageUrl?: string;
+}
+
+// Primary tiles render as illustrated cards in a 3-column grid.
+const PRIMARY_RECIPIENTS: RecipientTile[] = [
+  { id: "child", label: "My Child", imageUrl: "/recipient-samples/child.webp" },
+  { id: "baby", label: "My Baby", imageUrl: "/recipient-samples/baby.webp" },
+  { id: "partner", label: "Partner / Spouse", imageUrl: "/recipient-samples/partner.webp" },
+  { id: "parent", label: "Mom / Dad", imageUrl: "/recipient-samples/parent.webp" },
+  { id: "niece_nephew", label: "Niece / Nephew", imageUrl: "/recipient-samples/niece_nephew.webp" },
+  { id: "sibling", label: "My Sibling", imageUrl: "/recipient-samples/sibling.webp" },
+  { id: "friend", label: "My Friend", imageUrl: "/recipient-samples/friend.webp" },
+  { id: "grandparent", label: "Grandma / Grandpa", imageUrl: "/recipient-samples/grandparent.webp" },
+  { id: "pet", label: "My Pet", imageUrl: "/recipient-samples/pet.webp" },
+];
+
+// Secondary tiles render as compact pills under "More options…".
+const MORE_RECIPIENTS: RecipientTile[] = [
+  { id: "aunt", label: "Aunt" },
+  { id: "uncle", label: "Uncle" },
+  { id: "cousin", label: "Cousin" },
+  { id: "family", label: "Family" },
+  { id: "self", label: "Myself" },
 ];
 
 const OCCASIONS: { id: Occasion; label: string }[] = [
@@ -122,29 +140,69 @@ export default function WizardClient({
   // ---- Per-step rendering ------------------------------------------------
 
   if (step === 1) {
+    const moreSelected = MORE_RECIPIENTS.some(
+      (r) => r.id === payload.recipientType
+    );
     return (
       <StepShell
         step={1}
         totalSteps={totalSteps}
         title="Who is this book for?"
-        subtitle="Pick the relationship that fits best."
         onNext={() => setStep(2)}
         nextDisabled={!payload.recipientType}
       >
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {RECIPIENTS.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => set({ recipientType: r.id })}
-              className={`p-4 rounded border text-center ${
-                payload.recipientType === r.id ? "bg-black text-white" : "bg-white"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {PRIMARY_RECIPIENTS.map((r) => {
+            const selected = payload.recipientType === r.id;
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => set({ recipientType: r.id })}
+                className={`text-left rounded-lg border bg-white overflow-hidden transition ${
+                  selected ? "ring-2 ring-black" : "hover:shadow-sm"
+                }`}
+              >
+                <div className="aspect-[4/3] bg-stone-100">
+                  {r.imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={r.imageUrl}
+                      alt={r.label}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+                <div className="p-3 text-center text-sm font-medium">
+                  {r.label}
+                </div>
+              </button>
+            );
+          })}
         </div>
+
+        <details className="mt-6" open={moreSelected}>
+          <summary className="cursor-pointer text-sm font-medium text-stone-700 mb-3 select-none">
+            More options…
+          </summary>
+          <div className="flex flex-wrap gap-2 pt-2">
+            {MORE_RECIPIENTS.map((r) => {
+              const selected = payload.recipientType === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => set({ recipientType: r.id })}
+                  className={`px-4 py-2 rounded-full border text-sm ${
+                    selected ? "bg-black text-white border-black" : "bg-white"
+                  }`}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+        </details>
       </StepShell>
     );
   }

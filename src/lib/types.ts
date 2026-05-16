@@ -262,13 +262,20 @@ export interface ArtStyle {
 }
 
 export type RecipientType =
-  | "partner"
   | "child"
+  | "baby"
+  | "partner"
   | "parent"
+  | "niece_nephew"
   | "sibling"
   | "friend"
-  | "self"
+  | "grandparent"
   | "pet"
+  | "aunt"
+  | "uncle"
+  | "cousin"
+  | "family"
+  | "self"
   | "other";
 
 export type Occasion =
