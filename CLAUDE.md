@@ -34,6 +34,30 @@ There is no test runner configured.
 
 Uptime probe lives at `GET /api/health` — returns `{ ok, supabase, stripe, email, gemini }` with 200 when every required dependency is configured + 503 otherwise. The handler is deliberately cheap (env-presence checks only, no DB ping) — point monitors at it directly, do not add expensive work here.
 
+## Going to production
+
+Local dev sidesteps a few things that **must** be turned back on / set up correctly before the first real user hits the site. None of the below are code — they're Supabase dashboard, Resend dashboard, and DNS work.
+
+### Email (Supabase Auth → Resend)
+
+In dev, signup is usually run with one of two shortcuts so you don't have to wait on DNS:
+
+1. **"Confirm email" disabled** in Supabase → Authentication → Sign In / Up → Email — signup creates a confirmed user with no email sent, OR
+2. **Sender email = `onboarding@resend.dev`** (Resend's shared sandbox) — emails deliver but the `From:` header is Resend, not StoryInk.
+
+Both must be undone before launch. Full walkthrough in `docs/email-deployment.md`; the short prod-readiness checklist:
+
+- [ ] `storyink.ai` shows **green Verified** on every DNS record in **Resend → Domains**. Cloudflare proxy must be **OFF (gray cloud)** on the DKIM CNAMEs or the chain breaks.
+- [ ] **Supabase → Authentication → Emails → SMTP Settings** points at `smtp.resend.com` port `587`, username `resend`, password = a Resend API key with **Send** scope (the one in `SUPABASE_AUTH_SMTP_PASS` in `.env.example` if you've stashed it there).
+- [ ] **Sender email = `help@storyink.ai`** (or whatever production address). **Sender name = `StoryInk`** in the separate field — never put `"StoryInk <help@storyink.ai>"` into the Sender email field, Resend rejects malformed `MAIL FROM`.
+- [ ] **Confirm email** toggled back **ON** in Supabase → Authentication → Sign In / Up → Email.
+- [ ] **Site URL** under Authentication → URL Configuration is set to the **production URL** (not `http://localhost:3000`), and any preview/staging hosts are in **Additional Redirect URLs**. Without this, the link inside the confirmation email points at localhost and breaks on click.
+- [ ] All four branded HTML templates from `supabase/email-templates/*.html` are pasted into the matching slots in **Authentication → Email Templates** with subject lines set (suggestions in `supabase/email-templates/README.md`).
+- [ ] Auth email rate limit raised from the default 30/hour under **Authentication → Rate Limits → Number of emails per hour** (Resend's free tier handles way more than 30/hr, so Supabase's own throttle is now the bottleneck).
+- [ ] DMARC policy in DNS moved from `p=quarantine` to `p=reject` only **after 2–4 weeks** of clean DMARC reports — going straight to `p=reject` silently drops your own mail if SPF/DKIM has a subtle misalignment.
+
+Smoke test: real signup from a Gmail + an Outlook + an iCloud inbox. All three must land in Inbox (not Spam), `From:` line shows `help@storyink.ai`, and the confirmation CTA opens production (not localhost).
+
 ## Environment
 
 `.env.local` keys actually consumed by the code:
