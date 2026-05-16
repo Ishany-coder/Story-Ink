@@ -774,7 +774,7 @@ function CanvasEditorDesktop({
     );
     if (hasLayoutImage && hasLayoutText) return;
 
-    const resolved = resolveDisplayLayers(currentPage);
+    const resolved = resolveDisplayLayers(currentPage, story.default_text_size);
     setStory((prev) => ({
       ...prev,
       pages: prev.pages.map((p) =>
@@ -788,7 +788,7 @@ function CanvasEditorDesktop({
       ),
     }));
     setDirty((d) => ({ ...d, [currentPage.pageNumber]: true }));
-  }, [currentPage]);
+  }, [currentPage, story.default_text_size]);
 
   // ---- Layer mutations -----------------------------------------------------
 

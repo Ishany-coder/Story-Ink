@@ -88,7 +88,13 @@ alter table public.stories
   add column if not exists story_tone text default 'classic'
     check (story_tone in ('classic','rhyming')),
   add column if not exists script jsonb,
-  add column if not exists cast_character_ids uuid[] not null default '{}';
+  add column if not exists cast_character_ids uuid[] not null default '{}',
+  -- Per-story upper cap for AutoFitText on layout-source text overlays.
+  -- Null means "use the codebase default" (currently 38). Set via the
+  -- wizard's Step 6 text-size picker so authors can tune legibility per
+  -- book (e.g. younger reader = larger, denser narration = smaller).
+  add column if not exists default_text_size int
+    check (default_text_size is null or (default_text_size between 16 and 72));
 
 -- Digital purchase flag. When true, anyone with the story's link can
 -- read all pages (paid digital tier). When false, non-owners see only

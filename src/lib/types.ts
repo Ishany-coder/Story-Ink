@@ -189,6 +189,9 @@ export interface Story {
   story_tone?: StoryTone;
   script?: Script;
   cast_character_ids?: string[];
+  // Logical-pixel upper cap for AutoFitText on layout-source text. Null /
+  // undefined means "use the codebase default" (DEFAULT_LAYOUT_TEXT_SIZE).
+  default_text_size?: number | null;
 }
 
 // Pet type kept as a minimal stub for the legacy print pipeline path
@@ -300,6 +303,9 @@ export interface WizardPayload {
   storyTone?: StoryTone;
   pageCount?: number;
   title?: string;
+  // Picked from the wizard's text-size segment. Persisted to
+  // stories.default_text_size and threaded through to makeLayoutText.
+  defaultTextSize?: number;
 }
 
 export interface StoryDraft {

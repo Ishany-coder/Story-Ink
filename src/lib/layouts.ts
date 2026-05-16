@@ -101,7 +101,10 @@ export function getLayout(
 // before the layout system have no layout-tagged layers — synthesize them
 // ephemerally from page.imageUrl + page.text so the reader and editor always
 // render a consistent image + text. User-added layers pass through unchanged.
-export function resolveDisplayLayers(page: StoryPage): Layer[] {
+export function resolveDisplayLayers(
+  page: StoryPage,
+  defaultTextSize?: number | null
+): Layer[] {
   const existing = page.overlays ?? [];
   const hasLayoutImage = existing.some(
     (l) => l.source === "layout" && l.type === "image"
@@ -119,7 +122,11 @@ export function resolveDisplayLayers(page: StoryPage): Layer[] {
   }
   if (!hasLayoutText && page.text) {
     synthesized.push(
-      makeLayoutText(page.text, computeInitialTextRegion(page.text, layout))
+      makeLayoutText(
+        page.text,
+        computeInitialTextRegion(page.text, layout),
+        defaultTextSize
+      )
     );
   }
 
@@ -141,9 +148,15 @@ export function makeLayoutImage(src: string, region: import("./types").Rect): Im
   };
 }
 
+// Codebase default for the AutoFitText cap on layout-source text. Per-
+// story overrides flow in via stories.default_text_size (set on Step 6
+// of the wizard).
+export const DEFAULT_LAYOUT_TEXT_SIZE = 38;
+
 export function makeLayoutText(
   text: string,
-  region: import("./types").Rect
+  region: import("./types").Rect,
+  defaultTextSize?: number | null
 ): TextLayer {
   return {
     id: `layout-text-${region.x}-${region.y}`,
@@ -155,10 +168,9 @@ export function makeLayoutText(
     height: region.height,
     rotation: 0,
     // Acts as a cap — AutoFitText shrinks below this to fit the box, and
-    // grows back up to here when the box is large enough. Sized for a
-    // children's-storybook reading age (~38 logical px on an 800px canvas
-    // ≈ 4.75% of canvas height); long passages auto-shrink to fit.
-    fontSize: 38,
+    // grows back up to here when the box is large enough. Per-story
+    // override wins; otherwise DEFAULT_LAYOUT_TEXT_SIZE.
+    fontSize: defaultTextSize ?? DEFAULT_LAYOUT_TEXT_SIZE,
     color: "#1f1147",
     fontFamily: "var(--font-display), serif",
     fontWeight: "bold",
@@ -267,11 +279,15 @@ export function morphLayersToLayout(layers: Layer[], layout: Layout): Layer[] {
 // Build the default overlays set for a freshly generated page: one layout
 // image + one layout text. Used by /api/generate so the studio opens with
 // everything already in place.
-export function buildInitialOverlays(imageUrl: string, text: string): Layer[] {
+export function buildInitialOverlays(
+  imageUrl: string,
+  text: string,
+  defaultTextSize?: number | null
+): Layer[] {
   const layout = getLayout(DEFAULT_LAYOUT_ID);
   const textRegion = computeInitialTextRegion(text, layout);
   const overlays: Layer[] = [];
   if (imageUrl) overlays.push(makeLayoutImage(imageUrl, layout.imageRegion));
-  if (text) overlays.push(makeLayoutText(text, textRegion));
+  if (text) overlays.push(makeLayoutText(text, textRegion, defaultTextSize));
   return overlays;
 }
