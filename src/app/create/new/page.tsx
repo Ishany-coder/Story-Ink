@@ -33,7 +33,7 @@ export default async function CreateNewPage({ searchParams }: Props) {
   const styles = (stylesResult.data ?? []) as ArtStyle[];
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-8">
+    <main className="max-w-3xl mx-auto px-4 py-6">
       <WizardClient
         draft={draft}
         initialCharacters={characters as Character[]}

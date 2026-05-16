@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import ExampleBooksGallery from "@/components/ExampleBooksGallery";
 import StepShell from "./StepShell";
 import type {
   ArtStyle,
@@ -92,6 +91,12 @@ export default function WizardClient({
   const [payload, setPayload] = useState<WizardPayload>(draft.payload ?? {});
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Step 3 in-place delete: holds the character pending confirmation
+  // (null = modal closed) plus a flag to debounce against double-fire
+  // while the DELETE request is in flight.
+  const [pendingDelete, setPendingDelete] = useState<Character | null>(null);
+  const [deletingCharacter, setDeletingCharacter] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   // Step 1's "Custom storybook" inline panel toggle.
   const [customOpen, setCustomOpen] = useState<boolean>(
     () => (draft.payload?.recipientType === "other") && Boolean(draft.payload?.outline)
@@ -125,41 +130,124 @@ export default function WizardClient({
   const set = (patch: Partial<WizardPayload>) =>
     setPayload((p) => ({ ...p, ...patch }));
 
-  // Helper: pick a recipient + immediately move to step 2. Used by every
-  // tile in step 1 since the spec requires single-tap navigation.
   // When the user arrives at a step via a "click summary card" from step 7,
-  // any forward navigation (auto-advance, Next, Continue, Skip) snaps back
-  // to step 7 instead of marching through the wizard linearly. Back/Cancel
-  // also returns to 7. Cleared on review return.
+  // any forward navigation (Next, Skip) snaps back to step 7 instead of
+  // marching through the wizard linearly. Back also returns to 7. Cleared
+  // on review return.
   const [returnToReview, setReturnToReview] = useState(false);
+
+  // Browser-back integration: each forward step push adds a history entry
+  // tagged with { wizardStep }. The popstate listener mirrors browser
+  // navigation back into React state so hitting the browser Back arrow
+  // walks the user back through wizard steps instead of leaving the page.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Tag the initial entry so popstate from a later step can recognize
+    // it as wizard state. replaceState avoids polluting history.
+    const existing = window.history.state;
+    if (!existing || typeof existing.wizardStep !== "number") {
+      window.history.replaceState(
+        { ...(existing ?? {}), wizardStep: step },
+        ""
+      );
+    }
+    const onPopState = (e: PopStateEvent) => {
+      const s = e.state?.wizardStep;
+      if (typeof s === "number" && s >= 1 && s <= totalSteps) {
+        setStep(s);
+        // Landing back on review via browser-back clears the edit
+        // affordance — otherwise a subsequent Next would loop back to 7.
+        if (s === 7) setReturnToReview(false);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+    // Intentionally mount-only — `step` updates flow through React state
+    // separately; the listener reads from history events directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const navigateForward = useCallback((target: number) => {
+    if (typeof window !== "undefined") {
+      window.history.pushState({ wizardStep: target }, "");
+    }
+    setStep(target);
+  }, []);
+
+  // For in-UI Back, prefer history.back() so the wizard's history stack
+  // collapses naturally and a subsequent browser Back continues to the
+  // step before. Falls back to setStep when there's no wizard entry to
+  // pop (defensive — should not happen after the mount-effect tags state).
+  const navigateBack = useCallback((fallback: number) => {
+    if (
+      typeof window !== "undefined" &&
+      window.history.state?.wizardStep
+    ) {
+      window.history.back();
+    } else {
+      setStep(fallback);
+    }
+  }, []);
 
   const goNext = (target: number) => {
     if (returnToReview) {
       setReturnToReview(false);
-      setStep(7);
+      navigateForward(7);
     } else {
-      setStep(target);
+      navigateForward(target);
     }
   };
 
   const goBack = (target: number) => {
     if (returnToReview) {
       setReturnToReview(false);
-      setStep(7);
+      navigateForward(7);
     } else {
-      setStep(target);
+      navigateBack(target);
     }
   };
 
   const editFromReview = (originStep: number) => {
     setReturnToReview(true);
-    setStep(originStep);
+    navigateForward(originStep);
   };
 
-  const pickRecipientAndAdvance = (id: RecipientType) => {
-    set({ recipientType: id });
-    goNext(2);
+  const selectRecipient = (id: RecipientType) => {
+    // Picking a tile only updates selection; advancing is done via the
+    // top-right Next button so the user can change their mind without
+    // bouncing between steps. Clearing `outline` here keeps the custom
+    // storybook state from leaking into a templated pick.
+    set({ recipientType: id, outline: undefined });
+    setCustomOpen(false);
   };
+
+  async function confirmDeleteCharacter() {
+    if (!pendingDelete) return;
+    setDeletingCharacter(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/characters/${pendingDelete.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const deletedId = pendingDelete.id;
+      // Drop from the local character list and from any selection
+      // payload so the next render no longer shows the tile or counts
+      // it toward the cast.
+      setCharacters((prev) => prev.filter((c) => c.id !== deletedId));
+      const currentCast = payload.castCharacterIds ?? [];
+      if (currentCast.includes(deletedId)) {
+        set({
+          castCharacterIds: currentCast.filter((id) => id !== deletedId),
+        });
+      }
+      setPendingDelete(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "delete failed");
+    } finally {
+      setDeletingCharacter(false);
+    }
+  }
 
   // Refresh character list (used when user returns from /characters/new).
   useEffect(() => {
@@ -213,32 +301,47 @@ export default function WizardClient({
     const moreSelected = MORE_RECIPIENTS.some(
       (r) => r.id === payload.recipientType
     );
+    // Top-right Next is gated on having a selection. The "other" custom
+    // path additionally requires a non-empty outline since the AI has
+    // nothing to work with otherwise.
+    const nextDisabled =
+      !payload.recipientType ||
+      (payload.recipientType === "other" && !customDraft.trim());
     return (
       <StepShell
         step={1}
         totalSteps={totalSteps}
         title="Who is this book for?"
+        onNext={() => {
+          if (payload.recipientType === "other") {
+            // Commit the custom textarea text on advance.
+            set({ outline: customDraft.trim() });
+          }
+          goNext(2);
+        }}
+        nextAtTop
+        nextDisabled={nextDisabled}
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
-          setStep(7);
+          navigateBack(7);
         }}
       >
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-3 gap-2.5">
           {PRIMARY_RECIPIENTS.map((r) => {
             const selected = payload.recipientType === r.id;
             return (
               <button
                 key={r.id}
                 type="button"
-                onClick={() => pickRecipientAndAdvance(r.id)}
+                onClick={() => selectRecipient(r.id)}
                 className={`text-left rounded-2xl border bg-cream-50 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
                   selected
                     ? "border-moss-500 ring-2 ring-moss-700 bg-moss-100/40"
                     : "border-cream-300"
                 }`}
               >
-                <div className="aspect-[4/3] bg-cream-100">
+                <div className="aspect-[3/2] bg-cream-100">
                   {r.imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -248,7 +351,7 @@ export default function WizardClient({
                     />
                   )}
                 </div>
-                <div className="p-3 text-center text-sm font-medium text-ink-900">
+                <div className="px-2 py-1.5 text-center text-sm font-medium text-ink-900">
                   {r.label}
                 </div>
               </button>
@@ -256,19 +359,19 @@ export default function WizardClient({
           })}
         </div>
 
-        <details className="mt-6" open={moreSelected}>
-          <summary className="cursor-pointer text-sm font-medium text-ink-700 mb-3 select-none">
+        <details className="mt-4" open={moreSelected}>
+          <summary className="cursor-pointer text-sm font-medium text-ink-700 mb-2 select-none">
             More options…
           </summary>
-          <div className="flex flex-wrap gap-2 pt-2">
+          <div className="flex flex-wrap gap-2 pt-1">
             {MORE_RECIPIENTS.map((r) => {
               const selected = payload.recipientType === r.id;
               return (
                 <button
                   key={r.id}
                   type="button"
-                  onClick={() => pickRecipientAndAdvance(r.id)}
-                  className={`px-4 py-2 rounded-full border text-sm transition ${
+                  onClick={() => selectRecipient(r.id)}
+                  className={`px-4 py-1.5 rounded-full border text-sm transition ${
                     selected
                       ? "bg-moss-100/60 border-moss-500 text-moss-900 ring-2 ring-moss-700"
                       : "bg-cream-50 border-cream-300 text-ink-700 hover:border-gold-500"
@@ -282,15 +385,27 @@ export default function WizardClient({
         </details>
 
         {/* Custom storybook — distinct from the templates above. Opens an
-            inline textarea; on Continue the freeform prompt is stored in
-            payload.outline and we fall back to the "other" recipient
+            inline textarea; advancing via the top-right Next stores the
+            freeform prompt in payload.outline under the "other" recipient
             sentinel since the user isn't picking from the catalog. */}
-        <div className="mt-6">
+        <div className="mt-4">
           <button
             type="button"
-            onClick={() => setCustomOpen((v) => !v)}
-            className={`w-full text-left rounded-2xl border bg-cream-50 px-5 py-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
-              customOpen
+            onClick={() => {
+              const next = !customOpen;
+              setCustomOpen(next);
+              if (next) {
+                // Opening custom flips the selection so Next reflects the
+                // user's actual intent.
+                set({ recipientType: "other" });
+              } else if (payload.recipientType === "other") {
+                // Closing it clears the custom selection so the user
+                // isn't trapped in "other" without a visible textarea.
+                set({ recipientType: undefined, outline: undefined });
+              }
+            }}
+            className={`w-full text-left rounded-2xl border bg-cream-50 px-4 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
+              customOpen || payload.recipientType === "other"
                 ? "border-moss-500 ring-2 ring-moss-700"
                 : "border-cream-300"
             }`}
@@ -298,7 +413,7 @@ export default function WizardClient({
           >
             <div className="flex items-start gap-3">
               <span
-                className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-gold-100 text-gold-900 shrink-0"
+                className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-gold-100 text-gold-900 shrink-0"
                 aria-hidden="true"
               >
                 <svg
@@ -314,10 +429,10 @@ export default function WizardClient({
                 </svg>
               </span>
               <div className="flex-1">
-                <div className="font-[family-name:var(--font-display)] text-lg text-ink-900">
+                <div className="font-[family-name:var(--font-display)] text-base text-ink-900">
                   Custom storybook
                 </div>
-                <p className="text-sm text-ink-500 mt-0.5">
+                <p className="text-xs text-ink-500 mt-0.5">
                   None of the above? Describe the book you want in your own
                   words.
                 </p>
@@ -326,48 +441,16 @@ export default function WizardClient({
           </button>
 
           {customOpen && (
-            <div className="mt-3 rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5">
-              <label className="block text-sm font-medium text-ink-700 mb-2">
-                Describe your storybook
-              </label>
+            <div className="mt-2 rounded-2xl border border-cream-300 bg-cream-50 p-3 sm:p-4">
               <textarea
                 value={customDraft}
                 onChange={(e) => setCustomDraft(e.target.value)}
-                rows={6}
+                rows={3}
                 className="w-full rounded-xl border border-cream-300 bg-white p-3 text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
                 placeholder="A whimsical book about my best friend Sam, his vintage Vespa, and the imaginary city he commutes to every morning…"
               />
-              <div className="mt-3 flex items-center justify-end">
-                <button
-                  type="button"
-                  disabled={!customDraft.trim()}
-                  onClick={() => {
-                    set({
-                      // "other" is the closest existing RecipientType
-                      // sentinel — it's already in the API allowlist and
-                      // recipientLabel falls back to "someone you love",
-                      // which fits a freeform prompt.
-                      recipientType: "other",
-                      outline: customDraft.trim(),
-                    });
-                    goNext(2);
-                  }}
-                  className="px-6 py-2 bg-moss-700 text-cream-50 rounded-xl font-medium hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Continue
-                </button>
-              </div>
             </div>
           )}
-        </div>
-
-        {/* Sample storybook covers so the first-time user can see what
-            kind of artifact they're about to build. Lives on Step 1
-            because that's the moment of greatest "what am I doing
-            here?" uncertainty. Subsequent steps assume the user has
-            committed to the flow. */}
-        <div className="mt-10">
-          <ExampleBooksGallery compact />
         </div>
       </StepShell>
     );
@@ -381,6 +464,10 @@ export default function WizardClient({
         title="What's the occasion?"
         subtitle="Pick one — or skip if it doesn't apply."
         onBack={() => goBack(1)}
+        onNext={() => goNext(3)}
+        nextAtTop
+        nextDisabled={!payload.occasion}
+        nextLabel={returnToReview ? "Save changes" : "Next"}
         onSkip={() => {
           // Honor "Skip" by clearing any prior occasion selection.
           set({ occasion: undefined });
@@ -389,7 +476,7 @@ export default function WizardClient({
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
-          setStep(7);
+          navigateBack(7);
         }}
       >
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -399,10 +486,7 @@ export default function WizardClient({
               <button
                 key={o.id}
                 type="button"
-                onClick={() => {
-                  set({ occasion: o.id });
-                  goNext(3);
-                }}
+                onClick={() => set({ occasion: o.id })}
                 className={`group flex flex-col items-center justify-center gap-2 p-5 rounded-2xl border bg-cream-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
                   selected
                     ? "border-moss-500 ring-2 ring-moss-700 bg-moss-100/40"
@@ -434,6 +518,9 @@ export default function WizardClient({
 
   if (step === 3) {
     const selectedIds = new Set(payload.castCharacterIds ?? []);
+    const addHref = `/characters/new?next=${encodeURIComponent(
+      `/create/new?draft=${draft.id}`
+    )}`;
     return (
       <StepShell
         step={3}
@@ -442,82 +529,133 @@ export default function WizardClient({
         subtitle="Add at least one character. Their photos let the AI keep them looking like them on every page."
         onBack={() => goBack(2)}
         onNext={() => goNext(4)}
+        nextAtTop
         nextLabel={returnToReview ? "Save changes" : "Next"}
         nextDisabled={(payload.castCharacterIds ?? []).length === 0}
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
-          setStep(7);
+          navigateBack(7);
         }}
       >
-        <div className="space-y-4">
-          {characters.length === 0 && (
-            <div className="border border-cream-300 rounded-2xl p-6 text-center bg-cream-50">
-              <p className="text-ink-700 mb-3">
-                You haven&apos;t added any characters yet.
-              </p>
-              <Link
-                href={`/characters/new?next=${encodeURIComponent(
-                  `/create/new?draft=${draft.id}`
-                )}`}
-                className="px-4 py-2 bg-moss-700 text-cream-50 rounded-xl inline-block hover:bg-moss-900 transition"
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {characters.map((c) => {
+            const selected = selectedIds.has(c.id);
+            return (
+              // Tile is a positioned wrapper rather than a single
+              // <button> because the delete affordance needs to be a
+              // sibling button; nesting buttons is invalid HTML.
+              <div
+                key={c.id}
+                className={`relative rounded-2xl border bg-cream-50 overflow-hidden transition ${
+                  selected
+                    ? "border-moss-500 ring-2 ring-moss-700"
+                    : "border-cream-300 hover:border-gold-500"
+                }`}
               >
-                Add your first character
-              </Link>
-            </div>
-          )}
-          {characters.length > 0 && (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {characters.map((c) => {
-                  const selected = selectedIds.has(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => {
-                        const next = new Set(selectedIds);
-                        if (selected) next.delete(c.id);
-                        else next.add(c.id);
-                        set({ castCharacterIds: Array.from(next) });
-                      }}
-                      className={`text-left rounded-2xl border bg-cream-50 overflow-hidden transition ${
-                        selected
-                          ? "border-moss-500 ring-2 ring-moss-700"
-                          : "border-cream-300 hover:border-gold-500"
-                      }`}
-                    >
-                      <div className="aspect-square bg-cream-100">
-                        {c.reference_photo_urls[0] && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={c.reference_photo_urls[0]}
-                            alt={c.name}
-                            className="w-full h-full object-cover"
-                          />
-                        )}
-                      </div>
-                      <div className="p-2 text-sm">
-                        <div className="font-medium text-ink-900">{c.name}</div>
-                        <div className="text-ink-300 uppercase text-xs tracking-wide">
-                          {c.kind}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = new Set(selectedIds);
+                    if (selected) next.delete(c.id);
+                    else next.add(c.id);
+                    set({ castCharacterIds: Array.from(next) });
+                  }}
+                  className="block w-full text-left"
+                  aria-pressed={selected}
+                  aria-label={`${selected ? "Deselect" : "Select"} ${c.name}`}
+                >
+                  <div className="aspect-square bg-cream-100">
+                    {c.reference_photo_urls[0] && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={c.reference_photo_urls[0]}
+                        alt={c.name}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                  </div>
+                  <div className="p-2 text-sm">
+                    <div className="font-medium text-ink-900">{c.name}</div>
+                    <div className="text-ink-300 uppercase text-xs tracking-wide">
+                      {c.kind}
+                    </div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteError(null);
+                    setPendingDelete(c);
+                  }}
+                  aria-label={`Delete ${c.name}`}
+                  title={`Delete ${c.name}`}
+                  className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-cream-50/95 text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    className="h-4 w-4"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  </svg>
+                </button>
               </div>
-              <Link
-                href={`/characters/new?next=${encodeURIComponent(
-                  `/create/new?draft=${draft.id}`
-                )}`}
-                className="inline-block text-moss-700 hover:text-moss-900 underline-offset-4 hover:underline font-medium"
-              >
-                + Add another character
-              </Link>
-            </>
-          )}
+            );
+          })}
+          {/* Empty dashed tile that sits in the grid alongside the
+              character tiles. Acts as the only "add character"
+              affordance now that we've dropped the bottom text link. */}
+          <Link
+            href={addHref}
+            className="group flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-cream-300 bg-cream-50/40 text-ink-500 transition hover:border-moss-700 hover:bg-moss-100/40 hover:text-moss-900"
+            aria-label="Add another character"
+          >
+            <div className="aspect-square w-full flex flex-col items-center justify-center gap-2">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-current">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  className="h-5 w-5"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <span className="text-sm font-medium">
+                {characters.length === 0
+                  ? "Add your first character"
+                  : "Add another character"}
+              </span>
+            </div>
+          </Link>
         </div>
+
+        {pendingDelete && (
+          <DeleteCharacterModal
+            character={pendingDelete}
+            deleting={deletingCharacter}
+            error={deleteError}
+            onCancel={() => {
+              if (deletingCharacter) return;
+              setPendingDelete(null);
+              setDeleteError(null);
+            }}
+            onConfirm={confirmDeleteCharacter}
+          />
+        )}
       </StepShell>
     );
   }
@@ -532,11 +670,12 @@ export default function WizardClient({
         subtitle="What's the story about? Add any specific moments or details that should appear."
         onBack={() => goBack(3)}
         onNext={() => goNext(5)}
+        nextAtTop
         nextLabel={returnToReview ? "Save changes" : "Next"}
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
-          setStep(7);
+          navigateBack(7);
         }}
         nextDisabled={!payload.outline?.trim()}
       >
@@ -565,10 +704,14 @@ export default function WizardClient({
         title="Pick your art style"
         subtitle="Choose how you'd like your story illustrated."
         onBack={() => goBack(4)}
+        onNext={() => goNext(6)}
+        nextAtTop
+        nextLabel={returnToReview ? "Save changes" : "Next"}
+        nextDisabled={!payload.artStyleId}
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
-          setStep(7);
+          navigateBack(7);
         }}
       >
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -578,10 +721,7 @@ export default function WizardClient({
               <button
                 key={s.id}
                 type="button"
-                onClick={() => {
-                  set({ artStyleId: s.id });
-                  goNext(6);
-                }}
+                onClick={() => set({ artStyleId: s.id })}
                 className={`text-left rounded-2xl border bg-cream-50 overflow-hidden transition ${
                   selected
                     ? "border-moss-500 ring-2 ring-moss-700"
@@ -620,16 +760,17 @@ export default function WizardClient({
         subtitle="Pick a preset, or fine-tune the slider."
         onBack={() => goBack(5)}
         onNext={() => goNext(7)}
+        nextAtTop
         nextLabel={returnToReview ? "Save changes" : "Continue"}
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
-          setStep(7);
+          navigateBack(7);
         }}
       >
         <div className="rounded-2xl border border-cream-300 bg-cream-50 p-5 sm:p-6 space-y-6">
-          {/* Segmented preset chips. Tapping advances to step 7 since
-              the user has expressed a clear, complete preference. */}
+          {/* Segmented preset chips. Tapping selects the value; the
+              user advances via the top Next button. */}
           <div>
             <div className="text-xs uppercase tracking-[0.18em] text-ink-300 mb-2">
               Quick presets
@@ -641,10 +782,7 @@ export default function WizardClient({
                   <button
                     key={n}
                     type="button"
-                    onClick={() => {
-                      set({ pageCount: n });
-                      goNext(7);
-                    }}
+                    onClick={() => set({ pageCount: n })}
                     className={`px-4 py-2 rounded-full border text-sm font-medium transition ${
                       selected
                         ? "bg-moss-700 text-cream-50 border-moss-700"
@@ -775,7 +913,7 @@ export default function WizardClient({
       totalSteps={totalSteps}
       title="Ready to generate?"
       subtitle="Review your inputs. You'll get to approve the cast portraits before pages render."
-      onBack={() => setStep(6)}
+      onBack={() => goBack(6)}
       onNext={generate}
       nextLabel={generating ? "Sending…" : "Generate book"}
       nextDisabled={generating}
@@ -1212,6 +1350,81 @@ function KeyMemoriesEditor({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// Lightweight delete confirmation dialog rendered from Step 3. Plain
+// fixed-position modal with backdrop click + Escape to cancel; deliberately
+// avoids the browser confirm() since it's blocking and not styleable.
+function DeleteCharacterModal({
+  character,
+  deleting,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  character: Character;
+  deleting: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !deleting) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deleting, onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-character-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div
+        className="absolute inset-0 bg-ink-900/50"
+        onClick={() => {
+          if (!deleting) onCancel();
+        }}
+      />
+      <div className="relative w-full max-w-sm rounded-2xl border border-cream-300 bg-cream-50 p-6 shadow-[0_20px_50px_rgba(14,26,43,0.25)]">
+        <h2
+          id="delete-character-title"
+          className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900"
+        >
+          Delete {character.name}?
+        </h2>
+        <p className="mt-2 text-sm text-ink-700">
+          This removes the character and their reference photos. Stories that
+          already use them stay intact, but they won&apos;t appear in the cast
+          picker again.
+        </p>
+        {error && (
+          <p className="mt-3 text-sm font-medium text-rose-600">{error}</p>
+        )}
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={deleting}
+            className="px-4 py-2 rounded-xl text-sm font-medium text-ink-700 hover:text-ink-900 transition disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={deleting}
+            className="px-5 py-2 rounded-xl text-sm font-semibold text-cream-50 bg-rose-600 hover:bg-rose-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
