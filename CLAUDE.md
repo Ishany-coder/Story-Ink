@@ -133,3 +133,41 @@ Anything that fetches a URL pulled from the `stories` table (image inputs to Gem
 - Route handler that needs unrestricted writes (jobs, storage uploads, fulfillment) → `supabaseAdmin()`
 - Inngest functions never have a session — they always use `supabaseAdmin()`
 - Story-scoped routes → `assertOwnsStory(storyId, userId)` returns a `NextResponse` (404/403) on failure or `null` to continue
+
+## Design system
+
+The brand UI uses one palette only — **cream / moss / ink / gold / rose**. Anything else (`gray-*`, `slate-*`, `stone-*`, `zinc-*`, `neutral-*`, `red-*`, `emerald-*`, `green-*`, `amber-*` outside the gold family, `blue-*`, `indigo-*`, `purple-*`, `sky-*`, plain `bg-black` / `bg-white`) is off-palette and must be replaced. Mapping cheatsheet for fixes: gray/slate/stone/zinc/neutral → `ink-*` or `cream-*`; red → `rose-*`; emerald/green/teal → `moss-*`; amber → `gold-*` (warm/alert) or `moss-*` (in-progress/tip); black → `ink-900`; white → `cream-50`.
+
+> **Studio exception.** `CanvasEditor.tsx` and its sub-panels under `src/components/studio/` use a deliberate second palette (`bg-paper`, `sage-*`, `bark-*`, `clay-*`, `linen-*`, `forest-*`, plus some `stone-*` neutrals) declared as CSS tokens in `globals.css`. That is the Studio chrome — leave it alone. The memorial layout on `LandingPage.tsx` also legitimately uses `indigo-*` from the documented memorial palette. The cream/moss/ink/gold/rose rule applies everywhere else.
+
+### Buttons
+
+Three semantic variants × three sizes. Diverging from this set is a bug.
+
+**Primary (CTA / submit / "do the main thing"):**
+
+```
+inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed
+```
+
+**Secondary (back / cancel / alternate path):**
+
+```
+inline-flex items-center gap-1.5 rounded-full border border-cream-300 bg-cream-50 px-5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50
+```
+
+**Destructive (delete / discard / unrecoverable):**
+
+```
+inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 px-5 py-2.5 text-sm font-semibold text-rose-600 shadow-sm transition-colors hover:bg-rose-100 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 disabled:opacity-50
+```
+
+**Sizes — vary only `px` / `py` / `text-*`, keep radius, font-weight, colors, hover, and focus ring.**
+
+- **sm:** `px-3 py-1.5 text-xs` (toolbar / chips / table-row actions).
+- **md (default):** `px-5 py-2.5 text-sm` (every page CTA, every modal action).
+- **lg:** `px-6 py-3 text-base` (hero CTAs only — landing, empty states with one big "start" button).
+
+Do not invent a fourth size. Do not use responsive padding (`px-4 sm:px-6 lg:px-8`); pick one size for the surface. Do not drop the focus ring without replacing it. Icon-only buttons must include an `aria-label`.
+
+The Studio palette and `src/components/CanvasEditor.tsx` toolbar buttons are exempt — they have their own toolbar idiom (`bg-paper` / hairline borders). All other buttons in the codebase should match one of the three shapes above.

@@ -706,20 +706,36 @@ export const generateStoryV2Fn = inngest.createFunction(
         for (const p of script.pages)
           for (const id of p.characterIds) usedIds.add(id);
         const usedCast = ctx.cast.filter((c) => usedIds.has(c.id));
+        const usedCastIds = usedCast.map((c) => c.id);
+
+        // Batch the cache lookup. Previously this issued one
+        // .maybeSingle() per character, which is N+1 chatty AND opened
+        // a race window where two concurrent story-generations for
+        // overlapping cast would both observe a cache miss, both
+        // generate, and the loser would burn an Inngest retry on a
+        // UNIQUE(character_id, art_style_id) violation. One query up
+        // front shrinks the race window; the conflict-tolerant insert
+        // below closes the rest.
+        const cached = new Map<string, string>();
+        if (usedCastIds.length > 0) {
+          const { data: rows } = await admin
+            .from("character_portraits")
+            .select("character_id, portrait_url")
+            .in("character_id", usedCastIds)
+            .eq("art_style_id", ctx.style.id);
+          for (const row of rows ?? []) {
+            cached.set(row.character_id, row.portrait_url);
+          }
+        }
 
         return Promise.all(
           usedCast.map(async (c): Promise<CastPortraitEntry> => {
-            const { data: existing } = await admin
-              .from("character_portraits")
-              .select("portrait_url")
-              .eq("character_id", c.id)
-              .eq("art_style_id", ctx.style.id)
-              .maybeSingle<{ portrait_url: string }>();
-            if (existing?.portrait_url) {
+            const cachedUrl = cached.get(c.id);
+            if (cachedUrl) {
               return {
                 characterId: c.id,
                 name: c.name,
-                portraitUrl: existing.portrait_url,
+                portraitUrl: cachedUrl,
                 cached: true,
               };
             }
@@ -730,21 +746,17 @@ export const generateStoryV2Fn = inngest.createFunction(
             });
             const portraitUrl = await uploadGeneratedImage(dataUri);
 
-            const { error: insertErr } = await admin
-              .from("character_portraits")
-              .insert({
-                character_id: c.id,
-                art_style_id: ctx.style.id,
-                portrait_url: portraitUrl,
-              });
-            if (insertErr)
-              throw new Error(`portrait insert: ${insertErr.message}`);
+            const inserted = await insertPortraitOrFetchWinner(admin, {
+              characterId: c.id,
+              artStyleId: ctx.style.id,
+              portraitUrl,
+            });
 
             return {
               characterId: c.id,
               name: c.name,
-              portraitUrl,
-              cached: false,
+              portraitUrl: inserted.portraitUrl,
+              cached: inserted.lostRace,
             };
           })
         );
@@ -1001,18 +1013,22 @@ export const regenerateCastPortraitFn = inngest.createFunction(
       });
       const portraitUrl = await uploadGeneratedImage(dataUri);
 
-      // Delete + insert keeps the UNIQUE(character_id, art_style_id) index
-      // honest under concurrent regen requests.
-      await admin
+      // Regenerate semantics: the user explicitly asked for a new
+      // portrait, so upsert with onConflict overwrites whatever was
+      // there. This is idempotent under concurrent regen requests —
+      // last writer wins, no UNIQUE violation, no failed step.
+      const { error: upsertErr } = await admin
         .from("character_portraits")
-        .delete()
-        .eq("character_id", characterId)
-        .eq("art_style_id", story.art_style_id);
-      await admin.from("character_portraits").insert({
-        character_id: characterId,
-        art_style_id: story.art_style_id,
-        portrait_url: portraitUrl,
-      });
+        .upsert(
+          {
+            character_id: characterId,
+            art_style_id: story.art_style_id,
+            portrait_url: portraitUrl,
+          },
+          { onConflict: "character_id,art_style_id" }
+        );
+      if (upsertErr)
+        throw new Error(`portrait upsert: ${upsertErr.message}`);
 
       await markDone(jobId, {
         stage: "regenerated",
@@ -1022,6 +1038,45 @@ export const regenerateCastPortraitFn = inngest.createFunction(
     });
   }
 );
+
+// Insert a freshly-generated portrait, tolerating the UNIQUE
+// (character_id, art_style_id) constraint when a concurrent worker
+// raced us. On conflict we silently re-fetch the winning row's
+// portrait_url — both stories converge on the same canonical portrait
+// and neither retries. Returns lostRace=true when the caller's upload
+// is orphaned in storage but the row already exists.
+async function insertPortraitOrFetchWinner(
+  admin: ReturnType<typeof supabaseAdmin>,
+  args: { characterId: string; artStyleId: string; portraitUrl: string }
+): Promise<{ portraitUrl: string; lostRace: boolean }> {
+  const { error: insertErr } = await admin
+    .from("character_portraits")
+    .insert({
+      character_id: args.characterId,
+      art_style_id: args.artStyleId,
+      portrait_url: args.portraitUrl,
+    });
+  if (!insertErr) {
+    return { portraitUrl: args.portraitUrl, lostRace: false };
+  }
+  // 23505 = unique_violation. Anything else is a real failure we
+  // must surface.
+  if (insertErr.code !== "23505") {
+    throw new Error(`portrait insert: ${insertErr.message}`);
+  }
+  const { data: winner, error: winnerErr } = await admin
+    .from("character_portraits")
+    .select("portrait_url")
+    .eq("character_id", args.characterId)
+    .eq("art_style_id", args.artStyleId)
+    .maybeSingle<{ portrait_url: string }>();
+  if (winnerErr || !winner) {
+    throw new Error(
+      `portrait insert conflict but no winner found: ${winnerErr?.message ?? "row vanished"}`
+    );
+  }
+  return { portraitUrl: winner.portrait_url, lostRace: true };
+}
 
 export const allFunctions = [
   regenTextFn,

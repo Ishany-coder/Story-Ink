@@ -99,12 +99,32 @@ export async function POST(request: Request) {
   if (session.metadata?.kind === "digital") {
     const storyId = session.metadata?.story_id;
     const metaUserId = session.metadata?.user_id;
-    if (!storyId) {
+    if (!storyId || storyId.length === 0) {
       console.warn(
         "[stripe/webhook] digital session missing story_id metadata"
       );
       return NextResponse.json(
         { received: true, nonRetryable: true, error: "missing story_id" },
+        { status: 200 }
+      );
+    }
+    // Buyer identity is mandatory for digital unlock. Historically the
+    // check was permissive — `if (metaUserId && ...)` skipped owner
+    // validation entirely when `metaUserId` was missing or an empty
+    // string, which meant a crafted session with `user_id: null` in
+    // metadata could unlock any story id. Deny by default: require a
+    // non-empty `user_id` in metadata before we touch the row.
+    if (!metaUserId || metaUserId.length === 0) {
+      console.warn(
+        "[stripe/webhook] digital session missing user_id metadata — refusing unlock",
+        { storyId }
+      );
+      return NextResponse.json(
+        {
+          received: true,
+          nonRetryable: true,
+          error: "missing buyer user_id",
+        },
         { status: 200 }
       );
     }
@@ -142,7 +162,24 @@ export async function POST(request: Request) {
         { status: 200 }
       );
     }
-    if (metaUserId && storyRow.user_id && metaUserId !== storyRow.user_id) {
+    // The story row must have a known owner too. A null `user_id` on
+    // the story (e.g. account deletion ran but the story wasn't
+    // cascaded yet) means we have nobody to grant unlock to — deny.
+    if (!storyRow.user_id) {
+      console.warn(
+        "[stripe/webhook] story has no owner — refusing digital unlock",
+        { storyId }
+      );
+      return NextResponse.json(
+        {
+          received: true,
+          nonRetryable: true,
+          error: "story has no owner",
+        },
+        { status: 200 }
+      );
+    }
+    if (metaUserId !== storyRow.user_id) {
       console.warn(
         "[stripe/webhook] digital buyer/owner mismatch — refusing unlock",
         { storyId, metaUserId, ownerId: storyRow.user_id }
@@ -156,10 +193,14 @@ export async function POST(request: Request) {
         { status: 200 }
       );
     }
+    // Scope the unlock by both id AND user_id as defense-in-depth so a
+    // late-arriving owner change can't be exploited between the lookup
+    // above and the update.
     const { error: updateErr } = await supabaseAdmin()
       .from("stories")
       .update({ digital_unlocked: true })
-      .eq("id", storyId);
+      .eq("id", storyId)
+      .eq("user_id", storyRow.user_id);
     if (updateErr) {
       reportError(updateErr, "stripe.webhook.digital-unlock");
       return NextResponse.json(
