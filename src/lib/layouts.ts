@@ -116,17 +116,14 @@ export function resolveDisplayLayers(
 
   const layout = getLayout(page.layoutId);
   const synthesized: Layer[] = [];
+  const regions = computeInitialLayoutRegions(page.text ?? "", layout);
 
   if (!hasLayoutImage && page.imageUrl) {
-    synthesized.push(makeLayoutImage(page.imageUrl, layout.imageRegion));
+    synthesized.push(makeLayoutImage(page.imageUrl, regions.image));
   }
   if (!hasLayoutText && page.text) {
     synthesized.push(
-      makeLayoutText(
-        page.text,
-        computeInitialTextRegion(page.text, layout),
-        defaultTextSize
-      )
+      makeLayoutText(page.text, regions.text, defaultTextSize)
     );
   }
 
@@ -178,29 +175,67 @@ export function makeLayoutText(
   };
 }
 
-// For the default (full-bleed + caption) layout, grow the caption region
-// upward to accommodate long passages so the narration can render at a
-// readable size without AutoFitText shrinking it into illegibility.
+// Grow the text region upward (and, for split layouts, shrink the
+// image region to match) so longer narrations don't force AutoFitText
+// to squeeze the text down into illegibility. Returns both regions so
+// callers can size the image and text overlays together.
+export function computeInitialLayoutRegions(
+  text: string,
+  layout: Layout
+): { image: import("./types").Rect; text: import("./types").Rect } {
+  const baseText = layout.textRegion;
+  const baseImage = layout.imageRegion;
+
+  // Only the bottom-anchored layouts can grow their text region upward
+  // without colliding with side-by-side artwork.
+  const isGrowable =
+    layout.id === "full-bleed-caption" ||
+    layout.id === "top-image-bottom-text";
+  if (!isGrowable) return { image: baseImage, text: baseText };
+
+  const len = text.length;
+  // Baseline holds ~150 chars at the default cap; each additional ~50
+  // chars needs another line of room (~50 logical px at fontSize 38 +
+  // lineHeight 1.15 worth of padding).
+  const extraLines = Math.max(0, Math.ceil((len - 150) / 50));
+  const extraHeight = extraLines * 50;
+
+  if (layout.id === "full-bleed-caption") {
+    // Image is full-canvas; text overlays it. Grow text upward only.
+    const bottom = baseText.y + baseText.height;
+    const maxHeight = bottom - 40;
+    const height = Math.min(maxHeight, baseText.height + extraHeight);
+    const y = bottom - height;
+    return {
+      image: baseImage,
+      text: { x: baseText.x, y, width: baseText.width, height },
+    };
+  }
+
+  // top-image-bottom-text: text grows up, image shrinks down to match.
+  // Preserve a minimum image height so artwork stays meaningful.
+  const minImageHeight = 280;
+  const gap = 20;
+  const bottomMargin = 20;
+  const maxTextHeight = CANVAS_SIZE - minImageHeight - gap - bottomMargin;
+  const newTextHeight = Math.min(
+    maxTextHeight,
+    baseText.height + extraHeight
+  );
+  const newTextY = CANVAS_SIZE - bottomMargin - newTextHeight;
+  const newImageHeight = newTextY - gap;
+  return {
+    image: { x: baseImage.x, y: baseImage.y, width: baseImage.width, height: newImageHeight },
+    text: { x: baseText.x, y: newTextY, width: baseText.width, height: newTextHeight },
+  };
+}
+
+// Back-compat wrapper for callers that only need the text region.
 export function computeInitialTextRegion(
   text: string,
   layout: Layout
 ): import("./types").Rect {
-  const base = layout.textRegion;
-  if (layout.id !== "full-bleed-caption") return base;
-
-  const len = text.length;
-  // Baseline region (220 tall) holds ~150 chars comfortably at cap size.
-  // Each additional ~60 chars adds one more line's worth of height.
-  const extraLines = Math.max(0, Math.ceil((len - 150) / 60));
-  const extraHeight = extraLines * 36;
-
-  // Anchor to the bottom edge so the region grows upward, not past the
-  // canvas. Leave a 40px top margin.
-  const bottom = base.y + base.height;
-  const maxHeight = bottom - 40;
-  const height = Math.min(maxHeight, base.height + extraHeight);
-  const y = bottom - height;
-  return { x: base.x, y, width: base.width, height };
+  return computeInitialLayoutRegions(text, layout).text;
 }
 
 // Morph existing layout-tagged layers into a new layout's regions.
@@ -285,9 +320,9 @@ export function buildInitialOverlays(
   defaultTextSize?: number | null
 ): Layer[] {
   const layout = getLayout(DEFAULT_LAYOUT_ID);
-  const textRegion = computeInitialTextRegion(text, layout);
+  const regions = computeInitialLayoutRegions(text, layout);
   const overlays: Layer[] = [];
-  if (imageUrl) overlays.push(makeLayoutImage(imageUrl, layout.imageRegion));
-  if (text) overlays.push(makeLayoutText(text, textRegion, defaultTextSize));
+  if (imageUrl) overlays.push(makeLayoutImage(imageUrl, regions.image));
+  if (text) overlays.push(makeLayoutText(text, regions.text, defaultTextSize));
   return overlays;
 }
