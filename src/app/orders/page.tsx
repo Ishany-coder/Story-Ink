@@ -313,11 +313,11 @@ export function StatusBadge({ status }: { status: string }) {
     },
     shipped: {
       label: "shipped",
-      cls: "bg-emerald-100 text-emerald-700",
+      cls: "bg-moss-100 text-moss-700",
     },
     delivered: {
       label: "delivered",
-      cls: "bg-emerald-200 text-emerald-800",
+      cls: "bg-moss-200 text-moss-900",
     },
     failed: {
       label: "failed",

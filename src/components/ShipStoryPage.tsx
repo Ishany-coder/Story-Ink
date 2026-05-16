@@ -324,7 +324,7 @@ export default function ShipStoryPage({
                     <span>${quote.shippingCostUsd.toFixed(2)}</span>
                   </div>
                 ) : (
-                  <div className="flex justify-between text-[11px] font-medium text-stone-500">
+                  <div className="flex justify-between text-[11px] font-medium text-ink-500">
                     <span>Shipping</span>
                     <span>Free</span>
                   </div>
@@ -553,7 +553,7 @@ function ShortStoryDigitalOnlyNotice({ story }: { story: Story }) {
         &larr; Back to story
       </Link>
 
-      <div className="mt-6 rounded-3xl border border-amber-200 bg-amber-50 p-6">
+      <div className="mt-6 rounded-3xl border border-gold-300 bg-gold-100 p-6">
         <div className="mb-2 flex items-start gap-3">
           <span aria-hidden="true" className="text-2xl leading-none">
             ⓘ

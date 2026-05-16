@@ -119,10 +119,10 @@ export default async function ReadStoryPage({
   if (!story.pages || story.pages.length === 0) {
     return (
       <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center gap-4 px-6">
-        <p className="text-gray-400">This story has no pages.</p>
+        <p className="text-ink-300">This story has no pages.</p>
         <Link
           href="/read"
-          className="text-sm text-amber-400 hover:text-amber-300"
+          className="text-sm font-semibold text-moss-700 transition-colors hover:text-moss-900"
         >
           Back to library
         </Link>

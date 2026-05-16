@@ -15,10 +15,10 @@ export default async function AccountPage() {
   }
 
   return (
-    <article className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-12 text-ink-700">
+    <article className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 pb-12 sm:pb-16 text-ink-700">
       <Link
         href="/"
-        className="text-sm font-medium text-ink-300 hover:text-moss-700"
+        className="text-sm font-medium text-ink-500 transition-colors hover:text-moss-700"
       >
         &larr; Back home
       </Link>

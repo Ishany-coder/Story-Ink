@@ -499,7 +499,7 @@ export default function WizardClient({
                 value={customDraft}
                 onChange={(e) => setCustomDraft(e.target.value)}
                 rows={3}
-                className="w-full rounded-xl border border-cream-300 bg-white p-3 text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
+                className="w-full rounded-xl border border-cream-300 bg-cream-50 p-3 text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
                 placeholder="A whimsical book about my best friend Sam, his vintage Vespa, and the imaginary city he commutes to every morning…"
               />
             </div>
@@ -1040,7 +1040,7 @@ export default function WizardClient({
           <div
             ref={errorAnchorRef}
             role="alert"
-            className="bg-red-50 border border-red-200 text-red-900 rounded-xl p-3 text-sm"
+            className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-900"
           >
             {error}
           </div>

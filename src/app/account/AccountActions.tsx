@@ -58,14 +58,14 @@ export default function AccountActions() {
         type="button"
         onClick={handleExport}
         disabled={exporting}
-        className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {exporting ? "Preparing…" : "Export my data"}
       </button>
       <button
         type="button"
         onClick={() => setModalOpen(true)}
-        className="rounded-full border border-rose-300 px-5 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+        className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 px-5 py-2.5 text-sm font-semibold text-rose-600 transition-colors hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2"
       >
         Delete my account
       </button>

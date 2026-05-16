@@ -78,7 +78,7 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
       )}
 
       {state.kind === "success" && (
-        <div className="rounded-2xl border border-emerald-200 bg-cream-50 p-8 text-center shadow-[0_8px_24px_rgba(16,185,129,0.08)]">
+        <div className="rounded-2xl border border-moss-200 bg-cream-50 p-8 text-center shadow-[0_8px_24px_rgba(14,26,43,0.08)]">
           <CheckmarkCircle />
           <h1 className="mt-4 font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
             Your order has been received
@@ -98,7 +98,7 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
           <div className="mt-6">
             <Link
               href={`/read/${storyId}`}
-              className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+              className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
             >
               Back to story
             </Link>
@@ -118,7 +118,7 @@ export default function ShipSuccessConfirm({ storyId, sessionId }: Props) {
           </p>
           <Link
             href={`/ship/${storyId}`}
-            className="mt-6 inline-block rounded-full border border-cream-300 bg-cream-50 px-5 py-2 text-sm font-medium text-ink-700 hover:bg-cream-100"
+            className="mt-6 inline-flex items-center gap-1.5 rounded-full border border-cream-300 bg-cream-50 px-5 py-2.5 text-sm font-medium text-ink-700 transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
           >
             Try again
           </Link>
@@ -151,7 +151,7 @@ function Spinner() {
 
 function CheckmarkCircle() {
   return (
-    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-moss-100 text-moss-700">
       <svg
         viewBox="0 0 24 24"
         fill="none"

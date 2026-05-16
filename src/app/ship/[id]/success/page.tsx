@@ -53,7 +53,7 @@ export default async function ShipSuccess({
       </p>
       <Link
         href={`/read/${id}`}
-        className="mt-6 inline-block rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 transition-colors hover:bg-moss-900"
+        className="mt-6 inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
       >
         Back to story
       </Link>
@@ -75,8 +75,8 @@ function AdminOrderConfirm({
 }) {
   return (
     <div className="animate-rise-in mx-auto max-w-xl px-4 py-12">
-      <div className="rounded-2xl border border-emerald-200 bg-cream-50 p-8 text-center shadow-[0_8px_24px_rgba(16,185,129,0.08)]">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+      <div className="rounded-2xl border border-moss-200 bg-cream-50 p-8 text-center shadow-[0_8px_24px_rgba(14,26,43,0.08)]">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-moss-100 text-moss-700">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -108,14 +108,14 @@ function AdminOrderConfirm({
           {isAdmin && (
             <Link
               href={`/orders/${orderId}`}
-              className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+              className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
             >
               Open in /orders
             </Link>
           )}
           <Link
             href={`/read/${storyId}`}
-            className="rounded-full border border-cream-300 bg-cream-50 px-5 py-2 text-sm font-medium text-ink-700 hover:bg-cream-100"
+            className="inline-flex items-center gap-1.5 rounded-full border border-cream-300 bg-cream-50 px-5 py-2.5 text-sm font-medium text-ink-700 transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
           >
             Back to story
           </Link>

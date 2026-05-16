@@ -44,7 +44,7 @@ export default async function ReadPage() {
   }
 
   return (
-    <div className="animate-rise-in mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-12">
+    <div className="animate-rise-in mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pt-8 sm:pt-12 pb-12 sm:pb-16">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-3 border-b border-cream-300 pb-4">
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-3xl font-semibold text-ink-900">
@@ -57,7 +57,7 @@ export default async function ReadPage() {
         </div>
         <Link
           href="/"
-          className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+          className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
         >
           New story
         </Link>
@@ -103,7 +103,7 @@ function EmptyState({
       <p className="max-w-sm text-sm text-ink-500">{subtitle}</p>
       <Link
         href={ctaHref}
-        className="rounded-full bg-moss-700 px-4 sm:px-6 lg:px-8 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+        className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
       >
         {ctaLabel}
       </Link>
