@@ -6,29 +6,29 @@ export default function CharacterCard({ character }: { character: Character }) {
   return (
     <Link
       href={`/characters/${character.id}`}
-      className="block rounded-lg border bg-white hover:shadow-sm transition overflow-hidden"
+      className="block overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)] transition-all hover:-translate-y-1 hover:border-gold-500 hover:shadow-[0_12px_32px_rgba(14,26,43,0.10)]"
     >
-      <div className="aspect-square bg-stone-100 flex items-center justify-center">
+      <div className="flex aspect-square items-center justify-center bg-cream-200">
         {photo ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={photo}
             alt={character.name}
-            className="w-full h-full object-cover"
+            className="h-full w-full object-cover"
           />
         ) : (
-          <span className="text-stone-400 text-sm">No photo yet</span>
+          <span className="text-sm text-ink-300">No photo yet</span>
         )}
       </div>
       <div className="p-3">
         <div className="flex items-center gap-2">
-          <span className="font-medium">{character.name}</span>
-          <span className="text-xs uppercase tracking-wide text-stone-500">
+          <span className="font-medium text-ink-900">{character.name}</span>
+          <span className="text-xs uppercase tracking-wide text-ink-500">
             {character.kind}
           </span>
         </div>
         {character.role_label && (
-          <div className="text-sm text-stone-600">{character.role_label}</div>
+          <div className="text-sm text-ink-700">{character.role_label}</div>
         )}
       </div>
     </Link>

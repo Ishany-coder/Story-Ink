@@ -160,7 +160,7 @@ export default function AIAssistantPreview({
             <button
               type="button"
               onClick={onApply}
-              className="rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-5 py-2 text-sm font-black uppercase text-cream-50 shadow-md transition-all hover:scale-105"
+              className="rounded-2xl bg-gradient-to-r from-moss-500 to-moss-700 px-5 py-2 text-sm font-black uppercase text-cream-50 shadow-md transition-all hover:scale-105"
             >
               Apply
             </button>
@@ -265,14 +265,14 @@ function PageDiffBody({ pending }: { pending: Pending }) {
             <span className="rounded bg-rose-100 px-2 py-0.5 text-rose-600">
               −{removed} removed
             </span>
-            <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-600">
+            <span className="rounded bg-moss-100 px-2 py-0.5 text-moss-700">
               +{added} added
             </span>
             <span>{unchanged} unchanged</span>
           </>
         )}
         {newImageUrl !== undefined && (
-          <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-600">
+          <span className="rounded bg-moss-100 px-2 py-0.5 text-moss-700">
             new illustration
           </span>
         )}
@@ -291,7 +291,7 @@ function PageDiffBody({ pending }: { pending: Pending }) {
         />
         <PagePanel
           label="After"
-          tone="emerald"
+          tone="moss"
           layers={afterLayers}
           textHighlight={
             ops && textLayerId
@@ -310,7 +310,7 @@ function PageDiffBody({ pending }: { pending: Pending }) {
 
 interface PagePanelProps {
   label: "Before" | "After";
-  tone: "rose" | "emerald";
+  tone: "rose" | "moss";
   layers: Layer[];
   textHighlight?: {
     layerId: string;
@@ -323,11 +323,11 @@ function PagePanel({ label, tone, layers, textHighlight }: PagePanelProps) {
   const borderCls =
     tone === "rose"
       ? "border-rose-300 shadow-rose-100"
-      : "border-emerald-300 shadow-emerald-100";
+      : "border-moss-300 shadow-moss-100";
   const chipCls =
     tone === "rose"
       ? "bg-rose-200 text-rose-700"
-      : "bg-emerald-200 text-emerald-700";
+      : "bg-moss-200 text-moss-700";
 
   return (
     <div className="space-y-2">

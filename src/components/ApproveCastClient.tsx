@@ -161,9 +161,9 @@ export default function ApproveCastClient({
           return (
             <div
               key={p.characterId}
-              className="border rounded-lg overflow-hidden bg-white"
+              className="overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)] transition-all hover:border-gold-500"
             >
-              <div className="relative aspect-square bg-stone-100">
+              <div className="relative aspect-square bg-cream-200">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={p.portraitUrl}
@@ -179,13 +179,13 @@ export default function ApproveCastClient({
                   </div>
                 )}
               </div>
-              <div className="p-3 flex items-center justify-between">
-                <span className="font-medium">{p.name}</span>
+              <div className="flex items-center justify-between p-3">
+                <span className="font-medium text-ink-900">{p.name}</span>
                 <button
                   type="button"
                   onClick={() => regenerate(p.characterId)}
                   disabled={isRegenerating}
-                  className="text-sm underline disabled:opacity-50"
+                  className="text-sm font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline disabled:opacity-50"
                 >
                   {isRegenerating ? "Working…" : "Regenerate"}
                 </button>
@@ -200,13 +200,13 @@ export default function ApproveCastClient({
         })}
       </div>
 
-      {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
+      {error && <div className="mb-3 text-sm font-medium text-rose-600">{error}</div>}
 
       <button
         type="button"
         onClick={approveAll}
         disabled={approving || anyRegenerating}
-        className="px-6 py-3 bg-black text-white rounded text-lg disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-6 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         title={
           anyRegenerating
             ? "Wait for portraits to finish regenerating"

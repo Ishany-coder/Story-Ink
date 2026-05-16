@@ -95,7 +95,7 @@ export default function StoryProgressClient({ storyId }: { storyId: string }) {
 
   if (state.kind === "failed") {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 text-red-900 p-5">
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 text-rose-900 p-5">
         <div className="font-medium mb-1">Something went wrong.</div>
         <div className="text-sm">{state.error}</div>
       </div>

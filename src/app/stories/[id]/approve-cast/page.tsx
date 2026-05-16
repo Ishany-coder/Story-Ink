@@ -39,9 +39,11 @@ export default async function ApproveCastPage({ params }: Props) {
 
   if (!job || !(job.result as JobResult)?.portraits) {
     return (
-      <main className="max-w-2xl mx-auto px-4 py-10">
-        <h1 className="text-2xl font-semibold">Cast not ready yet</h1>
-        <p className="text-stone-600 mt-2">
+      <main className="mx-auto max-w-2xl px-4 pt-8 sm:pt-12 pb-12 sm:pb-16">
+        <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
+          Cast not ready yet
+        </h1>
+        <p className="mt-2 text-sm text-ink-500">
           The cast portraits are still being generated. Refresh in a few
           seconds.
         </p>
@@ -52,9 +54,11 @@ export default async function ApproveCastPage({ params }: Props) {
   const portraits = (job.result as JobResult).portraits;
 
   return (
-    <main className="max-w-3xl mx-auto px-4 py-10">
-      <h1 className="text-2xl font-semibold mb-2">Approve your cast</h1>
-      <p className="text-stone-600 mb-6">
+    <main className="mx-auto max-w-3xl px-4 pt-8 sm:pt-12 pb-12 sm:pb-16">
+      <h1 className="mb-2 font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
+        Approve your cast
+      </h1>
+      <p className="mb-6 text-sm text-ink-500">
         These portraits will be used as the visual reference for every page. If
         anyone looks wrong, regenerate just that character before the pages
         render.

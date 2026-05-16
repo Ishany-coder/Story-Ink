@@ -165,7 +165,7 @@ export default function CharacterForm({ initial, nextHref }: Props) {
           desktop viewport and forcing a scroll. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold text-ink-900">{headerTitle}</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">{headerTitle}</h1>
           <div className="inline-flex rounded-full border border-cream-300 bg-cream-50 p-1">
             {(["person", "pet"] as const).map((k) => (
               <button
@@ -195,7 +195,7 @@ export default function CharacterForm({ initial, nextHref }: Props) {
           <button
             type="submit"
             disabled={saving || uploading || !name.trim()}
-            className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? "Saving…" : initial ? "Save changes" : "Add character"}
           </button>

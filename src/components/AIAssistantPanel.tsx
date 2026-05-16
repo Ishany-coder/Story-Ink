@@ -461,7 +461,7 @@ export default function AIAssistantPanel({
       )}
 
       {pending && (
-        <p className="rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-amber-600">
+        <p className="rounded-xl bg-gold-100 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-gold-900">
           Preview open — apply or discard to continue
         </p>
       )}
