@@ -5,7 +5,12 @@
 
 import { supabaseAdmin } from "@/lib/supabase";
 
-export type JobStatus = "queued" | "running" | "done" | "failed";
+export type JobStatus =
+  | "queued"
+  | "running"
+  | "awaiting_cast_approval"
+  | "done"
+  | "failed";
 
 export interface JobRow {
   id: string;
@@ -80,6 +85,20 @@ export async function markFailed(
     .update({
       status: "failed",
       error: message.slice(0, 1000),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+}
+
+export async function markAwaitingCastApproval(
+  jobId: string,
+  result: unknown
+): Promise<void> {
+  await supabaseAdmin()
+    .from("jobs")
+    .update({
+      status: "awaiting_cast_approval",
+      result,
       updated_at: new Date().toISOString(),
     })
     .eq("id", jobId);

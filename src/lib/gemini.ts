@@ -853,3 +853,181 @@ function hashCode(str: string): number {
   }
   return hash;
 }
+
+// ---------------------------------------------------------------------------
+// V2 generation pipeline: script + cast portraits + page art with cast refs
+// ---------------------------------------------------------------------------
+
+import type { Character, Script } from "@/lib/types";
+import {
+  buildCastPortraitPrompt,
+  buildPagePrompt,
+  buildScriptPrompt,
+  type BuiltPrompt,
+} from "@/lib/story-prompt";
+import type {
+  Occasion,
+  RecipientType,
+  StoryTone,
+} from "@/lib/types";
+
+export interface GenerateScriptArgs {
+  recipientType: RecipientType;
+  occasion: Occasion;
+  storyTone: StoryTone;
+  cast: Character[];
+  outline: string;
+  keyMemories: string[];
+  pageCount: number;
+}
+
+function isScript(value: unknown, expectedPages: number): value is Script {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.title !== "string") return false;
+  if (!Array.isArray(v.pages)) return false;
+  if (v.pages.length !== expectedPages) return false;
+  return v.pages.every((p) => {
+    if (!p || typeof p !== "object") return false;
+    const pp = p as Record<string, unknown>;
+    return (
+      typeof pp.pageNumber === "number" &&
+      typeof pp.text === "string" &&
+      typeof pp.sceneDescription === "string" &&
+      Array.isArray(pp.characterIds) &&
+      pp.characterIds.every((id) => typeof id === "string")
+    );
+  });
+}
+
+export async function generateScript(args: GenerateScriptArgs): Promise<Script> {
+  const built: BuiltPrompt = buildScriptPrompt(args);
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    systemInstruction: built.systemPrompt,
+    generationConfig: {
+      responseMimeType: "application/json",
+    },
+  });
+
+  const result = await withTimeout(
+    model.generateContent(built.userPrompt),
+    GEMINI_TEXT_TIMEOUT_MS,
+    "generateScript"
+  );
+  assertSafeFinish(result, "generateScript");
+  const text = result.response.text();
+  const parsed = parseJsonResponse(text);
+  if (!isScript(parsed, args.pageCount)) {
+    throw new LlmJsonParseError(
+      `generateScript: parsed JSON did not match Script schema (expected ${args.pageCount} pages)`,
+      text
+    );
+  }
+  return parsed;
+}
+
+// Local helper: pull the first inlineData blob from an image response and
+// return it as a data: URI. Mirrors the inline pattern used by V1's
+// generatePageImage but factored out so cast + page generators share it.
+function extractFirstImageDataUri(result: {
+  response: {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
+      };
+    }>;
+  };
+}): string {
+  const parts = result.response.candidates?.[0]?.content?.parts ?? [];
+  for (const part of parts) {
+    const data = part.inlineData?.data;
+    const mime = part.inlineData?.mimeType;
+    if (data && mime) return `data:${mime};base64,${data}`;
+  }
+  throw new Error("Gemini returned no image data");
+}
+
+// V2 cast portrait. Returns a base64 data URI; caller uploads via
+// uploadGeneratedImage to the uploads bucket.
+export async function generateCastPortrait(args: {
+  character: Character;
+  artStylePromptScaffold: string;
+}): Promise<string> {
+  const prompt = buildCastPortraitPrompt(args);
+
+  const refImages: Array<{ inlineData: { data: string; mimeType: string } }> =
+    [];
+  for (const url of args.character.reference_photo_urls.slice(0, 5)) {
+    const inline = await fetchImageAsInlineData(url);
+    if (inline) refImages.push({ inlineData: inline });
+  }
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.1-flash-image-preview",
+  });
+
+  const result = await withTimeout(
+    model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }, ...refImages],
+        },
+      ],
+      generationConfig: {
+        // @ts-expect-error - field not declared in legacy SDK types
+        responseModalities: ["IMAGE", "TEXT"],
+      },
+    }),
+    GEMINI_IMAGE_TIMEOUT_MS,
+    "generateCastPortrait"
+  );
+  assertSafeFinish(result, "generateCastPortrait");
+  return extractFirstImageDataUri(result);
+}
+
+// V2 page image — pass the canonical cast portraits for the characters
+// that appear on this page, plus the scene description. Stable refs
+// replace V1's page-to-page conditioning chain.
+export async function generatePageImageWithCastRefs(args: {
+  sceneDescription: string;
+  artStylePromptScaffold: string;
+  castPortraitsOnPage: Array<{ name: string; portraitUrl: string }>;
+}): Promise<string> {
+  const prompt = buildPagePrompt({
+    sceneDescription: args.sceneDescription,
+    artStylePromptScaffold: args.artStylePromptScaffold,
+    characterNamesOnPage: args.castPortraitsOnPage.map((c) => c.name),
+  });
+
+  const refImages: Array<{ inlineData: { data: string; mimeType: string } }> =
+    [];
+  for (const c of args.castPortraitsOnPage) {
+    const inline = await fetchImageAsInlineData(c.portraitUrl);
+    if (inline) refImages.push({ inlineData: inline });
+  }
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.1-flash-image-preview",
+  });
+
+  const result = await withTimeout(
+    model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }, ...refImages],
+        },
+      ],
+      generationConfig: {
+        // @ts-expect-error - field not declared in legacy SDK types
+        responseModalities: ["IMAGE", "TEXT"],
+      },
+    }),
+    GEMINI_IMAGE_TIMEOUT_MS,
+    "generatePageImageWithCastRefs"
+  );
+  assertSafeFinish(result, "generatePageImageWithCastRefs");
+  return extractFirstImageDataUri(result);
+}

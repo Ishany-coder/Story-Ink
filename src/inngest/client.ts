@@ -21,9 +21,14 @@ export const inngest = new Inngest({
 // Event names used across the app. Importing from here keeps typos out of
 // both the send sites (HTTP routes) and the function triggers.
 export const EVENTS = {
+  // V1 (deleted in Plan D once V2 is verified end-to-end)
   generateStory: "story/generate.requested",
   regenText: "story/regen-text.requested",
   assistText: "assist/text.requested",
   assistImage: "assist/image.requested",
   assistInfer: "assist/infer.requested",
+  // V2 creation flow
+  storyGenerateV2: "story/generate.v2.requested",
+  castApproved: "story/cast.approved",
+  characterRegenerate: "character/portrait.regenerate.requested",
 } as const;

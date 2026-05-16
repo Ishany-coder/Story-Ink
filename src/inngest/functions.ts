@@ -10,13 +10,22 @@
 // client polls /api/jobs/[id] for progress.
 
 import { inngest, EVENTS } from "./client";
-import { markDone, markFailed, markProgress, markRunning } from "@/lib/jobs";
+import {
+  markAwaitingCastApproval,
+  markDone,
+  markFailed,
+  markProgress,
+  markRunning,
+} from "@/lib/jobs";
 import { reportError } from "@/lib/sentry";
 import {
   assistRegenerateImage,
   assistRegenerateText,
   classifyAssistIntent,
+  generateCastPortrait,
   generatePageImage,
+  generatePageImageWithCastRefs,
+  generateScript,
   generateStoryText,
   GeminiRateLimitError,
   GeminiSafetyBlockedError,
@@ -803,6 +812,399 @@ export const nightlyCleanupFn = inngest.createFunction(
   }
 );
 
+// ---------------------------------------------------------------------------
+// V2 generation pipeline (creation flow overhaul)
+//
+// Stage 1 (script) + Stage 2 (cast portraits) run inside generateStoryV2Fn.
+// After Stage 2 the job is parked in `awaiting_cast_approval` and we
+// return — Inngest functions are not the place to wait on human input.
+// The user's "Approve all" click hits /api/stories/[id]/approve-cast,
+// which sends EVENTS.castApproved; generatePagesAfterApprovalFn picks
+// that up and fans out per-page image generation. Per-character regen
+// runs in its own short-lived function.
+// ---------------------------------------------------------------------------
+
+interface StoryV2Context {
+  story: {
+    id: string;
+    user_id: string;
+    prompt: string;
+    page_count: number;
+    recipient_type: import("@/lib/types").RecipientType;
+    occasion: import("@/lib/types").Occasion;
+    story_tone: import("@/lib/types").StoryTone;
+    art_style_id: string;
+    cast_character_ids: string[];
+  };
+  cast: import("@/lib/types").Character[];
+  style: {
+    id: string;
+    display_name: string;
+    prompt_scaffold: string;
+  };
+}
+
+interface CastPortraitEntry {
+  characterId: string;
+  name: string;
+  portraitUrl: string;
+  cached: boolean;
+}
+
+export const generateStoryV2Fn = inngest.createFunction(
+  {
+    id: "story-generate-v2",
+    name: "Generate story (V2: script + cast portraits)",
+    retries: TEXT_RETRIES,
+    triggers: [{ event: EVENTS.storyGenerateV2 }],
+    onFailure: async ({ event, error }) => onInngestFailure(event, error),
+  },
+  async ({ event, step }) => {
+    const data = event.data as {
+      jobId: string;
+      storyId: string;
+      userId: string;
+    };
+    const { jobId, storyId } = data;
+    await markRunning(jobId);
+
+    const ctx: StoryV2Context = await step.run("load-context", async () => {
+      const admin = supabaseAdmin();
+      const { data: story, error: storyErr } = await admin
+        .from("stories")
+        .select(
+          "id, user_id, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids"
+        )
+        .eq("id", storyId)
+        .single<StoryV2Context["story"]>();
+      if (storyErr || !story) throw new Error(`load story: ${storyErr?.message}`);
+
+      const { data: cast, error: castErr } = await admin
+        .from("characters")
+        .select("*")
+        .in("id", story.cast_character_ids);
+      if (castErr) throw new Error(`load cast: ${castErr.message}`);
+
+      const { data: style, error: styleErr } = await admin
+        .from("art_styles")
+        .select("id, display_name, prompt_scaffold")
+        .eq("id", story.art_style_id)
+        .single<StoryV2Context["style"]>();
+      if (styleErr || !style) throw new Error(`load style: ${styleErr?.message}`);
+
+      return {
+        story,
+        cast: (cast ?? []) as import("@/lib/types").Character[],
+        style,
+      };
+    });
+
+    const script = await step.run("generate-script", async () => {
+      // The wizard's outline + key memories live on stories.prompt as
+      // a JSON-encoded payload (see /api/generate/v2). Plain strings
+      // fall back to outline-only.
+      let outline = "";
+      let keyMemories: string[] = [];
+      try {
+        const parsed = JSON.parse(ctx.story.prompt);
+        if (parsed && typeof parsed === "object") {
+          outline = typeof parsed.outline === "string" ? parsed.outline : "";
+          keyMemories = Array.isArray(parsed.keyMemories)
+            ? parsed.keyMemories.filter((s: unknown) => typeof s === "string")
+            : [];
+        } else {
+          outline = String(ctx.story.prompt ?? "");
+        }
+      } catch {
+        outline = String(ctx.story.prompt ?? "");
+      }
+
+      const s = await generateScript({
+        recipientType: ctx.story.recipient_type,
+        occasion: ctx.story.occasion,
+        storyTone: ctx.story.story_tone,
+        cast: ctx.cast,
+        outline,
+        keyMemories,
+        pageCount: ctx.story.page_count,
+      });
+
+      const { error } = await supabaseAdmin()
+        .from("stories")
+        .update({ script: s, title: s.title })
+        .eq("id", storyId);
+      if (error) throw new Error(`persist script: ${error.message}`);
+      return s;
+    });
+
+    const portraits: CastPortraitEntry[] = await step.run(
+      "generate-cast-portraits",
+      async () => {
+        const admin = supabaseAdmin();
+
+        const usedIds = new Set<string>();
+        for (const p of script.pages)
+          for (const id of p.characterIds) usedIds.add(id);
+        const usedCast = ctx.cast.filter((c) => usedIds.has(c.id));
+
+        return Promise.all(
+          usedCast.map(async (c): Promise<CastPortraitEntry> => {
+            const { data: existing } = await admin
+              .from("character_portraits")
+              .select("portrait_url")
+              .eq("character_id", c.id)
+              .eq("art_style_id", ctx.style.id)
+              .maybeSingle<{ portrait_url: string }>();
+            if (existing?.portrait_url) {
+              return {
+                characterId: c.id,
+                name: c.name,
+                portraitUrl: existing.portrait_url,
+                cached: true,
+              };
+            }
+
+            const dataUri = await generateCastPortrait({
+              character: c,
+              artStylePromptScaffold: ctx.style.prompt_scaffold,
+            });
+            const portraitUrl = await uploadGeneratedImage(dataUri);
+
+            const { error: insertErr } = await admin
+              .from("character_portraits")
+              .insert({
+                character_id: c.id,
+                art_style_id: ctx.style.id,
+                portrait_url: portraitUrl,
+              });
+            if (insertErr)
+              throw new Error(`portrait insert: ${insertErr.message}`);
+
+            return {
+              characterId: c.id,
+              name: c.name,
+              portraitUrl,
+              cached: false,
+            };
+          })
+        );
+      }
+    );
+
+    await markAwaitingCastApproval(jobId, {
+      stage: "awaiting_cast_approval",
+      storyId,
+      portraits,
+    });
+
+    return { jobId, storyId, awaitingCastApproval: true };
+  }
+);
+
+export const generatePagesAfterApprovalFn = inngest.createFunction(
+  {
+    id: "generate-pages-after-approval",
+    name: "Generate pages (V2: after cast approval)",
+    retries: IMAGE_RETRIES,
+    triggers: [{ event: EVENTS.castApproved }],
+    onFailure: async ({ event, error }) => onInngestFailure(event, error),
+  },
+  async ({ event, step }) => {
+    const { jobId, storyId } = event.data as {
+      jobId: string;
+      storyId: string;
+    };
+    await markRunning(jobId);
+
+    const ctx = await step.run("load-pages-context", async () => {
+      const admin = supabaseAdmin();
+      const { data: story, error } = await admin
+        .from("stories")
+        .select("id, script, art_style_id, cast_character_ids, page_count")
+        .eq("id", storyId)
+        .single<{
+          id: string;
+          script: import("@/lib/types").Script;
+          art_style_id: string;
+          cast_character_ids: string[];
+          page_count: number;
+        }>();
+      if (error || !story?.script) throw new Error("script missing");
+
+      const { data: style } = await admin
+        .from("art_styles")
+        .select("prompt_scaffold")
+        .eq("id", story.art_style_id)
+        .single<{ prompt_scaffold: string }>();
+      if (!style) throw new Error("style missing");
+
+      const { data: portraits } = await admin
+        .from("character_portraits")
+        .select("character_id, portrait_url")
+        .in("character_id", story.cast_character_ids)
+        .eq("art_style_id", story.art_style_id);
+
+      const { data: cast } = await admin
+        .from("characters")
+        .select("id, name")
+        .in("id", story.cast_character_ids);
+
+      // Seed empty pages so the Studio can render placeholders while
+      // images come in. updateStoryPageFields will fill imageUrl per page.
+      const initialPages = story.script.pages.map((p) => ({
+        pageNumber: p.pageNumber,
+        text: p.text,
+        imageUrl: "",
+        layoutId: DEFAULT_LAYOUT_ID,
+        overlays: [] as Layer[],
+      }));
+      const { error: pagesErr } = await admin
+        .from("stories")
+        .update({ pages: initialPages })
+        .eq("id", storyId);
+      if (pagesErr) throw new Error(`init pages: ${pagesErr.message}`);
+
+      // Return plain arrays — Inngest serializes step.run output to JSON,
+      // which would turn a Map into {}.
+      return {
+        story,
+        style,
+        portraits: portraits ?? [],
+        cast: cast ?? [],
+      };
+    });
+
+    const portraitByCharId = new Map<string, string>();
+    for (const p of ctx.portraits)
+      portraitByCharId.set(p.character_id, p.portrait_url);
+    const nameByCharId = new Map<string, string>();
+    for (const c of ctx.cast) nameByCharId.set(c.id, c.name);
+
+    const pages = ctx.story.script.pages;
+    await Promise.all(
+      pages.map((p) =>
+        step.run(`generate-page-${p.pageNumber}`, async () => {
+          const castOnPage = p.characterIds
+            .map((id) => {
+              const portraitUrl = portraitByCharId.get(id);
+              const name = nameByCharId.get(id);
+              return portraitUrl && name ? { name, portraitUrl } : null;
+            })
+            .filter(
+              (x): x is { name: string; portraitUrl: string } => x !== null
+            );
+
+          const dataUri = await generatePageImageWithCastRefs({
+            sceneDescription: p.sceneDescription,
+            artStylePromptScaffold: ctx.style.prompt_scaffold,
+            castPortraitsOnPage: castOnPage,
+          });
+          const imageUrl = await uploadGeneratedImage(dataUri);
+
+          const overlays = buildInitialOverlays(imageUrl, p.text);
+          await updateStoryPageFields(storyId, p.pageNumber, {
+            imageUrl,
+            overlays,
+            layoutId: DEFAULT_LAYOUT_ID,
+          });
+
+          await markProgress(jobId, {
+            stage: "pages",
+            completed: p.pageNumber,
+            total: pages.length,
+          });
+        })
+      )
+    );
+
+    await step.run("set-cover", async () => {
+      const admin = supabaseAdmin();
+      const { data: story } = await admin
+        .from("stories")
+        .select("pages")
+        .eq("id", storyId)
+        .single<{ pages: Array<{ pageNumber: number; imageUrl: string }> }>();
+      const first = story?.pages?.find((p) => p.pageNumber === 1);
+      if (first?.imageUrl) {
+        await admin
+          .from("stories")
+          .update({ cover_image: first.imageUrl })
+          .eq("id", storyId);
+      }
+    });
+
+    await markDone(jobId, { stage: "done", storyId });
+    return { jobId, storyId, done: true };
+  }
+);
+
+export const regenerateCastPortraitFn = inngest.createFunction(
+  {
+    id: "regenerate-cast-portrait",
+    name: "Regenerate one cast portrait",
+    retries: IMAGE_RETRIES,
+    triggers: [{ event: EVENTS.characterRegenerate }],
+    onFailure: async ({ event, error }) => onInngestFailure(event, error),
+  },
+  async ({ event, step }) => {
+    const { jobId, storyId, characterId } = event.data as {
+      jobId: string;
+      storyId: string;
+      characterId: string;
+    };
+    await markRunning(jobId);
+
+    await step.run("regen", async () => {
+      const admin = supabaseAdmin();
+      const { data: story } = await admin
+        .from("stories")
+        .select("art_style_id")
+        .eq("id", storyId)
+        .single<{ art_style_id: string }>();
+      if (!story) throw new Error("story missing");
+
+      const { data: character } = await admin
+        .from("characters")
+        .select("*")
+        .eq("id", characterId)
+        .single<import("@/lib/types").Character>();
+      if (!character) throw new Error("character missing");
+
+      const { data: style } = await admin
+        .from("art_styles")
+        .select("prompt_scaffold")
+        .eq("id", story.art_style_id)
+        .single<{ prompt_scaffold: string }>();
+      if (!style) throw new Error("style missing");
+
+      const dataUri = await generateCastPortrait({
+        character,
+        artStylePromptScaffold: style.prompt_scaffold,
+      });
+      const portraitUrl = await uploadGeneratedImage(dataUri);
+
+      // Delete + insert keeps the UNIQUE(character_id, art_style_id) index
+      // honest under concurrent regen requests.
+      await admin
+        .from("character_portraits")
+        .delete()
+        .eq("character_id", characterId)
+        .eq("art_style_id", story.art_style_id);
+      await admin.from("character_portraits").insert({
+        character_id: characterId,
+        art_style_id: story.art_style_id,
+        portrait_url: portraitUrl,
+      });
+
+      await markDone(jobId, {
+        stage: "regenerated",
+        characterId,
+        portraitUrl,
+      });
+    });
+  }
+);
+
 export const allFunctions = [
   generateStoryFn,
   regenTextFn,
@@ -810,4 +1212,7 @@ export const allFunctions = [
   assistImageFn,
   assistInferFn,
   nightlyCleanupFn,
+  generateStoryV2Fn,
+  generatePagesAfterApprovalFn,
+  regenerateCastPortraitFn,
 ];
