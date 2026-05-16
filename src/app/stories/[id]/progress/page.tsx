@@ -19,15 +19,22 @@ export default async function StoryProgressPage({ params }: Props) {
   if (!story || story.user_id !== user.id) notFound();
 
   return (
-    <main className="max-w-2xl mx-auto px-4 py-10">
-      <h1 className="text-2xl font-semibold mb-2">
-        Generating &ldquo;{story.title}&rdquo;
-      </h1>
-      <p className="text-stone-600 mb-6">
-        This page polls until either the cast is ready for approval or the book
-        finishes generating.
-      </p>
-      <StoryProgressClient storyId={id} />
+    <main className="min-h-[calc(100vh-4rem)] bg-cream-100">
+      <div className="max-w-2xl mx-auto px-4 py-12 sm:py-16">
+        <div className="mb-8">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-gold-900 mb-2">
+            Generating your storybook
+          </div>
+          <h1 className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl font-semibold text-ink-900 leading-tight">
+            &ldquo;{story.title}&rdquo;
+          </h1>
+          <p className="text-ink-500 mt-3">
+            Hang tight — we&apos;re bringing your story to life. This usually
+            takes a minute or two.
+          </p>
+        </div>
+        <StoryProgressClient storyId={id} />
+      </div>
     </main>
   );
 }

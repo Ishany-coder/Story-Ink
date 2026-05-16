@@ -566,7 +566,7 @@ import type {
 
 export interface GenerateScriptArgs {
   recipientType: RecipientType;
-  occasion: Occasion;
+  occasion?: Occasion;
   storyTone: StoryTone;
   cast: Character[];
   outline: string;

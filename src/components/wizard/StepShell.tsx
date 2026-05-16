@@ -10,8 +10,11 @@ export default function StepShell({
   children,
   onBack,
   onNext,
+  onSkip,
+  skipLabel = "Skip",
   nextLabel = "Next",
   nextDisabled,
+  nextVariant = "primary",
 }: {
   step: number;
   totalSteps: number;
@@ -20,43 +23,75 @@ export default function StepShell({
   children: ReactNode;
   onBack?: () => void;
   onNext?: () => void;
+  onSkip?: () => void;
+  skipLabel?: string;
   nextLabel?: string;
   nextDisabled?: boolean;
+  // "primary" — standard moss CTA (default).
+  // "prominent" — bigger, full-width on mobile, used by step 7 to signal
+  // "this is the action that actually creates the book."
+  nextVariant?: "primary" | "prominent";
 }) {
+  const nextClasses =
+    nextVariant === "prominent"
+      ? "w-full sm:w-auto px-8 py-3 bg-moss-700 text-cream-50 rounded-xl text-base font-semibold shadow-[0_4px_14px_rgba(31,61,46,0.25)] hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      : "px-6 py-2 bg-moss-700 text-cream-50 rounded-xl font-medium hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed";
+
   return (
     <div>
       <div className="mb-6">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs uppercase tracking-wide text-stone-500">
+        <div className="flex items-center gap-3 mb-3">
+          <span className="text-[11px] uppercase tracking-[0.18em] text-ink-300">
             Step {step} of {totalSteps}
           </span>
-          <div className="flex-1 h-1 bg-stone-200 rounded">
+          <div className="flex-1 h-1 bg-cream-200 rounded-full overflow-hidden">
             <div
-              className="h-1 bg-black rounded"
+              className="h-full bg-moss-700 rounded-full transition-all duration-500"
               style={{ width: `${(step / totalSteps) * 100}%` }}
             />
           </div>
         </div>
-        <h1 className="text-2xl font-semibold">{title}</h1>
-        {subtitle && <p className="text-stone-600 mt-1">{subtitle}</p>}
+        <h1 className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl font-semibold text-ink-900 leading-tight">
+          {title}
+        </h1>
+        {subtitle && (
+          <p className="text-ink-500 mt-2 text-base">{subtitle}</p>
+        )}
       </div>
 
       <div className="mb-8">{children}</div>
 
-      <div className="flex items-center justify-between">
-        {onBack ? (
-          <button type="button" onClick={onBack} className="px-4 py-2 underline">
-            ← Back
-          </button>
-        ) : (
-          <span />
-        )}
+      <div
+        className={`flex flex-col-reverse gap-3 sm:flex-row sm:items-center ${
+          onBack || onSkip ? "sm:justify-between" : "sm:justify-end"
+        }`}
+      >
+        <div className="flex items-center gap-4">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-ink-500 hover:text-ink-900 transition text-sm font-medium"
+            >
+              ← Back
+            </button>
+          )}
+          {onSkip && (
+            <button
+              type="button"
+              onClick={onSkip}
+              className="text-ink-500 hover:text-ink-700 transition text-sm font-medium underline-offset-4 hover:underline"
+            >
+              {skipLabel}
+            </button>
+          )}
+        </div>
         {onNext && (
           <button
             type="button"
             onClick={onNext}
             disabled={nextDisabled}
-            className="px-6 py-2 bg-black text-white rounded disabled:opacity-50"
+            className={nextClasses}
           >
             {nextLabel}
           </button>

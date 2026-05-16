@@ -13,7 +13,7 @@ import type {
 
 interface BuildPromptArgs {
   recipientType: RecipientType;
-  occasion: Occasion;
+  occasion?: Occasion;
   storyTone: StoryTone;
   cast: Character[];
   outline: string;
@@ -34,7 +34,8 @@ function castSummary(cast: Character[]): string {
     .join("\n");
 }
 
-function occasionFrame(occasion: Occasion, hasPetOnly: boolean): string {
+function occasionFrame(occasion: Occasion | undefined, hasPetOnly: boolean): string {
+  if (!occasion) return "Tone is warm and personal.";
   switch (occasion) {
     case "memorial":
       return hasPetOnly
@@ -52,7 +53,8 @@ function occasionFrame(occasion: Occasion, hasPetOnly: boolean): string {
       return "Tone is festive. Lean into seasonal imagery.";
     case "just_because":
       return "Tone is warm and personal. The story exists to say 'I see you'.";
-    case "other":
+    case "achievement":
+      return "Tone is celebratory and admiring — honor the accomplishment without being preachy.";
     default:
       return "Tone is warm and personal.";
   }

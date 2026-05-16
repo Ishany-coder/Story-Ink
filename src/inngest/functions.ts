@@ -544,7 +544,7 @@ interface StoryV2Context {
     prompt: string;
     page_count: number;
     recipient_type: import("@/lib/types").RecipientType;
-    occasion: import("@/lib/types").Occasion;
+    occasion: import("@/lib/types").Occasion | null;
     story_tone: import("@/lib/types").StoryTone;
     art_style_id: string;
     cast_character_ids: string[];
@@ -634,7 +634,7 @@ export const generateStoryV2Fn = inngest.createFunction(
 
       const s = await generateScript({
         recipientType: ctx.story.recipient_type,
-        occasion: ctx.story.occasion,
+        occasion: ctx.story.occasion ?? undefined,
         storyTone: ctx.story.story_tone,
         cast: ctx.cast,
         outline,
