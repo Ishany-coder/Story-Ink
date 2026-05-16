@@ -1,5 +1,33 @@
 import Link from "next/link";
 import { isBetaTesting } from "@/lib/beta-flag";
+import { supabaseAdmin } from "@/lib/supabase";
+
+interface ShowcaseStory {
+  id: string;
+  title: string;
+  cover_image: string;
+  page_count: number;
+}
+
+// Pulls the 3 latest stories from the configured showcase user (if set)
+// for display on the signed-out landing page. Returns [] when the env
+// var is unset or the query fails — caller falls back to mocks.
+async function loadShowcaseStories(): Promise<ShowcaseStory[]> {
+  const userId = process.env.SHOWCASE_USER_ID;
+  if (!userId) return [];
+  try {
+    const { data } = await supabaseAdmin()
+      .from("stories")
+      .select("id, title, cover_image, page_count")
+      .eq("user_id", userId)
+      .not("cover_image", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(3);
+    return (data ?? []) as ShowcaseStory[];
+  } catch {
+    return [];
+  }
+}
 
 // Full signed-out landing page. Leads with value and emotion — pricing
 // is deferred to the bottom CTA so visitors understand the product
@@ -8,11 +36,12 @@ import { isBetaTesting } from "@/lib/beta-flag";
 // Visual language: restrained, no decorative emoji, Legacy palette
 // (cream / ink / moss / gold). Mirrors the conventions in HeroSection.tsx.
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const showcase = await loadShowcaseStories();
   return (
     <div className="w-full">
       <LandingHero />
-      <SampleBooksSection />
+      <SampleBooksSection showcase={showcase} />
       <HowItWorksSection />
       <TestimonialsSection />
       <MemorialSection />
@@ -77,7 +106,10 @@ function LandingHero() {
 // Sample books — CSS-illustrated covers showing the product aesthetic
 // ---------------------------------------------------------------------------
 
-function SampleBooksSection() {
+function SampleBooksSection({ showcase }: { showcase: ShowcaseStory[] }) {
+  if (showcase.length > 0) {
+    return <RealShowcaseSection stories={showcase} />;
+  }
   const samples = [
     {
       title: "Max\u2019s Great Park Adventure",
@@ -172,6 +204,64 @@ function SampleBooksSection() {
 
 // ---------------------------------------------------------------------------
 // How it works — 4-step flow
+// ---------------------------------------------------------------------------
+// Real showcase — renders 3 actual stories from the SHOWCASE_USER_ID
+// account. Cards link to /read/[id]; the reader gates anon access on
+// stories.is_public, so for click-through to work those stories must
+// also be marked public (one-time SQL: see docs/email-deployment.md).
+// ---------------------------------------------------------------------------
+
+function RealShowcaseSection({ stories }: { stories: ShowcaseStory[] }) {
+  return (
+    <section className="border-y border-cream-300 bg-cream-50 px-4 py-20 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-12 text-center">
+          <p className="font-[family-name:var(--font-display)] text-[11px] font-medium uppercase tracking-[0.3em] text-moss-700">
+            Real stories
+          </p>
+          <h2 className="mt-3 font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-ink-900 sm:text-4xl">
+            Every pet has a story worth telling
+          </h2>
+          <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-ink-500">
+            From backyard adventures to heartfelt memorials, each book is
+            uniquely illustrated to match your pet&rsquo;s personality.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+          {stories.map((s) => (
+            <Link
+              key={s.id}
+              href={`/read/${s.id}`}
+              className="group flex flex-col overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)] transition-all duration-300 hover:-translate-y-1 hover:border-gold-500 hover:shadow-[0_12px_32px_rgba(14,26,43,0.10)]"
+            >
+              <div className="relative aspect-square overflow-hidden bg-cream-200">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={s.cover_image}
+                  alt={`Cover of "${s.title}"`}
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                />
+                <div className="absolute right-3 top-3 rounded-full border border-cream-300 bg-cream-50/95 px-2.5 py-1 text-[11px] font-medium text-ink-500 shadow-sm">
+                  {s.page_count} pages
+                </div>
+              </div>
+              <div className="flex flex-1 flex-col gap-1 p-4">
+                <h3 className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900 line-clamp-2">
+                  {s.title}
+                </h3>
+                <span className="mt-auto pt-2 text-xs text-moss-700 font-medium transition-opacity group-hover:opacity-100">
+                  Read book →
+                </span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 function HowItWorksSection() {

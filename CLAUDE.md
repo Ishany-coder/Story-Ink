@@ -45,6 +45,7 @@ Uptime probe lives at `GET /api/health` — returns `{ ok, supabase, stripe, ema
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 - `RESEND_API_KEY`, `EMAIL_FROM` — transactional email. `EMAIL_FROM` must be a Resend-verified domain. Full deployment walkthrough (DNS, SPF/DKIM/DMARC, smoke test) lives in `docs/email-deployment.md`. Until set, the default address is a deliberately invalid placeholder so a misconfigured boot fails loudly on the first send rather than silently dropping mail.
 - `ALLOWED_IMAGE_HOSTS` — optional comma-separated extension to the SSRF allowlist (`isAllowedContentUrl`)
+- `SHOWCASE_USER_ID` — optional Supabase auth user UUID. When set, the signed-out landing page replaces its CSS-illustrated mocks with that user's 3 latest stories that have a `cover_image`. Click-through requires those stories to be marked `is_public = true` so the public reader at `/read/[id]` will serve them to anon visitors. When unset (or query returns no rows), the page falls back to the mock samples.
 
 ## Database
 
