@@ -48,7 +48,7 @@ Uptime probe lives at `GET /api/health` — returns `{ ok, supabase, stripe, ema
 
 ## Database
 
-Schema lives in `supabase/schema.sql` and is **idempotent** — re-run it after edits. Tables: `pets`, `stories`, `jobs`, `custom_layouts`, `print_orders`. All are RLS-scoped to `auth.uid()`; public reads are gated by an `is_public` column where it makes sense (`stories`, `pets`).
+Schema lives in `supabase/schema.sql` and is **idempotent** — re-run it after edits. Tables: `characters`, `character_portraits`, `art_styles`, `story_drafts`, `stories`, `jobs`, `custom_layouts`, `print_orders`. All are RLS-scoped to `auth.uid()`; public reads are gated by `stories.is_public`. The `art_styles` catalog is publicly readable; portraits are owner-scoped via their parent character; drafts and characters are strictly owner-only. Apply the seed once via `supabase/seed-art-styles.sql`.
 
 Storage bucket: `uploads` (public read, writes only via service role).
 
@@ -68,22 +68,27 @@ Storage bucket: `uploads` (public read, writes only via service role).
 
 Every long-running Gemini call goes through Inngest, never inline in a route handler:
 
-1. HTTP route (`POST /api/generate`, `/api/stories/[id]/...`) authenticates, validates input, calls `createJob()` to insert a `jobs` row (`status: "queued"`), then `inngest.send({ name: ... })`. Returns the `jobId` with `202`.
-2. Inngest invokes the matching function in `src/inngest/functions.ts`. Each function uses `step.run(...)` so each unit of work retries independently on Gemini 429s, Supabase ECONNRESETs, etc. The function moves the job through `running` → `done` (with a `result` payload) or `failed` (with an `error`). `onFailure` handlers exist on every function so an exhausted retry budget still marks the job failed.
+1. HTTP route (`POST /api/generate/v2`, `/api/stories/[id]/...`) authenticates, validates input, calls `createJob()` to insert a `jobs` row (`status: "queued"`), then `inngest.send({ name: ... })`. Returns the `jobId` with `202`.
+2. Inngest invokes the matching function in `src/inngest/functions.ts`. Each function uses `step.run(...)` so each unit of work retries independently on Gemini 429s, Supabase ECONNRESETs, etc. The function moves the job through `running` → optional `awaiting_cast_approval` → `done` (with a `result` payload) or `failed` (with an `error`). `onFailure` handlers exist on every function so an exhausted retry budget still marks the job failed.
 3. Client polls `GET /api/jobs/[id]` via `src/lib/useJobPolling.ts` until terminal.
 
 Event names are centralized in `src/inngest/client.ts` as the `EVENTS` const — import from there, don't string-literal them at send sites.
 
 The full registration list lives in `allFunctions` (`src/inngest/functions.ts`) and is served by `src/app/api/inngest/route.ts` using `inngest/next`'s `serve`.
 
-### Story generation specifics
+### Story generation (V2)
 
-`generateStoryFn` has two image-generation strategies controlled by `imageMode`:
+The creation surface is the 7-step wizard at `/create/new` (component: `src/components/wizard/WizardClient.tsx`). The wizard auto-saves to `story_drafts` and on submit calls `POST /api/generate/v2`, which inserts a `stories` row + `jobs` row and dispatches `EVENTS.storyGenerateV2`.
 
-- **`quality`** (default for pet stories) — pages are generated **serially**. Page 1 is the canonical character sheet; page 2..N pass page 1 *and* the immediately-previous page back to Gemini as inline image context. This is the difference between "a real keepsake" and "the dog turns into a different dog by page 4." See the prompt construction in `generatePageImage` (`src/lib/gemini.ts`).
-- **`fast`** (and all generic stories) — pages fan out in parallel using only the pet's reference photos.
+The Inngest pipeline runs in two functions in `src/inngest/functions.ts`:
 
-Pet stories also prepend `buildPetStorySystemPrompt(pet)` (`src/lib/pet-prompt.ts`) to the user's idea before `generateStoryText`. Memorial-mode pets get specific guardrails (no peril, two valid narrative paths: recollection vs. Rainbow Bridge — never blended). Living-mode pets get adventure tone. Quirks from `quirk-bank.ts` are rendered as Q&A so a single quirk can drive an entire page.
+1. **`generateStoryV2Fn`** — Stage 1 generates a structured script (`generateScript` in `src/lib/gemini.ts`) and persists it to `stories.script`. Stage 2 generates one canonical portrait per character in the chosen art style (`generateCastPortrait`), reading-through the `character_portraits` cache keyed by `(character_id, art_style_id)`. The job is then parked in status `awaiting_cast_approval` and the function returns — Inngest does not wait on human input.
+2. User approves at `/stories/[id]/approve-cast` → `POST /api/stories/[id]/approve-cast` sends `EVENTS.castApproved`.
+3. **`generatePagesAfterApprovalFn`** — Stage 3 fans out per-page image generation. Each page calls `generatePageImageWithCastRefs` with the scene description plus the canonical portraits of the characters on that page. Pages render in parallel — there is no page-to-page conditioning chain anymore; cast portraits replace that role.
+
+Per-character regenerate (from the approval gate) runs in `regenerateCastPortraitFn` via `EVENTS.characterRegenerate`.
+
+Prompt building lives in `src/lib/story-prompt.ts` (`buildScriptPrompt`, `buildCastPortraitPrompt`, `buildPagePrompt`). Memorial guardrails are gated by `stories.occasion === "memorial"` and adapt their language for person vs. pet `kind`.
 
 ### Studio / Canvas editor
 
