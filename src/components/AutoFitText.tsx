@@ -9,6 +9,12 @@ interface AutoFitTextProps {
   color: string;
   fontFamily: string;
   fontWeight: string;
+  italic?: boolean;
+  underline?: boolean;
+  letterSpacing?: number;
+  lineHeight?: number;
+  textAlign?: "left" | "center" | "right";
+  textShadow?: string;
 }
 
 export default function AutoFitText({
@@ -18,13 +24,21 @@ export default function AutoFitText({
   color,
   fontFamily,
   fontWeight,
+  italic,
+  underline,
+  letterSpacing,
+  lineHeight,
+  textAlign,
+  textShadow,
 }: AutoFitTextProps) {
+  const effectiveLineHeight = lineHeight ?? 1.15;
   const { containerRef, fontSizePx } = useAutoFitFontSize({
     text,
     logicalWidth,
     logicalMaxFontSize,
     fontFamily,
     fontWeight,
+    lineHeight: effectiveLineHeight,
   });
 
   return (
@@ -44,8 +58,13 @@ export default function AutoFitText({
           color,
           fontFamily,
           fontWeight,
-          lineHeight: 1.15,
-          textAlign: "center",
+          fontStyle: italic ? "italic" : undefined,
+          textDecoration: underline ? "underline" : undefined,
+          letterSpacing:
+            typeof letterSpacing === "number" ? `${letterSpacing}em` : undefined,
+          lineHeight: effectiveLineHeight,
+          textAlign: textAlign ?? "center",
+          textShadow,
           wordBreak: "break-word",
           whiteSpace: "pre-wrap",
           width: "100%",
