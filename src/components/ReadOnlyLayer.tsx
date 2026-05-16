@@ -49,27 +49,22 @@ export default function ReadOnlyLayer({ layer }: { layer: Layer }) {
         shadowParts.push(`${dx}px ${dy}px 0 ${c}`);
       }
     }
-    const extra: React.CSSProperties = {
-      fontStyle: t.italic ? "italic" : undefined,
-      textDecoration: t.underline ? "underline" : undefined,
-      letterSpacing:
-        typeof t.letterSpacing === "number" ? `${t.letterSpacing}em` : undefined,
-      lineHeight: t.lineHeight,
-      textAlign: t.textAlign,
-      textShadow: shadowParts.length > 0 ? shadowParts.join(", ") : undefined,
-    };
     return (
       <div style={style}>
-        <div style={extra}>
-          <AutoFitText
-            text={t.text}
-            logicalWidth={t.width}
-            logicalMaxFontSize={t.fontSize}
-            color={t.color}
-            fontFamily={t.fontFamily}
-            fontWeight={t.fontWeight}
-          />
-        </div>
+        <AutoFitText
+          text={t.text}
+          logicalWidth={t.width}
+          logicalMaxFontSize={t.fontSize}
+          color={t.color}
+          fontFamily={t.fontFamily}
+          fontWeight={t.fontWeight}
+          italic={t.italic}
+          underline={t.underline}
+          letterSpacing={t.letterSpacing}
+          lineHeight={t.lineHeight}
+          textAlign={t.textAlign}
+          textShadow={shadowParts.length > 0 ? shadowParts.join(", ") : undefined}
+        />
       </div>
     );
   }

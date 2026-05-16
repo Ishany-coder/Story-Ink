@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { type Story } from "@/lib/types";
@@ -53,10 +53,42 @@ export default function SlideReader({ story }: { story: Story }) {
     [page, story.default_text_size]
   );
 
+  // Pin the reader to the small viewport so the entire spread (canvas
+  // + arrows + page dots) fits without a page scroll. `100svh` resolves
+  // to the visible viewport on mobile browsers (excluding any retracting
+  // chrome). We subtract 4rem for the fixed navbar at the top of every
+  // layout. The header / fresh-tip / dots rows each shrink-0; the slide
+  // column flex-1s, and a ResizeObserver-driven measurement below
+  // computes the exact square that fits the smaller of the column's
+  // width or its remaining height (so wrapping dot rows, a beta banner,
+  // and the fresh-tip strip all just-work without static guesses).
+  const outerHeight = "calc(100svh - 4rem)";
+  const slideRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState<number | null>(null);
+  useEffect(() => {
+    const el = slideRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w <= 0 || h <= 0) return;
+      // 1024px = max-w-5xl (64rem). Don't grow past it so the reader
+      // doesn't go absurdly large on ultrawide displays.
+      setCanvasSize(Math.min(w, h, 1024));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-gradient-to-b from-cream-200 to-cream-100">
+    <div
+      className="flex flex-col bg-gradient-to-b from-cream-200 to-cream-100"
+      style={{ height: outerHeight }}
+    >
       {showFreshTip && (
-        <div className="flex items-center justify-center gap-2 border-b border-cream-300 bg-cream-100 px-4 py-2 text-center text-[12px] font-medium text-ink-700 sm:px-6 lg:px-8">
+        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-cream-300 bg-cream-100 px-4 py-2 text-center text-[12px] font-medium text-ink-700 sm:px-6 lg:px-8">
           <span className="flex-1 sm:flex-none">
             Your story is ready. Want to tweak a page?{" "}
             <Link
@@ -90,7 +122,7 @@ export default function SlideReader({ story }: { story: Story }) {
       )}
 
       {/* Header */}
-      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 border-b-2 border-dashed border-cream-300 px-3 py-3 sm:px-6 sm:gap-4 lg:px-8">
+      <div className="grid shrink-0 grid-cols-[auto_1fr_auto] items-center gap-2 border-b-2 border-dashed border-cream-300 px-3 py-2 sm:gap-4 sm:px-6 sm:py-3 lg:px-8">
         <Link
           href="/read"
           className="flex items-center gap-1.5 text-sm font-bold text-ink-300 transition-colors hover:text-moss-700"
@@ -132,8 +164,18 @@ export default function SlideReader({ story }: { story: Story }) {
       </div>
 
       {/* Slide */}
-      <div className="flex flex-1 items-center justify-center px-3 py-4 sm:px-4 sm:py-6">
-        <div className="relative mx-auto w-full max-w-5xl">
+      <div
+        ref={slideRef}
+        className="flex min-h-0 flex-1 items-center justify-center px-3 py-2 sm:px-4 sm:py-3"
+      >
+        <div
+          className="relative mx-auto aspect-square"
+          style={
+            canvasSize != null
+              ? { width: canvasSize, height: canvasSize }
+              : { width: "min(100%, 1024px)" }
+          }
+        >
           <div className="overflow-hidden rounded-2xl border-4 border-cream-300 bg-cream-50 shadow-xl shadow-cream-200/50 sm:rounded-3xl">
             <div className="relative aspect-square w-full bg-gradient-to-br from-cream-100 to-cream-200">
               {layers.map((layer) => (
@@ -187,7 +229,7 @@ export default function SlideReader({ story }: { story: Story }) {
       </div>
 
       {/* Page dots — wrap to multiple rows on phone for long stories. */}
-      <div className="flex flex-wrap justify-center gap-2 px-3 pb-6 sm:gap-3 sm:pb-8">
+      <div className="flex shrink-0 flex-wrap justify-center gap-2 px-3 pb-3 sm:gap-3 sm:pb-4">
         {pages.map((_, i) => (
           <button
             key={i}
