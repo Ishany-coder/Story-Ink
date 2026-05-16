@@ -8,85 +8,37 @@
 -- Idempotent: re-running this script is safe.
 
 -- ---------------------------------------------------------------------------
--- Pets
+-- V2 cutover (creation flow overhaul, 2026-05-15)
+-- App is pre-production. Hard wipe of V1 story / pet / job / order data
+-- before the new schema applies. Order matters: print_order_events
+-- references print_orders, which references stories; custom_layouts also
+-- references stories. Use CASCADE on the truncate to keep this single-
+-- statement-safe. Wrapped in a DO block so the truncate is a no-op the
+-- first time the script runs against a brand-new DB (where these tables
+-- don't exist yet).
 -- ---------------------------------------------------------------------------
 
-create table if not exists public.pets (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  name text not null,
-  species text not null check (species in (
-    'dog','cat','bird','rabbit','horse','reptile','fish','other'
-  )),
-  breed text,
-  age text,
-  -- Free-form notes the AI seeds into every story prompt for this pet.
-  -- Kept as one text blob (vs. structured fields) so the user can write
-  -- whatever feels natural — "loves the mailman, hates baths, sleeps on
-  -- my pillow." Token cost on Gemini is fine at <500 chars.
-  personality_notes text,
-  -- "living" pets get adventure-tone stories; "memorial" pets get
-  -- celebratory recollection stories with softer guardrails.
-  mode text not null default 'living' check (mode in ('living','memorial')),
-  passed_at date,
-  -- Reference photo URLs. Capped to 10 in the API to keep token cost
-  -- and image-grounding latency reasonable.
-  photos jsonb not null default '[]'::jsonb,
-  -- Optional override for the templated memorial dedication page on
-  -- printed memorial books. NULL → use the template "In loving memory
-  -- of {name}, {dates}".
-  dedication_text text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+do $$
+begin
+  if to_regclass('public.print_order_events') is not null then
+    truncate table public.print_order_events restart identity cascade;
+  end if;
+  if to_regclass('public.print_orders') is not null then
+    truncate table public.print_orders restart identity cascade;
+  end if;
+  if to_regclass('public.custom_layouts') is not null then
+    truncate table public.custom_layouts restart identity cascade;
+  end if;
+  if to_regclass('public.jobs') is not null then
+    truncate table public.jobs restart identity cascade;
+  end if;
+  if to_regclass('public.stories') is not null then
+    truncate table public.stories restart identity cascade;
+  end if;
+end $$;
 
--- Idempotent for existing deployments that pre-date this column.
-alter table public.pets add column if not exists dedication_text text;
-
--- The pet `is_public` flag was removed (pets are always private now —
--- story-level sharing via stories.is_public is the only shareable
--- axis). The old "pets visible to owner or public" policy referenced
--- this column, so drop the policy first or the column drop errors with
--- "cannot drop column is_public ... policy depends on column".
-drop policy if exists "pets visible to owner or public" on public.pets;
-alter table public.pets drop column if exists is_public;
-
--- Structured "personality DNA" — a list of {prompt, answer} entries
--- the user fills out from a curated bank of specific quirk
--- questions ("Does she tilt her head?", "Where does he sleep?").
--- Stored as JSONB so the bank can grow without a schema change;
--- the Pet type narrows the shape on the application side.
-alter table public.pets
-  add column if not exists quirks jsonb not null default '[]'::jsonb;
-
-create index if not exists pets_user_id_idx on public.pets (user_id);
-create index if not exists pets_created_at_idx on public.pets (created_at desc);
-
-alter table public.pets enable row level security;
-
--- Old "pets visible to owner or public" policy (when is_public existed)
--- is replaced with owner-only: a pet only ever resolves for its owner.
-drop policy if exists "pets visible to owner or public" on public.pets;
-drop policy if exists "pets visible to owner" on public.pets;
-create policy "pets visible to owner"
-  on public.pets for select
-  using (user_id = auth.uid());
-
-drop policy if exists "pets insert by owner" on public.pets;
-create policy "pets insert by owner"
-  on public.pets for insert
-  with check (user_id = auth.uid());
-
-drop policy if exists "pets update by owner" on public.pets;
-create policy "pets update by owner"
-  on public.pets for update
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
-
-drop policy if exists "pets delete by owner" on public.pets;
-create policy "pets delete by owner"
-  on public.pets for delete
-  using (user_id = auth.uid());
+-- Drop pets entirely. The new schema replaces it with `characters` below.
+drop table if exists public.pets cascade;
 
 -- ---------------------------------------------------------------------------
 -- Stories
@@ -96,29 +48,28 @@ create table if not exists public.stories (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   prompt text not null,
-  -- 6-page floor: shorter than that doesn't read as a story; 800 cap
-  -- protects against a malformed client request kicking off a runaway
-  -- image job. Hardcover printing additionally requires >= 24 pages
+  -- V2 page count range: 8..64. Hardcover printing requires >= 24 pages
   -- and is gated on the /ship route — that check is application-level
   -- so the same row can still be sold as a digital book.
-  page_count int not null check (page_count between 6 and 800),
+  page_count int not null check (page_count between 8 and 64),
   pages jsonb not null,
   cover_image text,
   created_at timestamptz not null default now()
 );
 
--- Existing deployed DBs may have the old `between 24 and 800` check;
--- drop the old constraint (named auto by Postgres as
--- `stories_page_count_check`) so they accept the new floor on re-run.
--- Safe to repeat: drop-if-exists handles the no-op case, the add-check
--- below puts the new constraint in place.
+-- Tighten the page_count constraint for V2 (existing deployed DBs may
+-- have the older 6..800 or 24..800 check). Drop-if-exists handles the
+-- no-op case; the add-check below puts the V2 constraint in place.
 alter table public.stories drop constraint if exists stories_page_count_check;
 alter table public.stories add constraint stories_page_count_check
-  check (page_count between 6 and 800);
+  check (page_count between 8 and 64);
 
--- Legacy columns removed when entity stickers and comic mode were dropped.
+-- Legacy columns removed.
 alter table public.stories drop column if exists entities;
 alter table public.stories drop column if exists mode;
+alter table public.stories drop column if exists pet_id;
+alter table public.stories drop column if exists kind;
+alter table public.stories drop column if exists image_style;
 
 alter table public.stories
   add column if not exists library_images jsonb not null default '[]'::jsonb;
@@ -126,20 +77,18 @@ alter table public.stories
 alter table public.stories
   add column if not exists ai_system_prompt text;
 
--- Ownership + privacy + optional pet link. user_id is required for all
--- new rows; existing pre-auth rows would be NULL — the legacy purge
--- script clears the table before this migration runs in fresh setups.
 alter table public.stories
   add column if not exists user_id uuid references auth.users(id) on delete cascade,
   add column if not exists is_public boolean not null default false,
-  add column if not exists pet_id uuid references public.pets(id) on delete set null,
-  -- "pet" stories use the pet's profile + photos; "generic" stories
-  -- preserve the original freeform creation flow without a pet.
-  add column if not exists kind text not null default 'generic'
-    check (kind in ('pet','generic')),
-  -- Image-style preset id (see src/lib/image-styles.ts). Stored so
-  -- regenerations and AI Assistant tweaks pick up the same look.
-  add column if not exists image_style text not null default 'watercolor';
+  -- V2 columns: wizard outputs land here on submit. art_style_id FK is
+  -- enforced after the art_styles table is created below.
+  add column if not exists recipient_type text,
+  add column if not exists occasion text,
+  add column if not exists art_style_id text,
+  add column if not exists story_tone text default 'classic'
+    check (story_tone in ('classic','rhyming')),
+  add column if not exists script jsonb,
+  add column if not exists cast_character_ids uuid[] not null default '{}';
 
 -- Digital purchase flag. When true, anyone with the story's link can
 -- read all pages (paid digital tier). When false, non-owners see only
@@ -150,7 +99,6 @@ alter table public.stories
 
 create index if not exists stories_created_at_idx on public.stories (created_at desc);
 create index if not exists stories_user_id_idx on public.stories (user_id);
-create index if not exists stories_pet_id_idx on public.stories (pet_id);
 create index if not exists stories_public_idx
   on public.stories (created_at desc) where is_public;
 
@@ -180,6 +128,153 @@ create policy "stories update by owner"
 drop policy if exists "stories delete by owner" on public.stories;
 create policy "stories delete by owner"
   on public.stories for delete
+  using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- Characters (V2: replaces pets; unifies people + pets in one shape)
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.characters (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('person','pet')),
+  name text not null,
+  role_label text,
+  traits text,
+  -- nullable; only set when kind='pet'
+  species text,
+  reference_photo_urls text[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists characters_user_id_idx on public.characters (user_id);
+create index if not exists characters_created_at_idx
+  on public.characters (created_at desc);
+
+alter table public.characters enable row level security;
+
+drop policy if exists "characters visible to owner" on public.characters;
+create policy "characters visible to owner"
+  on public.characters for select
+  using (user_id = auth.uid());
+
+drop policy if exists "characters insert by owner" on public.characters;
+create policy "characters insert by owner"
+  on public.characters for insert
+  with check (user_id = auth.uid());
+
+drop policy if exists "characters update by owner" on public.characters;
+create policy "characters update by owner"
+  on public.characters for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+drop policy if exists "characters delete by owner" on public.characters;
+create policy "characters delete by owner"
+  on public.characters for delete
+  using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------------
+-- Art styles (V2: curated catalog)
+-- Seeded by supabase/seed-art-styles.sql.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.art_styles (
+  id text primary key,
+  display_name text not null,
+  description text,
+  prompt_scaffold text not null,
+  sample_image_urls text[] not null default '{}',
+  sort_order int not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+alter table public.art_styles enable row level security;
+
+-- Catalog is publicly readable so the art-style picker works for anon
+-- visitors on a future marketing surface. Writes are service-role only.
+drop policy if exists "art styles readable" on public.art_styles;
+create policy "art styles readable"
+  on public.art_styles for select
+  using (true);
+
+revoke insert, update, delete on public.art_styles from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Character portraits (V2: per-(character, style) cached canonical portrait)
+-- Stage 2 of generation reads first; only renders + inserts on miss.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.character_portraits (
+  id uuid primary key default gen_random_uuid(),
+  character_id uuid not null references public.characters(id) on delete cascade,
+  art_style_id text not null references public.art_styles(id),
+  portrait_url text not null,
+  generated_at timestamptz not null default now(),
+  unique (character_id, art_style_id)
+);
+
+create index if not exists character_portraits_character_idx
+  on public.character_portraits (character_id);
+
+alter table public.character_portraits enable row level security;
+
+drop policy if exists "character portraits readable by owner"
+  on public.character_portraits;
+create policy "character portraits readable by owner"
+  on public.character_portraits for select
+  using (
+    exists (
+      select 1 from public.characters c
+      where c.id = character_portraits.character_id
+        and c.user_id = auth.uid()
+    )
+  );
+
+revoke insert, update, delete on public.character_portraits from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Story drafts (V2: wizard auto-save)
+-- Many parallel drafts per user. Promoted to a stories row on Generate.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.story_drafts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text,
+  current_step smallint not null default 1 check (current_step between 1 and 7),
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists story_drafts_user_id_idx on public.story_drafts (user_id);
+create index if not exists story_drafts_updated_at_idx
+  on public.story_drafts (updated_at desc);
+
+alter table public.story_drafts enable row level security;
+
+drop policy if exists "drafts visible to owner" on public.story_drafts;
+create policy "drafts visible to owner"
+  on public.story_drafts for select
+  using (user_id = auth.uid());
+
+drop policy if exists "drafts insert by owner" on public.story_drafts;
+create policy "drafts insert by owner"
+  on public.story_drafts for insert
+  with check (user_id = auth.uid());
+
+drop policy if exists "drafts update by owner" on public.story_drafts;
+create policy "drafts update by owner"
+  on public.story_drafts for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+drop policy if exists "drafts delete by owner" on public.story_drafts;
+create policy "drafts delete by owner"
+  on public.story_drafts for delete
   using (user_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
