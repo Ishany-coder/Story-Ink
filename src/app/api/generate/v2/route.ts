@@ -54,6 +54,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "cast required" }, { status: 400 });
     }
     const pageCount = Math.min(Math.max(body.pageCount ?? 24, 8), 64);
+    // Text-size picker is optional; clamp to a sane range (16–72 logical
+    // px). Anything outside falls back to the codebase default.
+    let defaultTextSize: number | undefined;
+    if (typeof body.defaultTextSize === "number") {
+      const n = Math.round(body.defaultTextSize);
+      if (n >= 16 && n <= 72) defaultTextSize = n;
+    }
 
     // Verify the cast belongs to this user.
     const admin = supabaseAdmin();
@@ -87,6 +94,7 @@ export async function POST(req: NextRequest) {
         art_style_id: body.artStyleId,
         cast_character_ids: body.castCharacterIds,
         is_public: body.isPublic === true,
+        default_text_size: defaultTextSize ?? null,
       })
       .select("id")
       .single<{ id: string }>();

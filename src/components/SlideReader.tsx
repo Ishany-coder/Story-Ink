@@ -48,7 +48,10 @@ export default function SlideReader({ story }: { story: Story }) {
   }, [goNext, goPrev]);
 
   const page = pages[currentPage];
-  const layers = useMemo(() => resolveDisplayLayers(page), [page]);
+  const layers = useMemo(
+    () => resolveDisplayLayers(page, story.default_text_size),
+    [page, story.default_text_size]
+  );
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col bg-gradient-to-b from-cream-200 to-cream-100">
@@ -130,7 +133,7 @@ export default function SlideReader({ story }: { story: Story }) {
 
       {/* Slide */}
       <div className="flex flex-1 items-center justify-center px-3 py-4 sm:px-4 sm:py-6">
-        <div className="relative mx-auto w-full max-w-3xl">
+        <div className="relative mx-auto w-full max-w-5xl">
           <div className="overflow-hidden rounded-2xl border-4 border-cream-300 bg-cream-50 shadow-xl shadow-cream-200/50 sm:rounded-3xl">
             <div className="relative aspect-square w-full bg-gradient-to-br from-cream-100 to-cream-200">
               {layers.map((layer) => (

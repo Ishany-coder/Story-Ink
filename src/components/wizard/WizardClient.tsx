@@ -191,6 +191,7 @@ export default function WizardClient({
           artStyleId: payload.artStyleId,
           pageCount: payload.pageCount ?? 16,
           title: payload.title,
+          defaultTextSize: payload.defaultTextSize,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -709,6 +710,14 @@ export default function WizardClient({
           </div>
         </div>
 
+        {/* Text size — sets the AutoFitText cap on every page's
+            layout-source narration. Standard is the codebase default
+            (38). Younger reader → Large; longer narrations → Compact. */}
+        <TextSizePicker
+          value={payload.defaultTextSize}
+          onChange={(n) => set({ defaultTextSize: n })}
+        />
+
         <style jsx>{`
           .page-count-slider {
             -webkit-appearance: none;
@@ -968,6 +977,76 @@ function SummaryCard({
     );
   }
   return <div className={baseClasses}>{body}</div>;
+}
+
+// Three-preset text-size picker rendered inside Step 6. Values are the
+// logical-px caps that flow through to stories.default_text_size and
+// AutoFitText. Null/undefined value means "use codebase default".
+const TEXT_SIZE_PRESETS: Array<{ id: string; label: string; size: number; sample: string }> = [
+  { id: "compact", label: "Compact", size: 28, sample: "Aa" },
+  { id: "standard", label: "Standard", size: 38, sample: "Aa" },
+  { id: "large", label: "Large", size: 48, sample: "Aa" },
+];
+
+function TextSizePicker({
+  value,
+  onChange,
+}: {
+  value: number | undefined;
+  onChange: (n: number) => void;
+}) {
+  // Default to "Standard" (38) when unset, so the visual reflects what
+  // the codebase will use on submit.
+  const active = value ?? 38;
+  return (
+    <div className="rounded-2xl border border-cream-300 bg-cream-50 p-5 sm:p-6">
+      <div className="mb-3 flex items-baseline justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-[0.18em] text-ink-300">
+            Default text size
+          </div>
+          <p className="mt-1 text-sm text-ink-500">
+            How big the narration appears on each page. You can tweak per
+            page later in the Studio.
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        {TEXT_SIZE_PRESETS.map((p) => {
+          const selected = active === p.size;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onChange(p.size)}
+              className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border bg-cream-50 px-3 py-4 transition-all ${
+                selected
+                  ? "border-moss-500 ring-2 ring-moss-700 bg-moss-100/40"
+                  : "border-cream-300 hover:border-gold-500 hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(14,26,43,0.06)]"
+              }`}
+            >
+              <span
+                className={`font-[family-name:var(--font-display)] leading-none ${
+                  selected ? "text-moss-900" : "text-ink-900"
+                }`}
+                style={{ fontSize: `${Math.round(p.size * 0.55)}px` }}
+                aria-hidden="true"
+              >
+                {p.sample}
+              </span>
+              <span
+                className={`text-xs font-medium ${
+                  selected ? "text-moss-900" : "text-ink-700"
+                }`}
+              >
+                {p.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

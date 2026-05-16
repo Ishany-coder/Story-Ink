@@ -549,6 +549,7 @@ interface StoryV2Context {
     story_tone: import("@/lib/types").StoryTone;
     art_style_id: string;
     cast_character_ids: string[];
+    default_text_size: number | null;
   };
   cast: import("@/lib/types").Character[];
   style: {
@@ -587,7 +588,7 @@ export const generateStoryV2Fn = inngest.createFunction(
       const { data: story, error: storyErr } = await admin
         .from("stories")
         .select(
-          "id, user_id, title, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids"
+          "id, user_id, title, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids, default_text_size"
         )
         .eq("id", storyId)
         .single<StoryV2Context["story"]>();
@@ -740,7 +741,7 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
       const admin = supabaseAdmin();
       const { data: story, error } = await admin
         .from("stories")
-        .select("id, script, art_style_id, cast_character_ids, page_count")
+        .select("id, script, art_style_id, cast_character_ids, page_count, default_text_size")
         .eq("id", storyId)
         .single<{
           id: string;
@@ -748,6 +749,7 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
           art_style_id: string;
           cast_character_ids: string[];
           page_count: number;
+          default_text_size: number | null;
         }>();
       if (error || !story?.script) throw new Error("script missing");
 
@@ -821,7 +823,11 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
           });
           const imageUrl = await uploadGeneratedImage(dataUri);
 
-          const overlays = buildInitialOverlays(imageUrl, p.text);
+          const overlays = buildInitialOverlays(
+            imageUrl,
+            p.text,
+            ctx.story.default_text_size
+          );
           await updateStoryPageFields(storyId, p.pageNumber, {
             imageUrl,
             overlays,
