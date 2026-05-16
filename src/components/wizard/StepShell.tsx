@@ -43,9 +43,14 @@ export default function StepShell({
   editingReview?: boolean;
   onExitReview?: () => void;
 }) {
+  // The prominent variant gets a heavier shadow + larger padding so the
+  // "Generate book" CTA reads as the commit action. It used to span the
+  // full mobile width (back when it lived at the bottom of the step);
+  // since Step 7 now mounts it in the top action row alongside Back,
+  // we drop the w-full so it doesn't shove the Back link off-screen.
   const nextClasses =
     nextVariant === "prominent"
-      ? "w-full sm:w-auto px-8 py-3 bg-moss-700 text-cream-50 rounded-xl text-base font-semibold shadow-[0_4px_14px_rgba(31,61,46,0.25)] hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      ? "px-8 py-3 bg-moss-700 text-cream-50 rounded-xl text-base font-semibold shadow-[0_4px_14px_rgba(31,61,46,0.25)] hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed"
       : "px-6 py-2 bg-moss-700 text-cream-50 rounded-xl font-medium hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed";
 
   // When nextAtTop is set, Back/Skip/Next all live in a single top action

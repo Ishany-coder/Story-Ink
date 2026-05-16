@@ -36,10 +36,52 @@ import {
   uploadGeneratedImage,
 } from "@/lib/supabase";
 import { buildInitialOverlays, DEFAULT_LAYOUT_ID } from "@/lib/layouts";
-import type { Layer, Story } from "@/lib/types";
+import type { Layer, MemoryReference, Story } from "@/lib/types";
 
 const TEXT_RETRIES = 2;
 const IMAGE_RETRIES = 3;
+
+// Both the script-stage and the page-stage need to read back the
+// wizard's prompt payload (outline + memories[]) from stories.prompt.
+// Plain strings — legacy / corrupted records — fall back to
+// outline-only with no memories. Defensive: every memory entry is
+// re-validated structurally before downstream code trusts it.
+function parsePromptPayload(raw: string | null | undefined): {
+  outline: string;
+  memories: MemoryReference[];
+} {
+  if (!raw) return { outline: "", memories: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return { outline: String(raw), memories: [] };
+    }
+    const outline =
+      typeof parsed.outline === "string" ? parsed.outline : "";
+    const rawMemories: unknown[] = Array.isArray(parsed.memories)
+      ? (parsed.memories as unknown[])
+      : [];
+    const memories: MemoryReference[] = [];
+    for (const entry of rawMemories) {
+      if (!entry || typeof entry !== "object") continue;
+      const m = entry as Record<string, unknown>;
+      if (
+        typeof m.id === "string" &&
+        typeof m.photoUrl === "string" &&
+        typeof m.caption === "string"
+      ) {
+        memories.push({
+          id: m.id,
+          photoUrl: m.photoUrl,
+          caption: m.caption,
+        });
+      }
+    }
+    return { outline, memories };
+  } catch {
+    return { outline: String(raw), memories: [] };
+  }
+}
 
 // onFailure handlers receive a wrapped event whose `data.event.data` is the
 // original event. We narrow just enough to pull the jobId out.
@@ -615,24 +657,10 @@ export const generateStoryV2Fn = inngest.createFunction(
     });
 
     const script = await step.run("generate-script", async () => {
-      // The wizard's outline + key memories live on stories.prompt as
-      // a JSON-encoded payload (see /api/generate/v2). Plain strings
-      // fall back to outline-only.
-      let outline = "";
-      let keyMemories: string[] = [];
-      try {
-        const parsed = JSON.parse(ctx.story.prompt);
-        if (parsed && typeof parsed === "object") {
-          outline = typeof parsed.outline === "string" ? parsed.outline : "";
-          keyMemories = Array.isArray(parsed.keyMemories)
-            ? parsed.keyMemories.filter((s: unknown) => typeof s === "string")
-            : [];
-        } else {
-          outline = String(ctx.story.prompt ?? "");
-        }
-      } catch {
-        outline = String(ctx.story.prompt ?? "");
-      }
+      // The wizard's outline + memory reference photos live on
+      // stories.prompt as a JSON-encoded payload (see /api/generate/v2).
+      // Plain strings (pre-V2 / legacy) fall back to outline-only.
+      const { outline, memories } = parsePromptPayload(ctx.story.prompt);
 
       const s = await generateScript({
         recipientType: ctx.story.recipient_type,
@@ -640,7 +668,7 @@ export const generateStoryV2Fn = inngest.createFunction(
         storyTone: ctx.story.story_tone,
         cast: ctx.cast,
         outline,
-        keyMemories,
+        memories,
         pageCount: ctx.story.page_count,
       });
 
@@ -741,11 +769,14 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
       const admin = supabaseAdmin();
       const { data: story, error } = await admin
         .from("stories")
-        .select("id, script, art_style_id, cast_character_ids, page_count, default_text_size")
+        .select(
+          "id, script, prompt, art_style_id, cast_character_ids, page_count, default_text_size"
+        )
         .eq("id", storyId)
         .single<{
           id: string;
           script: import("@/lib/types").Script;
+          prompt: string;
           art_style_id: string;
           cast_character_ids: string[];
           page_count: number;
@@ -771,6 +802,12 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         .select("id, name")
         .in("id", story.cast_character_ids);
 
+      // Re-parse the wizard prompt payload so the per-page step has
+      // access to memory photo URLs + captions. The script-stage
+      // refinement already guarantees every memory id is referenced at
+      // least once, so this map is safe to look up against.
+      const { memories } = parsePromptPayload(story.prompt);
+
       // Seed empty pages so the Studio can render placeholders while
       // images come in. updateStoryPageFields will fill imageUrl per page.
       const initialPages = story.script.pages.map((p) => ({
@@ -793,6 +830,7 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         style,
         portraits: portraits ?? [],
         cast: cast ?? [],
+        memories,
       };
     });
 
@@ -801,6 +839,8 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
       portraitByCharId.set(p.character_id, p.portrait_url);
     const nameByCharId = new Map<string, string>();
     for (const c of ctx.cast) nameByCharId.set(c.id, c.name);
+    const memoryById = new Map<string, MemoryReference>();
+    for (const m of ctx.memories) memoryById.set(m.id, m);
 
     const pages = ctx.story.script.pages;
     await Promise.all(
@@ -816,10 +856,32 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
               (x): x is { name: string; portraitUrl: string } => x !== null
             );
 
+          // Build the page's memory inputs by joining script-emitted
+          // memoryReferences (id + usage) against the wizard's memory
+          // map (id → photoUrl + caption). Drops any ref whose id is
+          // missing from the map; the script-stage refinement makes
+          // this defensive rather than load-bearing.
+          const memoryRefsOnPage = (p.memoryReferences ?? [])
+            .map((ref) => {
+              const m = memoryById.get(ref.memoryId);
+              return m
+                ? {
+                    caption: m.caption,
+                    photoUrl: m.photoUrl,
+                    usage: ref.usage,
+                  }
+                : null;
+            })
+            .filter(
+              (x): x is { caption: string; photoUrl: string; usage: string } =>
+                x !== null
+            );
+
           const dataUri = await generatePageImageWithCastRefs({
             sceneDescription: p.sceneDescription,
             artStylePromptScaffold: ctx.style.prompt_scaffold,
             castPortraitsOnPage: castOnPage,
+            memoryRefsOnPage,
           });
           const imageUrl = await uploadGeneratedImage(dataUri);
 

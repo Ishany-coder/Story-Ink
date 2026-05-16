@@ -551,7 +551,8 @@ Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "
 // V2 generation pipeline: script + cast portraits + page art with cast refs
 // ---------------------------------------------------------------------------
 
-import type { Character, Script } from "@/lib/types";
+import type { Character, MemoryReference, Script } from "@/lib/types";
+import { parseScript } from "@/lib/script-schema";
 import {
   buildCastPortraitPrompt,
   buildPagePrompt,
@@ -570,27 +571,8 @@ export interface GenerateScriptArgs {
   storyTone: StoryTone;
   cast: Character[];
   outline: string;
-  keyMemories: string[];
+  memories: MemoryReference[];
   pageCount: number;
-}
-
-function isScript(value: unknown, expectedPages: number): value is Script {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  if (typeof v.title !== "string") return false;
-  if (!Array.isArray(v.pages)) return false;
-  if (v.pages.length !== expectedPages) return false;
-  return v.pages.every((p) => {
-    if (!p || typeof p !== "object") return false;
-    const pp = p as Record<string, unknown>;
-    return (
-      typeof pp.pageNumber === "number" &&
-      typeof pp.text === "string" &&
-      typeof pp.sceneDescription === "string" &&
-      Array.isArray(pp.characterIds) &&
-      pp.characterIds.every((id) => typeof id === "string")
-    );
-  });
 }
 
 export async function generateScript(args: GenerateScriptArgs): Promise<Script> {
@@ -611,13 +593,21 @@ export async function generateScript(args: GenerateScriptArgs): Promise<Script> 
   assertSafeFinish(result, "generateScript");
   const text = result.response.text();
   const parsed = parseJsonResponse(text);
-  if (!isScript(parsed, args.pageCount)) {
+  // Zod-backed parse + cross-field refinements. Refinements live in
+  // script-schema.ts: page count, only-allowed memory ids, and every
+  // memory id used at least once. Failures surface the same
+  // LlmJsonParseError so existing onFailure retry logic keeps working.
+  const result2 = parseScript(parsed, {
+    expectedPageCount: args.pageCount,
+    allowedMemoryIds: args.memories.map((m) => m.id),
+  });
+  if (!result2.success) {
     throw new LlmJsonParseError(
-      `generateScript: parsed JSON did not match Script schema (expected ${args.pageCount} pages)`,
+      `generateScript: ${result2.message}`,
       text
     );
   }
-  return parsed;
+  return result2.data;
 }
 
 // Local helper: pull the first inlineData blob from an image response and
@@ -680,25 +670,48 @@ export async function generateCastPortrait(args: {
   return extractFirstImageDataUri(result);
 }
 
-// V2 page image — pass the canonical cast portraits for the characters
-// that appear on this page, plus the scene description. Stable refs
-// replace V1's page-to-page conditioning chain.
+// V2 page image — passes the canonical cast portraits AND any memory
+// reference photos that should appear on this page. The Gemini parts
+// array is ordered: [text, ...castInline, ...memoryInline]. The text
+// prompt enumerates both batches by name/caption so the model knows
+// which attached image is which.
 export async function generatePageImageWithCastRefs(args: {
   sceneDescription: string;
   artStylePromptScaffold: string;
   castPortraitsOnPage: Array<{ name: string; portraitUrl: string }>;
+  memoryRefsOnPage?: Array<{
+    caption: string;
+    photoUrl: string;
+    usage: string;
+  }>;
 }): Promise<string> {
+  const memoryRefs = args.memoryRefsOnPage ?? [];
   const prompt = buildPagePrompt({
     sceneDescription: args.sceneDescription,
     artStylePromptScaffold: args.artStylePromptScaffold,
     characterNamesOnPage: args.castPortraitsOnPage.map((c) => c.name),
+    memoryRefsOnPage: memoryRefs.map((m) => ({
+      caption: m.caption,
+      usage: m.usage,
+    })),
   });
 
-  const refImages: Array<{ inlineData: { data: string; mimeType: string } }> =
+  // Inline image parts in two batches matched to the prompt's
+  // enumeration: cast portraits first (character anchors), then memory
+  // references. A failure to fetch any single ref is non-fatal — we
+  // skip it and continue rather than dropping the whole page.
+  const castInline: Array<{ inlineData: { data: string; mimeType: string } }> =
     [];
   for (const c of args.castPortraitsOnPage) {
     const inline = await fetchImageAsInlineData(c.portraitUrl);
-    if (inline) refImages.push({ inlineData: inline });
+    if (inline) castInline.push({ inlineData: inline });
+  }
+  const memoryInline: Array<{
+    inlineData: { data: string; mimeType: string };
+  }> = [];
+  for (const m of memoryRefs) {
+    const inline = await fetchImageAsInlineData(m.photoUrl);
+    if (inline) memoryInline.push({ inlineData: inline });
   }
 
   const model = genAI.getGenerativeModel({
@@ -710,7 +723,7 @@ export async function generatePageImageWithCastRefs(args: {
       contents: [
         {
           role: "user",
-          parts: [{ text: prompt }, ...refImages],
+          parts: [{ text: prompt }, ...castInline, ...memoryInline],
         },
       ],
       generationConfig: {

@@ -7,6 +7,7 @@ import StepShell from "./StepShell";
 import type {
   ArtStyle,
   Character,
+  MemoryReference,
   Occasion,
   RecipientType,
   StoryDraft,
@@ -97,6 +98,18 @@ export default function WizardClient({
   const [pendingDelete, setPendingDelete] = useState<Character | null>(null);
   const [deletingCharacter, setDeletingCharacter] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Scroll target for generate-stage errors on Step 7. The Generate
+  // CTA lives in the top action row; without scrollIntoView the error
+  // banner ended up below the fold and the failure looked silent.
+  const errorAnchorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (error && errorAnchorRef.current) {
+      errorAnchorRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, [error]);
   // Step 1's "Custom storybook" inline panel toggle.
   const [customOpen, setCustomOpen] = useState<boolean>(
     () => (draft.payload?.recipientType === "other") && Boolean(draft.payload?.outline)
@@ -107,6 +120,46 @@ export default function WizardClient({
         ? draft.payload?.outline ?? ""
         : ""
   );
+
+  // One-shot reconciliation: drop cast ids that no longer exist among
+  // the user's characters. `initialCharacters` is fresh from the
+  // server, so it's the authority. Old drafts can carry ids that
+  // pointed at characters since deleted from /characters; if we don't
+  // strip them here, the user submits, hits a 400 at /api/generate/v2,
+  // and bounces with no clear path forward. Auto-save picks up the
+  // cleaned payload on its next debounce.
+  useEffect(() => {
+    const valid = new Set(initialCharacters.map((c) => c.id));
+    const current = payload.castCharacterIds ?? [];
+    const filtered = current.filter((id) => valid.has(id));
+    if (filtered.length !== current.length) {
+      setPayload((p) => ({ ...p, castCharacterIds: filtered }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-select a character that was just created via the "+ Add
+  // character" tile. CharacterForm appends ?addedCharacter=<id> to
+  // the wizard return URL on successful create; we read it here, add
+  // the id to the cast (if it actually exists in initialCharacters),
+  // then strip the param so a refresh doesn't re-trigger the effect.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const addedId = url.searchParams.get("addedCharacter");
+    if (!addedId) return;
+    const exists = initialCharacters.some((c) => c.id === addedId);
+    if (exists) {
+      setPayload((p) => {
+        const current = p.castCharacterIds ?? [];
+        if (current.includes(addedId)) return p;
+        return { ...p, castCharacterIds: [...current, addedId] };
+      });
+    }
+    url.searchParams.delete("addedCharacter");
+    router.replace(url.pathname + (url.search ? url.search : ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-save on every step / payload change (debounced).
   const saveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -275,7 +328,7 @@ export default function WizardClient({
           storyTone: payload.storyTone ?? "classic",
           castCharacterIds: payload.castCharacterIds ?? [],
           outline: payload.outline ?? "",
-          keyMemories: payload.keyMemories ?? [],
+          memories: payload.memories ?? [],
           artStyleId: payload.artStyleId,
           pageCount: payload.pageCount ?? 16,
           title: payload.title,
@@ -518,14 +571,15 @@ export default function WizardClient({
 
   if (step === 3) {
     const selectedIds = new Set(payload.castCharacterIds ?? []);
-    const addHref = `/characters/new?next=${encodeURIComponent(
-      `/create/new?draft=${draft.id}`
-    )}`;
+    const returnTo = `/create/new?draft=${draft.id}`;
+    const addHref = `/characters/new?next=${encodeURIComponent(returnTo)}`;
+    const editHref = (charId: string) =>
+      `/characters/${charId}?next=${encodeURIComponent(returnTo)}`;
     return (
       <StepShell
         step={3}
         totalSteps={totalSteps}
-        title="Build the cast"
+        title="Build Your Cast"
         subtitle="Add at least one character. Their photos let the AI keep them looking like them on every page."
         onBack={() => goBack(2)}
         onNext={() => goNext(4)}
@@ -582,32 +636,83 @@ export default function WizardClient({
                     </div>
                   </div>
                 </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteError(null);
-                    setPendingDelete(c);
-                  }}
-                  aria-label={`Delete ${c.name}`}
-                  title={`Delete ${c.name}`}
-                  className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-cream-50/95 text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                {/* Selection badge — always rendered; only its colors
+                    change so the tile doesn't shift on toggle. The ring
+                    on the wrapper still carries the at-a-glance signal;
+                    this badge makes it unambiguous at tile scale. */}
+                <span
+                  aria-hidden="true"
+                  className={`absolute left-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full border-2 shadow-sm transition-colors ${
+                    selected
+                      ? "bg-moss-700 border-moss-700 text-cream-50"
+                      : "bg-cream-50/95 border-cream-300 text-transparent"
+                  }`}
                 >
                   <svg
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="3"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    aria-hidden="true"
                     className="h-4 w-4"
                   >
-                    <path d="M3 6h18" />
-                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M5 12l5 5L20 7" />
                   </svg>
-                </button>
+                </span>
+                {/* Per-tile action cluster: edit on the left, delete on
+                    the right. Both stop propagation so they don't toggle
+                    selection. The Edit link routes to the character form
+                    with a `next` param so saving returns to this step. */}
+                <div className="absolute right-1.5 top-1.5 flex items-center gap-1">
+                  <Link
+                    href={editHref(c.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Edit ${c.name}`}
+                    title={`Edit ${c.name}`}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cream-50/95 text-ink-700 shadow-sm transition-colors hover:bg-moss-700 hover:text-cream-50 focus:outline-none focus:ring-2 focus:ring-moss-700/40"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      className="h-4 w-4"
+                    >
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                    </svg>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteError(null);
+                      setPendingDelete(c);
+                    }}
+                    aria-label={`Delete ${c.name}`}
+                    title={`Delete ${c.name}`}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cream-50/95 text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      className="h-4 w-4"
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -661,7 +766,8 @@ export default function WizardClient({
   }
 
   if (step === 4) {
-    const memories = payload.keyMemories ?? [];
+    const memoryRefs = payload.memories ?? [];
+    const missingCaption = memoryRefs.some((m) => !m.caption.trim());
     return (
       <StepShell
         step={4}
@@ -677,7 +783,10 @@ export default function WizardClient({
           setReturnToReview(false);
           navigateBack(7);
         }}
-        nextDisabled={!payload.outline?.trim()}
+        // Gate on outline content AND on every uploaded memory having a
+        // caption — the AI needs the context to know how to use the
+        // photo on a page.
+        nextDisabled={!payload.outline?.trim() || missingCaption}
       >
         <div className="space-y-4">
           <textarea
@@ -687,9 +796,9 @@ export default function WizardClient({
             className="w-full rounded-xl border border-cream-300 bg-cream-50 p-3 text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
             placeholder="A magical adventure where Mom takes Maya on a road trip to find the world's biggest pancake…"
           />
-          <KeyMemoriesEditor
-            value={memories}
-            onChange={(m) => set({ keyMemories: m })}
+          <MemoryReferencesEditor
+            value={memoryRefs}
+            onChange={(m) => set({ memories: m })}
           />
         </div>
       </StepShell>
@@ -915,35 +1024,33 @@ export default function WizardClient({
       subtitle="Review your inputs. You'll get to approve the cast portraits before pages render."
       onBack={() => goBack(6)}
       onNext={generate}
+      nextAtTop
       nextLabel={generating ? "Sending…" : "Generate book"}
-      nextDisabled={generating}
+      // Require a non-empty title before committing — the inline title
+      // input on this step is the user's last chance to name the book.
+      nextDisabled={generating || !payload.title?.trim()}
       nextVariant="prominent"
     >
       <div className="space-y-4">
-        {/* Title input — leave blank to let the AI suggest one. */}
-        <div className="rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5">
-          <label
-            htmlFor="story-title"
-            className="block text-[11px] uppercase tracking-[0.18em] text-ink-300 mb-2"
+        {/* Generate-stage error banner. Sits at the top of Step 7 so a
+            failed submit is immediately visible at the same eyeline
+            as the Generate CTA in the top action row. The effect on
+            `error` also smooth-scrolls the anchor into view. */}
+        {error && (
+          <div
+            ref={errorAnchorRef}
+            role="alert"
+            className="bg-red-50 border border-red-200 text-red-900 rounded-xl p-3 text-sm"
           >
-            Book title
-          </label>
-          <input
-            id="story-title"
-            type="text"
-            value={payload.title ?? ""}
-            onChange={(e) => set({ title: e.target.value })}
-            maxLength={120}
-            placeholder="Leave blank and we'll suggest one"
-            className="w-full bg-transparent border-0 border-b border-cream-300 px-0 py-1 text-lg sm:text-xl font-[family-name:var(--font-display)] text-ink-900 placeholder:text-ink-300 focus:outline-none focus:border-moss-700 transition-colors"
-          />
-          <p className="mt-2 text-xs text-ink-500">
-            If empty, the AI will name the book based on the story it generates.
-          </p>
-        </div>
+            {error}
+          </div>
+        )}
 
         {/* Header card — art style sample strip behind the title gives
-            the review a "magazine cover" feel rather than a form. */}
+            the review a "magazine cover" feel rather than a form. The
+            title field is rendered in place as an input that styles
+            itself like a heading; the user clicks the title to rename
+            the book. Leaving it blank lets the AI suggest one. */}
         <div className="relative overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)]">
           <div className="absolute inset-0 flex">
             {sampleStripUrls.length > 0 ? (
@@ -962,12 +1069,22 @@ export default function WizardClient({
           </div>
           <div className="absolute inset-0 bg-gradient-to-t from-cream-50 via-cream-50/85 to-cream-50/30" />
           <div className="relative p-6 sm:p-8">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-gold-900 mb-1">
+            <label
+              htmlFor="story-title"
+              className="block text-[11px] uppercase tracking-[0.18em] text-gold-900 mb-1"
+            >
               Story preview
-            </div>
-            <h2 className="font-[family-name:var(--font-display)] text-2xl sm:text-3xl font-semibold text-ink-900 leading-tight">
-              {payload.title?.trim() || "Untitled story"}
-            </h2>
+            </label>
+            <input
+              id="story-title"
+              type="text"
+              value={payload.title ?? ""}
+              onChange={(e) => set({ title: e.target.value })}
+              maxLength={120}
+              placeholder="Untitled story"
+              aria-label="Book title"
+              className="w-full bg-transparent border-0 border-b-2 border-transparent px-0 py-1 font-[family-name:var(--font-display)] text-2xl sm:text-3xl font-semibold text-ink-900 leading-tight placeholder:text-ink-300 placeholder:italic hover:border-cream-300 focus:outline-none focus:border-moss-700 transition-colors"
+            />
           </div>
         </div>
 
@@ -1063,11 +1180,6 @@ export default function WizardClient({
         </button>
       </div>
 
-      {error && (
-        <div className="mt-4 bg-red-50 border border-red-200 text-red-900 rounded-xl p-3 text-sm">
-          {error}
-        </div>
-      )}
     </StepShell>
   );
 }
@@ -1290,65 +1402,190 @@ function OccasionIcon({ id }: { id: Occasion }) {
   }
 }
 
-function KeyMemoriesEditor({
+// Upload zone + caption inputs for the wizard's "reference photos &
+// memories" section. Each entry pairs a Supabase Storage URL (uploaded
+// via /api/upload, same path the character form uses) with a short
+// caption that gives the AI context for how to use the photo. Captions
+// are required before the wizard advances — the parent gates Next on
+// `m.caption.trim()` for every entry.
+const MAX_MEMORY_PHOTOS = 10;
+
+function MemoryReferencesEditor({
   value,
   onChange,
 }: {
-  value: string[];
-  onChange: (next: string[]) => void;
+  value: MemoryReference[];
+  onChange: (next: MemoryReference[]) => void;
 }) {
-  const [draft, setDraft] = useState("");
-  function add() {
-    const t = draft.trim();
-    if (!t) return;
-    onChange([...value, t]);
-    setDraft("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  async function uploadOne(file: File): Promise<string> {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!res.ok) throw new Error(await res.text());
+    const body = (await res.json()) as { url: string };
+    return body.url;
   }
+
+  async function handlePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const room = MAX_MEMORY_PHOTOS - value.length;
+    if (room <= 0) {
+      setUploadError(`Max ${MAX_MEMORY_PHOTOS} photos.`);
+      e.target.value = "";
+      return;
+    }
+    const trimmed = Array.from(files)
+      .filter((f) => f.type.startsWith("image/"))
+      .slice(0, room);
+    if (trimmed.length === 0) {
+      e.target.value = "";
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const uploaded: MemoryReference[] = [];
+      for (const f of trimmed) {
+        const url = await uploadOne(f);
+        uploaded.push({
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `mem-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`,
+          photoUrl: url,
+          caption: "",
+        });
+      }
+      onChange([...value, ...uploaded]);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "upload failed");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  function updateCaption(id: string, caption: string) {
+    onChange(value.map((m) => (m.id === id ? { ...m, caption } : m)));
+  }
+  function removeOne(id: string) {
+    onChange(value.filter((m) => m.id !== id));
+  }
+
+  const slotsLeft = MAX_MEMORY_PHOTOS - value.length;
+
   return (
-    <div>
-      <label className="block text-sm font-medium text-ink-700 mb-1">
-        Key memories (optional)
-      </label>
-      <div className="flex gap-2 mb-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add();
-            }
-          }}
-          placeholder='e.g. "trip to Maine 2019"'
-          className="flex-1 rounded-xl border border-cream-300 bg-cream-50 px-3 py-2 text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
-        />
-        <button
-          type="button"
-          onClick={add}
-          className="px-4 py-2 rounded-xl border border-cream-300 bg-cream-50 text-ink-700 hover:border-gold-500 transition"
-        >
-          Add
-        </button>
+    <div className="rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-ink-900">
+            Reference photos &amp; memories{" "}
+            <span className="font-normal text-ink-500">(optional)</span>
+          </h3>
+          <p className="mt-0.5 text-xs text-ink-500">
+            Upload up to {MAX_MEMORY_PHOTOS} photos that should appear in the
+            book. Add a short caption so the AI knows what each memory is about
+            — every photo will be woven into at least one page.
+          </p>
+        </div>
+        <span className="text-xs text-ink-300 shrink-0">
+          {value.length}/{MAX_MEMORY_PHOTOS}
+        </span>
       </div>
-      {value.length > 0 && (
-        <ul className="flex flex-wrap gap-2">
-          {value.map((m, i) => (
-            <li
-              key={`${i}-${m}`}
-              className="inline-flex items-center gap-1 bg-cream-100 border border-cream-300 rounded-full px-3 py-1 text-sm text-ink-700"
+
+      <ul className="space-y-2">
+        {value.map((m) => (
+          <li
+            key={m.id}
+            className="flex items-stretch gap-3 rounded-xl border border-cream-300 bg-cream-50 p-2"
+          >
+            <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-cream-100 border border-cream-300">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={m.photoUrl}
+                alt={m.caption || "Memory photo"}
+                className="h-full w-full object-cover"
+              />
+            </div>
+            <div className="flex-1 flex flex-col">
+              <textarea
+                value={m.caption}
+                onChange={(e) => updateCaption(m.id, e.target.value)}
+                rows={2}
+                placeholder="What is this photo? e.g. 'Grandma's kitchen with the red apron'"
+                className="flex-1 w-full resize-none rounded-lg border border-cream-300 bg-cream-50 px-3 py-2 text-sm text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
+              />
+              {!m.caption.trim() && (
+                <p className="mt-1 text-[11px] font-medium text-rose-600">
+                  Caption required.
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => removeOne(m.id)}
+              aria-label="Remove memory photo"
+              className="self-start rounded-full px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 transition"
             >
-              {m}
-              <button
-                type="button"
-                onClick={() => onChange(value.filter((_, j) => j !== i))}
-                className="text-ink-300 hover:text-ink-700 transition"
-                aria-label="remove"
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {slotsLeft > 0 && (
+        <label
+          className={`mt-3 group relative flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed px-4 text-center transition-all ${
+            value.length === 0 ? "py-6" : "py-4"
+          } border-moss-500/60 bg-moss-100/40 hover:border-moss-700 hover:bg-moss-100`}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className={`shrink-0 text-moss-700 ${
+              value.length === 0 ? "h-7 w-7" : "h-5 w-5"
+            }`}
+          >
+            <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+            <polyline points="7 9 12 4 17 9" />
+            <line x1="12" y1="4" x2="12" y2="16" />
+          </svg>
+          <div className="text-sm font-semibold text-ink-900">
+            {uploading
+              ? "Uploading…"
+              : value.length === 0
+                ? "Upload reference photos"
+                : `+ Add more (${value.length}/${MAX_MEMORY_PHOTOS})`}
+          </div>
+          {value.length === 0 && (
+            <div className="text-xs text-ink-500">
+              Click to choose images. JPG or PNG, up to {MAX_MEMORY_PHOTOS}.
+            </div>
+          )}
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            disabled={uploading}
+            onChange={handlePick}
+            className="sr-only"
+            aria-label="Upload reference photos"
+          />
+        </label>
+      )}
+
+      {uploadError && (
+        <p className="mt-2 text-sm font-medium text-rose-600">{uploadError}</p>
       )}
     </div>
   );

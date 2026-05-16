@@ -6,6 +6,7 @@
 
 import type {
   Character,
+  MemoryReference,
   Occasion,
   RecipientType,
   StoryTone,
@@ -17,7 +18,12 @@ interface BuildPromptArgs {
   storyTone: StoryTone;
   cast: Character[];
   outline: string;
-  keyMemories: string[];
+  // Reference photos uploaded in the wizard. The script MUST use every
+  // entry in at least one page's `memoryReferences`. The model never
+  // sees the photo URLs in the script-stage prompt (image generation
+  // stage attaches them inline); it only sees ids + captions so it can
+  // plan where each photo belongs.
+  memories: MemoryReference[];
   pageCount: number;
 }
 
@@ -111,6 +117,21 @@ export interface BuiltPrompt {
 export function buildScriptPrompt(args: BuildPromptArgs): BuiltPrompt {
   const hasPetOnly = args.cast.length > 0 && args.cast.every((c) => c.kind === "pet");
 
+  // Memory rules switch on whether the user uploaded anything — when the
+  // memories array is empty we don't want to confuse the model with a
+  // schema field they shouldn't populate. When it's non-empty, we lean
+  // hard on "every photo must appear" since the downstream Zod schema
+  // will reject scripts that drop a memoryId.
+  const memoryRules = args.memories.length
+    ? `
+You will receive a list of REFERENCE PHOTOS below, each anchored by an id and described by a caption. The user uploaded these because they want the artwork to reflect specific people, places, or objects from their life. You MUST:
+- Reference every photo in at least one page's "memoryReferences" array (never silently drop a photo).
+- For each entry in "memoryReferences", set "usage" to a concrete illustrator instruction that names what to take from the photo and how to combine it with the cast portraits attached to the same page (e.g. "Use the kitchen and red apron from this photo as the setting; place Maya at the counter wearing the apron"). Be specific about setting, objects, clothing, lighting, or pose — whatever the photo actually shows.
+- Only reference memoryIds from the provided list. Never invent new ids.
+- A page may use zero, one, or multiple photos. Group photos on the same page only when their combination makes narrative sense.
+`.trim()
+    : "No reference photos were provided — leave each page's \"memoryReferences\" array empty.";
+
   const system = `
 You write personalized illustrated storybooks. The book is for ${recipientLabel(
     args.recipientType
@@ -123,6 +144,8 @@ ${toneInstruction(args.storyTone)}
 Cast (these are the only characters that may appear; use their names verbatim and reference them by id when filling characterIds):
 ${castSummary(args.cast)}
 
+${memoryRules}
+
 Output a single JSON object with this shape:
 {
   "title": string,
@@ -132,7 +155,13 @@ Output a single JSON object with this shape:
       "pageNumber": number,                  // 1..N
       "text": string,                        // the page's narrative text
       "sceneDescription": string,            // a vivid description of what is happening, the setting, and which characters are visible — used as input to image generation
-      "characterIds": string[]               // ids (verbatim from the cast above) of cast members visible on this page
+      "characterIds": string[],              // ids (verbatim from the cast above) of cast members visible on this page
+      "memoryReferences": [                  // photos to apply to THIS page; [] if none
+        {
+          "memoryId": string,                // verbatim id from the reference photo list
+          "usage": string                    // illustrator instruction for how to combine the photo with cast portraits on this page
+        }
+      ]
     }
   ]
 }
@@ -144,11 +173,15 @@ Constraints:
 - Each page is self-contained but contributes to a continuous arc.
 `.trim();
 
+  const memoriesBlock = args.memories.length
+    ? `Reference photos (use every one in at least one page's memoryReferences):\n${args.memories
+        .map((m) => `- id: ${m.id} | caption: ${m.caption}`)
+        .join("\n")}`
+    : null;
+
   const user = [
     args.outline?.trim() ? `Story outline:\n${args.outline.trim()}` : null,
-    args.keyMemories.length
-      ? `Key memories or beats to weave in:\n- ${args.keyMemories.join("\n- ")}`
-      : null,
+    memoriesBlock,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -179,25 +212,45 @@ This portrait will be used as the visual reference for ${character.name} on ever
 `.trim();
 }
 
-// Per-page prompt for Stage 3. The cast portraits are passed as inline
-// image inputs alongside this text — the prompt references them.
+// Per-page prompt for Stage 3. The cast portraits AND memory reference
+// photos are passed as inline image inputs alongside this text — the
+// prompt enumerates them in order so the model knows which attached
+// image is which. Cast portraits are anchors for character likeness;
+// memory references contribute setting, objects, clothing, or props
+// per the per-photo "usage" instruction emitted by Stage 1.
 export function buildPagePrompt(args: {
   sceneDescription: string;
   artStylePromptScaffold: string;
   characterNamesOnPage: string[];
+  memoryRefsOnPage: Array<{ caption: string; usage: string }>;
 }): string {
   const characterRefList =
     args.characterNamesOnPage.length > 0
-      ? `Use the attached reference portraits for ${args.characterNamesOnPage.join(
+      ? `Cast portraits attached (in order): ${args.characterNamesOnPage.join(
           ", "
-        )}. The faces, features, and overall appearance must match those references exactly.`
+        )}. The faces, features, and overall appearance of these characters must match the attached portraits exactly.`
       : "";
+
+  const memoryRefList =
+    args.memoryRefsOnPage.length > 0
+      ? `Reference photos attached after the cast portraits (in order):\n${args.memoryRefsOnPage
+          .map(
+            (m, i) =>
+              `  ${i + 1}. caption: "${m.caption}" — usage: ${m.usage}`
+          )
+          .join(
+            "\n"
+          )}\nApply each reference photo's usage instruction faithfully while keeping the cast looking like their portraits. Treat the reference photos as source material for setting, objects, clothing, lighting, and props — re-render them in the story's illustrated style; do not paste them in photographically.`
+      : "";
+
   return `
 ${args.artStylePromptScaffold}
 
 Scene: ${args.sceneDescription}
 
 ${characterRefList}
+
+${memoryRefList}
 
 Storybook illustration of the scene. Do not include any text, captions, or watermarks in the image.
 `.trim();

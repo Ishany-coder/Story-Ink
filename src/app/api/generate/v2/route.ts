@@ -3,12 +3,63 @@ import { requireUser, UnauthorizedError } from "@/lib/supabase-server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { createJob } from "@/lib/jobs";
 import { inngest, EVENTS } from "@/inngest/client";
+import { isAllowedContentUrl } from "@/lib/http";
 import type {
+  MemoryReference,
   Occasion,
   RecipientType,
   StoryTone,
   WizardPayload,
 } from "@/lib/types";
+
+const MAX_MEMORY_PHOTOS = 10;
+const MAX_CAPTION_LEN = 500;
+
+// Server-side guard for the memories[] array. Mirrors the wizard's
+// invariants (max 10, captions required, photo URLs must clear the
+// SSRF allowlist) and returns either the sanitized list or a 400-safe
+// error message that the route can surface verbatim.
+function validateMemories(
+  raw: unknown
+): { ok: true; memories: MemoryReference[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, memories: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: "memories must be an array" };
+  }
+  if (raw.length > MAX_MEMORY_PHOTOS) {
+    return { ok: false, error: `memories must be ≤ ${MAX_MEMORY_PHOTOS}` };
+  }
+  const out: MemoryReference[] = [];
+  const seenIds = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      return { ok: false, error: "memory entry must be an object" };
+    }
+    const m = entry as Record<string, unknown>;
+    if (typeof m.id !== "string" || m.id.length === 0) {
+      return { ok: false, error: "memory id required" };
+    }
+    if (seenIds.has(m.id)) {
+      return { ok: false, error: `duplicate memory id ${m.id}` };
+    }
+    if (typeof m.photoUrl !== "string" || !isAllowedContentUrl(m.photoUrl)) {
+      return { ok: false, error: "memory photoUrl not in allowlist" };
+    }
+    if (typeof m.caption !== "string" || m.caption.trim().length === 0) {
+      return { ok: false, error: "memory caption required" };
+    }
+    if (m.caption.length > MAX_CAPTION_LEN) {
+      return { ok: false, error: "memory caption too long" };
+    }
+    seenIds.add(m.id);
+    out.push({
+      id: m.id,
+      photoUrl: m.photoUrl,
+      caption: m.caption.trim(),
+    });
+  }
+  return { ok: true, memories: out };
+}
 
 const VALID_RECIPIENTS: RecipientType[] = [
   "child", "baby", "partner", "parent", "niece_nephew", "sibling",
@@ -62,22 +113,48 @@ export async function POST(req: NextRequest) {
       if (n >= 16 && n <= 72) defaultTextSize = n;
     }
 
-    // Verify the cast belongs to this user.
+    // Sanitize the cast against what the user actually owns. Stale
+    // character ids commonly land here when a draft was saved with a
+    // character that was later deleted (the wizard's mount-time filter
+    // catches most of these, but cross-tab and cross-session deletes
+    // can still slip through). Silently drop the dead ids; only fail
+    // if every id is gone, in which case we return a 400 with a
+    // user-readable message instead of the old silent 403.
     const admin = supabaseAdmin();
     const { data: ownedCast } = await admin
       .from("characters")
       .select("id")
       .in("id", body.castCharacterIds)
       .eq("user_id", user.id);
-    if (!ownedCast || ownedCast.length !== body.castCharacterIds.length) {
-      return NextResponse.json({ error: "cast contains unowned characters" }, { status: 403 });
+    const ownedIds = new Set((ownedCast ?? []).map((c) => c.id));
+    const sanitizedCast = body.castCharacterIds.filter((id) =>
+      ownedIds.has(id)
+    );
+    if (sanitizedCast.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Every character in your cast was removed. Go back to the cast step and re-select at least one.",
+        },
+        { status: 400 }
+      );
     }
 
-    // Pack outline + keyMemories into stories.prompt (JSON-encoded) so Stage 1
+    // Memory reference photos: validated server-side so we can trust
+    // them in the Inngest pipeline (SSRF allowlist + caption required).
+    const memoriesResult = validateMemories(body.memories);
+    if (!memoriesResult.ok) {
+      return NextResponse.json(
+        { error: memoriesResult.error },
+        { status: 400 }
+      );
+    }
+
+    // Pack outline + memories into stories.prompt (JSON-encoded) so Stage 1
     // can read them back. A dedicated column is a follow-up.
     const promptPayload = JSON.stringify({
       outline: body.outline ?? "",
-      keyMemories: body.keyMemories ?? [],
+      memories: memoriesResult.memories,
     });
 
     const { data: story, error: storyErr } = await admin
@@ -92,7 +169,7 @@ export async function POST(req: NextRequest) {
         occasion,
         story_tone: body.storyTone,
         art_style_id: body.artStyleId,
-        cast_character_ids: body.castCharacterIds,
+        cast_character_ids: sanitizedCast,
         is_public: body.isPublic === true,
         default_text_size: defaultTextSize ?? null,
       })

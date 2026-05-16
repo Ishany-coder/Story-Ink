@@ -4,17 +4,17 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Character, CharacterKind } from "@/lib/types";
 
-const MAX_PHOTOS = 5;
-
 type Props = {
   initial: Character | null;
   nextHref?: string;
 };
 
-// Character creation form (V2). Reference photos are how the AI keeps
-// people / pets looking like them across pages, so the upload zone is
-// the most important input on this page — it gets the largest visual
-// treatment and supports drag-and-drop in addition to click-to-pick.
+// Character creation form (V2). A single reference photo per character
+// is what the AI uses to keep them looking like themselves across
+// pages, so the upload zone is the most important input on this page —
+// it gets the largest visual treatment and supports drag-and-drop in
+// addition to click-to-pick. Legacy characters that were saved with
+// multiple reference URLs are coerced down to the first one on load.
 export default function CharacterForm({ initial, nextHref }: Props) {
   const router = useRouter();
   const [kind, setKind] = useState<CharacterKind>(initial?.kind ?? "person");
@@ -22,8 +22,10 @@ export default function CharacterForm({ initial, nextHref }: Props) {
   const [roleLabel, setRoleLabel] = useState(initial?.role_label ?? "");
   const [traits, setTraits] = useState(initial?.traits ?? "");
   const [species, setSpecies] = useState(initial?.species ?? "");
-  const [photos, setPhotos] = useState<string[]>(
-    initial?.reference_photo_urls ?? []
+  // Single photo URL (or null when empty). The DB column is still a
+  // string[]; on save we wrap this into `[photo]` / `[]`.
+  const [photo, setPhoto] = useState<string | null>(
+    initial?.reference_photo_urls?.[0] ?? null
   );
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -41,25 +43,26 @@ export default function CharacterForm({ initial, nextHref }: Props) {
     return body.url;
   }
 
-  async function ingestFiles(fileList: FileList | File[]) {
-    const files = Array.from(fileList).filter((f) =>
+  async function ingestFile(fileList: FileList | File[]) {
+    // Only the first image-typed file is used — every character has a
+    // single reference photo. Extra files in a multi-select drop are
+    // ignored on purpose.
+    const file = Array.from(fileList).find((f) =>
       f.type.startsWith("image/")
     );
-    if (files.length === 0) return;
-    if (photos.length >= MAX_PHOTOS) {
-      setError(`Max ${MAX_PHOTOS} photos`);
+    if (!file) return;
+    if (photo) {
+      // Defensive: the upload zone is hidden once a photo exists, but
+      // a programmatic drop could still hit this. Surface a clear
+      // message instead of silently replacing the file.
+      setError("Remove the current photo before uploading a new one.");
       return;
     }
     setUploading(true);
     setError(null);
     try {
-      const room = MAX_PHOTOS - photos.length;
-      const trimmed = files.slice(0, room);
-      const uploaded: string[] = [];
-      for (const f of trimmed) {
-        uploaded.push(await uploadOne(f));
-      }
-      setPhotos((prev) => [...prev, ...uploaded]);
+      const url = await uploadOne(file);
+      setPhoto(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : "upload failed");
     } finally {
@@ -70,7 +73,7 @@ export default function CharacterForm({ initial, nextHref }: Props) {
   async function handlePick(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    await ingestFiles(files);
+    await ingestFile(files);
     e.target.value = "";
   }
 
@@ -78,10 +81,10 @@ export default function CharacterForm({ initial, nextHref }: Props) {
     e.preventDefault();
     setDragOver(false);
     if (uploading) return;
-    if (photos.length >= MAX_PHOTOS) return;
+    if (photo) return;
     const files = e.dataTransfer.files;
     if (!files || files.length === 0) return;
-    await ingestFiles(files);
+    await ingestFile(files);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -95,7 +98,9 @@ export default function CharacterForm({ initial, nextHref }: Props) {
         role_label: roleLabel || null,
         traits: traits || null,
         species: kind === "pet" ? species || null : null,
-        reference_photo_urls: photos,
+        // DB column is string[]; we store a single-element array (or
+        // empty) to keep the shape stable for existing callers.
+        reference_photo_urls: photo ? [photo] : [],
       };
       const url = initial ? `/api/characters/${initial.id}` : "/api/characters";
       const method = initial ? "PATCH" : "POST";
@@ -105,7 +110,20 @@ export default function CharacterForm({ initial, nextHref }: Props) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());
-      router.push(nextHref ?? "/characters");
+      // On create (not edit), pass the new character's id back to the
+      // wizard via `addedCharacter` so it can auto-select the character
+      // in the cast on return. Only honored when there's a nextHref to
+      // route through — the bare /characters listing ignores the hint.
+      const respBody = (await res.json().catch(() => null)) as
+        | { character?: { id?: string } }
+        | null;
+      const newId = respBody?.character?.id;
+      let dest = nextHref ?? "/characters";
+      if (!initial && newId && nextHref) {
+        const sep = nextHref.includes("?") ? "&" : "?";
+        dest = `${nextHref}${sep}addedCharacter=${encodeURIComponent(newId)}`;
+      }
+      router.push(dest);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "save failed");
@@ -165,13 +183,23 @@ export default function CharacterForm({ initial, nextHref }: Props) {
             ))}
           </div>
         </div>
-        <button
-          type="submit"
-          disabled={saving || uploading || !name.trim()}
-          className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50 shrink-0"
-        >
-          {saving ? "Saving…" : initial ? "Save changes" : "Add character"}
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            disabled={saving || uploading}
+            className="text-sm font-medium text-ink-500 hover:text-ink-900 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving || uploading || !name.trim()}
+            className="rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Saving…" : initial ? "Save changes" : "Add character"}
+          </button>
+        </div>
       </div>
 
       {/* Two-column desktop layout: identity + traits on the left, the
@@ -235,104 +263,68 @@ export default function CharacterForm({ initial, nextHref }: Props) {
         </section>
 
         <section className="rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5">
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <div>
-              <h2 className="font-[family-name:var(--font-display)] text-base font-semibold text-ink-900">
-                Reference photos
-              </h2>
-              <p className="mt-0.5 text-xs text-ink-500">
-                3–5 clear photos in different poses works best.
-              </p>
-            </div>
-            <span className="text-xs text-ink-300">
-              {photos.length}/{MAX_PHOTOS}
-            </span>
+          <div className="mb-3">
+            <h2 className="font-[family-name:var(--font-display)] text-base font-semibold text-ink-900">
+              Reference photo
+            </h2>
           </div>
 
-          <div className="space-y-3">
-            {photos.length > 0 && (
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                {photos.map((src, i) => (
-                  <div
-                    key={src}
-                    className="relative aspect-square overflow-hidden rounded-xl border border-cream-300"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={src}
-                      alt={name.trim() ? `Reference photo of ${name.trim()}` : ""}
-                      className="h-full w-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPhotos((prev) => prev.filter((_, j) => j !== i))
-                      }
-                      aria-label="Remove photo"
-                      className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {photos.length < MAX_PHOTOS && (
-              <label
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  if (!uploading) setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={handleDrop}
-                className={`group relative flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed px-4 text-center transition-all ${
-                  photos.length === 0 ? "py-6 sm:py-7" : "py-4"
-                } ${
-                  dragOver
-                    ? "border-moss-700 bg-moss-100"
-                    : "border-moss-500/60 bg-moss-100/40 hover:border-moss-700 hover:bg-moss-100"
-                }`}
+          {photo ? (
+            <div className="relative aspect-square w-40 overflow-hidden rounded-xl border border-cream-300">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photo}
+                alt={name.trim() ? `Reference photo of ${name.trim()}` : ""}
+                className="h-full w-full object-cover"
+              />
+              <button
+                type="button"
+                onClick={() => setPhoto(null)}
+                aria-label="Remove photo"
+                className="absolute right-1 top-1 rounded-full bg-cream-50/95 px-2 py-0.5 text-[10px] font-medium text-rose-600 shadow-sm transition-colors hover:bg-rose-500 hover:text-cream-50"
               >
-                <UploadIcon
-                  className={`shrink-0 text-moss-700 transition-transform ${
-                    photos.length === 0 ? "h-7 w-7" : "h-5 w-5"
-                  } ${dragOver ? "scale-110" : "group-hover:scale-105"}`}
-                />
-                {photos.length === 0 ? (
-                  <>
-                    <div className="text-sm font-semibold text-ink-900">
-                      {uploading
-                        ? "Uploading…"
-                        : dragOver
-                          ? "Drop to upload"
-                          : `Upload ${kind === "pet" ? "your pet's" : "their"} photos`}
-                    </div>
-                    <div className="text-xs text-ink-500">
-                      Click or drag images. JPG/PNG, up to {MAX_PHOTOS}.
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-sm font-semibold text-moss-900">
-                    {uploading
-                      ? "Uploading…"
-                      : dragOver
-                        ? "Drop to add"
-                        : `+ Add more (${photos.length}/${MAX_PHOTOS})`}
-                  </div>
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  disabled={uploading}
-                  onChange={handlePick}
-                  className="sr-only"
-                  aria-label="Upload reference photos"
-                />
-              </label>
-            )}
-          </div>
+                Remove
+              </button>
+            </div>
+          ) : (
+            <label
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (!uploading) setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              className={`group relative flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed px-4 py-6 sm:py-7 text-center transition-all ${
+                dragOver
+                  ? "border-moss-700 bg-moss-100"
+                  : "border-moss-500/60 bg-moss-100/40 hover:border-moss-700 hover:bg-moss-100"
+              }`}
+            >
+              <UploadIcon
+                className={`shrink-0 h-7 w-7 text-moss-700 transition-transform ${
+                  dragOver ? "scale-110" : "group-hover:scale-105"
+                }`}
+              />
+              <div className="text-sm font-semibold text-ink-900">
+                {uploading
+                  ? "Uploading…"
+                  : dragOver
+                    ? "Drop to upload"
+                    : `Upload ${kind === "pet" ? "your pet's" : "their"} photo`}
+              </div>
+              <div className="text-xs text-ink-500">
+                Click or drag an image. JPG or PNG.
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                disabled={uploading}
+                onChange={handlePick}
+                className="sr-only"
+                aria-label="Upload reference photo"
+              />
+            </label>
+          )}
         </section>
       </div>
 

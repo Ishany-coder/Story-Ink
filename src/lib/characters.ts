@@ -107,12 +107,42 @@ export async function deleteCharacterForUser(
   characterId: string,
   userId: string
 ): Promise<void> {
-  const { error } = await supabaseAdmin()
+  const admin = supabaseAdmin();
+  const { error } = await admin
     .from("characters")
     .delete()
     .eq("id", characterId)
     .eq("user_id", userId);
   if (error) throw new Error(`deleteCharacterForUser: ${error.message}`);
+
+  // Best-effort cleanup: strip the deleted id from any drafts that
+  // still reference it. Without this, an old draft's cast picker
+  // carries a dead id all the way to /api/generate/v2 — which used to
+  // produce a silent 403. The wizard's mount-time filter + the API's
+  // sanitization are belt-and-suspenders for this; failures here are
+  // logged but non-fatal.
+  try {
+    const { data: drafts } = await admin
+      .from("story_drafts")
+      .select("id, payload")
+      .eq("user_id", userId);
+    for (const d of (drafts ?? []) as Array<{
+      id: string;
+      payload: Record<string, unknown> | null;
+    }>) {
+      const payload = d.payload;
+      const cast = payload?.castCharacterIds;
+      if (!Array.isArray(cast) || !cast.includes(characterId)) continue;
+      const nextCast = cast.filter((x) => x !== characterId);
+      const nextPayload = { ...(payload ?? {}), castCharacterIds: nextCast };
+      await admin
+        .from("story_drafts")
+        .update({ payload: nextPayload })
+        .eq("id", d.id);
+    }
+  } catch (e) {
+    console.warn("deleteCharacterForUser: draft cast cleanup failed", e);
+  }
 }
 
 export const CHARACTER_LIMITS = { maxPhotos: MAX_PHOTOS_PER_CHARACTER };
