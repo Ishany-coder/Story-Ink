@@ -127,9 +127,38 @@ export default function WizardClient({
 
   // Helper: pick a recipient + immediately move to step 2. Used by every
   // tile in step 1 since the spec requires single-tap navigation.
+  // When the user arrives at a step via a "click summary card" from step 7,
+  // any forward navigation (auto-advance, Next, Continue, Skip) snaps back
+  // to step 7 instead of marching through the wizard linearly. Back/Cancel
+  // also returns to 7. Cleared on review return.
+  const [returnToReview, setReturnToReview] = useState(false);
+
+  const goNext = (target: number) => {
+    if (returnToReview) {
+      setReturnToReview(false);
+      setStep(7);
+    } else {
+      setStep(target);
+    }
+  };
+
+  const goBack = (target: number) => {
+    if (returnToReview) {
+      setReturnToReview(false);
+      setStep(7);
+    } else {
+      setStep(target);
+    }
+  };
+
+  const editFromReview = (originStep: number) => {
+    setReturnToReview(true);
+    setStep(originStep);
+  };
+
   const pickRecipientAndAdvance = (id: RecipientType) => {
     set({ recipientType: id });
-    setStep(2);
+    goNext(2);
   };
 
   // Refresh character list (used when user returns from /characters/new).
@@ -188,6 +217,11 @@ export default function WizardClient({
         step={1}
         totalSteps={totalSteps}
         title="Who is this book for?"
+        editingReview={returnToReview}
+        onExitReview={() => {
+          setReturnToReview(false);
+          setStep(7);
+        }}
       >
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {PRIMARY_RECIPIENTS.map((r) => {
@@ -315,7 +349,7 @@ export default function WizardClient({
                       recipientType: "other",
                       outline: customDraft.trim(),
                     });
-                    setStep(2);
+                    goNext(2);
                   }}
                   className="px-6 py-2 bg-moss-700 text-cream-50 rounded-xl font-medium hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -345,11 +379,16 @@ export default function WizardClient({
         totalSteps={totalSteps}
         title="What's the occasion?"
         subtitle="Pick one — or skip if it doesn't apply."
-        onBack={() => setStep(1)}
+        onBack={() => goBack(1)}
         onSkip={() => {
           // Honor "Skip" by clearing any prior occasion selection.
           set({ occasion: undefined });
-          setStep(3);
+          goNext(3);
+        }}
+        editingReview={returnToReview}
+        onExitReview={() => {
+          setReturnToReview(false);
+          setStep(7);
         }}
       >
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -361,7 +400,7 @@ export default function WizardClient({
                 type="button"
                 onClick={() => {
                   set({ occasion: o.id });
-                  setStep(3);
+                  goNext(3);
                 }}
                 className={`group flex flex-col items-center justify-center gap-2 p-5 rounded-2xl border bg-cream-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
                   selected
@@ -400,9 +439,15 @@ export default function WizardClient({
         totalSteps={totalSteps}
         title="Build the cast"
         subtitle="Add at least one character. Their photos let the AI keep them looking like them on every page."
-        onBack={() => setStep(2)}
-        onNext={() => setStep(4)}
+        onBack={() => goBack(2)}
+        onNext={() => goNext(4)}
+        nextLabel={returnToReview ? "Save changes" : "Next"}
         nextDisabled={(payload.castCharacterIds ?? []).length === 0}
+        editingReview={returnToReview}
+        onExitReview={() => {
+          setReturnToReview(false);
+          setStep(7);
+        }}
       >
         <div className="space-y-4">
           {characters.length === 0 && (
@@ -484,8 +529,14 @@ export default function WizardClient({
         totalSteps={totalSteps}
         title="Your story outline"
         subtitle="What's the story about? Add any specific moments or details that should appear."
-        onBack={() => setStep(3)}
-        onNext={() => setStep(5)}
+        onBack={() => goBack(3)}
+        onNext={() => goNext(5)}
+        nextLabel={returnToReview ? "Save changes" : "Next"}
+        editingReview={returnToReview}
+        onExitReview={() => {
+          setReturnToReview(false);
+          setStep(7);
+        }}
         nextDisabled={!payload.outline?.trim()}
       >
         <div className="space-y-4">
@@ -512,7 +563,12 @@ export default function WizardClient({
         totalSteps={totalSteps}
         title="Pick your art style"
         subtitle="Choose how you'd like your story illustrated."
-        onBack={() => setStep(4)}
+        onBack={() => goBack(4)}
+        editingReview={returnToReview}
+        onExitReview={() => {
+          setReturnToReview(false);
+          setStep(7);
+        }}
       >
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {artStyles.map((s) => {
@@ -523,7 +579,7 @@ export default function WizardClient({
                 type="button"
                 onClick={() => {
                   set({ artStyleId: s.id });
-                  setStep(6);
+                  goNext(6);
                 }}
                 className={`text-left rounded-2xl border bg-cream-50 overflow-hidden transition ${
                   selected
@@ -561,8 +617,14 @@ export default function WizardClient({
         totalSteps={totalSteps}
         title="How long should it be?"
         subtitle="Pick a preset, or fine-tune the slider."
-        onBack={() => setStep(5)}
-        onNext={() => setStep(7)}
+        onBack={() => goBack(5)}
+        onNext={() => goNext(7)}
+        nextLabel={returnToReview ? "Save changes" : "Continue"}
+        editingReview={returnToReview}
+        onExitReview={() => {
+          setReturnToReview(false);
+          setStep(7);
+        }}
       >
         <div className="rounded-2xl border border-cream-300 bg-cream-50 p-5 sm:p-6 space-y-6">
           {/* Segmented preset chips. Tapping advances to step 7 since
@@ -580,7 +642,7 @@ export default function WizardClient({
                     type="button"
                     onClick={() => {
                       set({ pageCount: n });
-                      setStep(7);
+                      goNext(7);
                     }}
                     className={`px-4 py-2 rounded-full border text-sm font-medium transition ${
                       selected
@@ -711,6 +773,28 @@ export default function WizardClient({
       nextVariant="prominent"
     >
       <div className="space-y-4">
+        {/* Title input — leave blank to let the AI suggest one. */}
+        <div className="rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5">
+          <label
+            htmlFor="story-title"
+            className="block text-[11px] uppercase tracking-[0.18em] text-ink-300 mb-2"
+          >
+            Book title
+          </label>
+          <input
+            id="story-title"
+            type="text"
+            value={payload.title ?? ""}
+            onChange={(e) => set({ title: e.target.value })}
+            maxLength={120}
+            placeholder="Leave blank and we'll suggest one"
+            className="w-full bg-transparent border-0 border-b border-cream-300 px-0 py-1 text-lg sm:text-xl font-[family-name:var(--font-display)] text-ink-900 placeholder:text-ink-300 focus:outline-none focus:border-moss-700 transition-colors"
+          />
+          <p className="mt-2 text-xs text-ink-500">
+            If empty, the AI will name the book based on the story it generates.
+          </p>
+        </div>
+
         {/* Header card — art style sample strip behind the title gives
             the review a "magazine cover" feel rather than a form. */}
         <div className="relative overflow-hidden rounded-2xl border border-cream-300 bg-cream-50 shadow-[0_1px_2px_rgba(14,26,43,0.04)]">
@@ -740,21 +824,45 @@ export default function WizardClient({
           </div>
         </div>
 
-        {/* Summary grid */}
+        {/* Summary grid — each card jumps to its origin step in
+            edit-mode. The hover hint ("Edit →") only appears on
+            interactive cards. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <SummaryCard label="Recipient" value={recipientLabel} />
-          <SummaryCard label="Occasion" value={occasionLabel} />
-          <SummaryCard label="Pages" value={String(payload.pageCount ?? 16)} />
+          <SummaryCard
+            label="Recipient"
+            value={recipientLabel}
+            onEdit={() => editFromReview(1)}
+          />
+          <SummaryCard
+            label="Occasion"
+            value={occasionLabel}
+            onEdit={() => editFromReview(2)}
+          />
+          <SummaryCard
+            label="Pages"
+            value={String(payload.pageCount ?? 16)}
+            onEdit={() => editFromReview(6)}
+          />
           <SummaryCard
             label="Style"
             value={selectedStyle?.display_name ?? "Not specified"}
+            onEdit={() => editFromReview(5)}
           />
         </div>
 
-        {/* Cast strip */}
-        <div className="rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-ink-300 mb-3">
-            Cast
+        {/* Cast strip — clickable, jumps to step 3 in edit mode. */}
+        <button
+          type="button"
+          onClick={() => editFromReview(3)}
+          className="group block w-full text-left rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5 transition hover:border-gold-500 hover:shadow-[0_4px_12px_rgba(14,26,43,0.06)] cursor-pointer"
+        >
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-ink-300">
+              Cast
+            </div>
+            <span className="text-[11px] font-medium text-moss-700 opacity-0 transition-opacity group-hover:opacity-100">
+              Edit →
+            </span>
           </div>
           {selectedCast.length === 0 ? (
             <div className="text-sm text-ink-500">No cast selected.</div>
@@ -782,12 +890,21 @@ export default function WizardClient({
               ))}
             </ul>
           )}
-        </div>
+        </button>
 
-        {/* Outline */}
-        <div className="rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-ink-300 mb-2">
-            Story outline
+        {/* Outline — clickable, jumps to step 4 in edit mode. */}
+        <button
+          type="button"
+          onClick={() => editFromReview(4)}
+          className="group block w-full text-left rounded-2xl border border-cream-300 bg-cream-50 p-4 sm:p-5 transition hover:border-gold-500 hover:shadow-[0_4px_12px_rgba(14,26,43,0.06)] cursor-pointer"
+        >
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-ink-300">
+              Story outline
+            </div>
+            <span className="text-[11px] font-medium text-moss-700 opacity-0 transition-opacity group-hover:opacity-100">
+              Edit →
+            </span>
           </div>
           {payload.outline?.trim() ? (
             <p className="whitespace-pre-wrap text-ink-700 text-sm leading-relaxed">
@@ -796,7 +913,7 @@ export default function WizardClient({
           ) : (
             <p className="text-sm text-ink-500">No outline provided.</p>
           )}
-        </div>
+        </button>
       </div>
 
       {error && (
@@ -812,17 +929,45 @@ export default function WizardClient({
 // Step 7 helpers
 // ---------------------------------------------------------------------------
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-cream-300 bg-cream-50 p-4">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-ink-300 mb-1">
-        {label}
+function SummaryCard({
+  label,
+  value,
+  onEdit,
+}: {
+  label: string;
+  value: string;
+  onEdit?: () => void;
+}) {
+  const baseClasses =
+    "group block w-full text-left rounded-xl border border-cream-300 bg-cream-50 p-4 transition";
+  const interactiveClasses = onEdit
+    ? " hover:border-gold-500 hover:shadow-[0_4px_12px_rgba(14,26,43,0.06)] cursor-pointer"
+    : "";
+  const body = (
+    <>
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-ink-300">
+          {label}
+        </div>
+        {onEdit && (
+          <span className="text-[11px] font-medium text-moss-700 opacity-0 transition-opacity group-hover:opacity-100">
+            Edit →
+          </span>
+        )}
       </div>
       <div className="text-ink-900 font-medium text-sm break-words">
         {value}
       </div>
-    </div>
+    </>
   );
+  if (onEdit) {
+    return (
+      <button type="button" onClick={onEdit} className={baseClasses + interactiveClasses}>
+        {body}
+      </button>
+    );
+  }
+  return <div className={baseClasses}>{body}</div>;
 }
 
 // ---------------------------------------------------------------------------
