@@ -286,7 +286,7 @@ export type Occasion =
   | "graduation"
   | "holiday"
   | "new_baby"
-  | "other";
+  | "achievement";
 
 export type StoryTone = "classic" | "rhyming";
 

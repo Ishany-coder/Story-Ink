@@ -16,7 +16,7 @@ const VALID_RECIPIENTS: RecipientType[] = [
   "family", "self", "other",
 ];
 const VALID_OCCASIONS: Occasion[] = [
-  "birthday", "anniversary", "memorial", "just_because", "graduation", "holiday", "new_baby", "other",
+  "birthday", "anniversary", "memorial", "just_because", "graduation", "holiday", "new_baby", "achievement",
 ];
 const VALID_TONES: StoryTone[] = ["classic", "rhyming"];
 
@@ -33,7 +33,12 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "recipientType invalid" }, { status: 400 });
     }
-    if (!body.occasion || !VALID_OCCASIONS.includes(body.occasion)) {
+    // Occasion is optional (Step 2 has a "Skip" button). Drafts saved
+    // before the "other" → "achievement" rename get silently coerced to
+    // unset rather than rejected.
+    let occasion: Occasion | undefined = body.occasion;
+    if ((occasion as string | undefined) === "other") occasion = undefined;
+    if (occasion && !VALID_OCCASIONS.includes(occasion)) {
       return NextResponse.json({ error: "occasion invalid" }, { status: 400 });
     }
     if (!body.storyTone || !VALID_TONES.includes(body.storyTone)) {
@@ -77,7 +82,7 @@ export async function POST(req: NextRequest) {
         page_count: pageCount,
         pages: [],
         recipient_type: body.recipientType,
-        occasion: body.occasion,
+        occasion,
         story_tone: body.storyTone,
         art_style_id: body.artStyleId,
         cast_character_ids: body.castCharacterIds,
