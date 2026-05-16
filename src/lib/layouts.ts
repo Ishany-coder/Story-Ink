@@ -155,9 +155,10 @@ export function makeLayoutText(
     height: region.height,
     rotation: 0,
     // Acts as a cap — AutoFitText shrinks below this to fit the box, and
-    // grows back up to here when the box is large enough. Kept small so
-    // short captions don't look ballooned.
-    fontSize: 22,
+    // grows back up to here when the box is large enough. Sized for a
+    // children's-storybook reading age (~38 logical px on an 800px canvas
+    // ≈ 4.75% of canvas height); long passages auto-shrink to fit.
+    fontSize: 38,
     color: "#1f1147",
     fontFamily: "var(--font-display), serif",
     fontWeight: "bold",

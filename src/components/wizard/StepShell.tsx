@@ -15,6 +15,8 @@ export default function StepShell({
   nextLabel = "Next",
   nextDisabled,
   nextVariant = "primary",
+  editingReview = false,
+  onExitReview,
 }: {
   step: number;
   totalSteps: number;
@@ -31,6 +33,10 @@ export default function StepShell({
   // "prominent" — bigger, full-width on mobile, used by step 7 to signal
   // "this is the action that actually creates the book."
   nextVariant?: "primary" | "prominent";
+  // When true, a banner is shown signaling the user came from the review
+  // step. onExitReview wires the banner's "Back to review" affordance.
+  editingReview?: boolean;
+  onExitReview?: () => void;
 }) {
   const nextClasses =
     nextVariant === "prominent"
@@ -39,6 +45,21 @@ export default function StepShell({
 
   return (
     <div>
+      {editingReview && onExitReview && (
+        <div className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-gold-300 bg-gold-100/50 px-4 py-2.5">
+          <span className="text-sm text-ink-700">
+            <span className="font-medium text-gold-900">Editing</span> — changes
+            return you to review.
+          </span>
+          <button
+            type="button"
+            onClick={onExitReview}
+            className="text-sm font-medium text-moss-700 hover:text-moss-900 transition"
+          >
+            ← Back to review
+          </button>
+        </div>
+      )}
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-3">
           <span className="text-[11px] uppercase tracking-[0.18em] text-ink-300">

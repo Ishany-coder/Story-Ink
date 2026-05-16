@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       .from("stories")
       .insert({
         user_id: user.id,
-        title: body.title ?? "Untitled story",
+        title: body.title?.trim() ? body.title.trim() : "Untitled story",
         prompt: promptPayload,
         page_count: pageCount,
         pages: [],

@@ -541,6 +541,7 @@ interface StoryV2Context {
   story: {
     id: string;
     user_id: string;
+    title: string | null;
     prompt: string;
     page_count: number;
     recipient_type: import("@/lib/types").RecipientType;
@@ -586,7 +587,7 @@ export const generateStoryV2Fn = inngest.createFunction(
       const { data: story, error: storyErr } = await admin
         .from("stories")
         .select(
-          "id, user_id, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids"
+          "id, user_id, title, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids"
         )
         .eq("id", storyId)
         .single<StoryV2Context["story"]>();
@@ -642,9 +643,15 @@ export const generateStoryV2Fn = inngest.createFunction(
         pageCount: ctx.story.page_count,
       });
 
+      // Respect a user-provided title from the wizard. Only fall back to
+      // the AI-generated title when the stored title is missing or is the
+      // "Untitled story" sentinel that route.ts uses for blank input.
+      const userTitle = ctx.story.title?.trim();
+      const finalTitle =
+        userTitle && userTitle !== "Untitled story" ? userTitle : s.title;
       const { error } = await supabaseAdmin()
         .from("stories")
-        .update({ script: s, title: s.title })
+        .update({ script: s, title: finalTitle })
         .eq("id", storyId);
       if (error) throw new Error(`persist script: ${error.message}`);
       return s;
