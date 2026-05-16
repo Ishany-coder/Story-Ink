@@ -198,6 +198,11 @@ function LoginPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [confirmEmailNotice, setConfirmEmailNotice] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+  // Set when Supabase rejects the OAuth call with "provider is not
+  // enabled" so we hide the Google button for the rest of this session
+  // — clicking again would just hit the same error. Real fix lives in
+  // the Supabase dashboard (Authentication → Providers → Google).
+  const [googleUnavailable, setGoogleUnavailable] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -284,7 +289,22 @@ function LoginPageInner() {
       },
     });
     if (err) {
-      setError(err.message);
+      const msg = err.message.toLowerCase();
+      // Supabase returns a generic "Unsupported provider: provider is
+      // not enabled" string when Google OAuth isn't configured on the
+      // project. Show a friendlier message and hide the button for the
+      // rest of the session so the user falls back to email.
+      if (
+        msg.includes("provider is not enabled") ||
+        msg.includes("unsupported provider")
+      ) {
+        setError(
+          "Google sign-in isn't available yet — please use email below."
+        );
+        setGoogleUnavailable(true);
+      } else {
+        setError(err.message);
+      }
       setGooglePending(false);
     }
     // On success the browser is redirected to Google — no further action needed.
@@ -357,8 +377,10 @@ function LoginPageInner() {
             </div>
           ) : (
             <>
-              {/* Google OAuth button — shown on sign-in and sign-up */}
-              {mode !== "forgot" && (
+              {/* Google OAuth button — shown on sign-in and sign-up,
+                  hidden once Supabase tells us the provider isn't
+                  configured (see handleGoogleSignIn). */}
+              {mode !== "forgot" && !googleUnavailable && (
                 <>
                   <button
                     type="button"
