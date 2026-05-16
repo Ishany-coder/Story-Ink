@@ -179,7 +179,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: storyErr?.message ?? "create story" }, { status: 500 });
     }
 
-    const jobId = await createJob("story.generate.v2", user.id);
+    // Seed the job's result with { storyId } so the progress page's
+    // latest-job poll matches immediately and the user sees the
+    // stepper without a couple of seconds of 404 noise.
+    const jobId = await createJob("story.generate.v2", user.id, {
+      storyId: story.id,
+    });
     await inngest.send({
       name: EVENTS.storyGenerateV2,
       data: { jobId, storyId: story.id, userId: user.id },

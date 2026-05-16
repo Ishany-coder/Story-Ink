@@ -25,11 +25,22 @@ export interface JobRow {
 
 export async function createJob(
   type: string,
-  userId: string | null = null
+  userId: string | null = null,
+  // Optional payload written into `result` at insert time. Used by the
+  // story-generate flow to stamp the new storyId immediately so the
+  // /api/stories/:id/latest-job poll can find the job before Inngest
+  // has a chance to run its first step. Without this seed, the poll
+  // 404s for a couple of seconds and the console fills with errors.
+  initialResult: unknown = null
 ): Promise<string> {
   const { data, error } = await supabaseAdmin()
     .from("jobs")
-    .insert({ type, status: "queued", user_id: userId })
+    .insert({
+      type,
+      status: "queued",
+      user_id: userId,
+      result: initialResult,
+    })
     .select("id")
     .single<{ id: string }>();
   if (error || !data) {
