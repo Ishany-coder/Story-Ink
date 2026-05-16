@@ -32,6 +32,7 @@ import {
 } from "@/lib/gemini";
 import {
   supabaseAdmin,
+  processAndUploadPageImage,
   updateStoryPageFields,
   uploadGeneratedImage,
 } from "@/lib/supabase";
@@ -325,7 +326,7 @@ export const assistImageFn = inngest.createFunction(
       fetchStoryAndPage(storyId, pageNumber, userId ?? null)
     );
 
-    const imageUrl = await step.run("generate-and-upload", async () => {
+    const urls = await step.run("generate-and-upload", async () => {
       const dataUri = await assistRegenerateImage({
         systemPrompt: composeSystemPrompt(
           globalSystemPrompt,
@@ -338,13 +339,20 @@ export const assistImageFn = inngest.createFunction(
         currentImageUrl: page.imageUrl,
         styleId: story.art_style_id ?? null,
       });
-      return uploadGeneratedImage(dataUri);
+      // Generate clean + watermarked variants so the editor / reader
+      // can swap on paid-status without re-encoding on the fly.
+      return processAndUploadPageImage(dataUri);
     });
 
     await step.run("mark-done", () =>
-      markDone(jobId, { targets: ["image"], text: null, imageUrl })
+      markDone(jobId, {
+        targets: ["image"],
+        text: null,
+        imageUrl: urls.imageUrl,
+        watermarkedImageUrl: urls.watermarkedImageUrl,
+      })
     );
-    return { imageUrl };
+    return urls;
   }
 );
 
@@ -412,7 +420,7 @@ export const assistInferFn = inngest.createFunction(
       });
     }
 
-    const [text, imageUrl] = await Promise.all([
+    const [text, imageUrls] = await Promise.all([
       targets.includes("text")
         ? step
             .run("text", () =>
@@ -446,7 +454,8 @@ export const assistInferFn = inngest.createFunction(
                 currentImageUrl: page.imageUrl,
                 styleId: story.art_style_id ?? null,
               });
-              return uploadGeneratedImage(dataUri);
+              // Returns { imageUrl, watermarkedImageUrl }.
+              return processAndUploadPageImage(dataUri);
             })
             .catch((err: unknown) => {
               console.error("[inngest.infer] image failed:", err);
@@ -455,10 +464,12 @@ export const assistInferFn = inngest.createFunction(
         : Promise.resolve(null),
     ]);
 
+    const imageUrl = imageUrls?.imageUrl ?? null;
+    const watermarkedImageUrl = imageUrls?.watermarkedImageUrl ?? null;
     await step.run("mark-done", () =>
-      markDone(jobId, { targets, text, imageUrl })
+      markDone(jobId, { targets, text, imageUrl, watermarkedImageUrl })
     );
-    return { targets, text, imageUrl };
+    return { targets, text, imageUrl, watermarkedImageUrl };
   }
 );
 
@@ -883,7 +894,12 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
             castPortraitsOnPage: castOnPage,
             memoryRefsOnPage,
           });
-          const imageUrl = await uploadGeneratedImage(dataUri);
+          // Upload original + StoryInk-watermarked variant. The
+          // reader / canvas pick between the two based on the
+          // viewer's paid status; the print PDF always reads
+          // `imageUrl`.
+          const { imageUrl, watermarkedImageUrl } =
+            await processAndUploadPageImage(dataUri);
 
           const overlays = buildInitialOverlays(
             imageUrl,
@@ -892,6 +908,7 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
           );
           await updateStoryPageFields(storyId, p.pageNumber, {
             imageUrl,
+            watermarkedImageUrl,
             overlays,
             layoutId: DEFAULT_LAYOUT_ID,
           });
@@ -911,12 +928,25 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         .from("stories")
         .select("pages")
         .eq("id", storyId)
-        .single<{ pages: Array<{ pageNumber: number; imageUrl: string }> }>();
+        .single<{
+          pages: Array<{
+            pageNumber: number;
+            imageUrl: string;
+            watermarkedImageUrl?: string;
+          }>;
+        }>();
       const first = story?.pages?.find((p) => p.pageNumber === 1);
       if (first?.imageUrl) {
+        // cover_image stays canonical for the print PDF;
+        // cover_image_watermarked is what library/sample/OG renderers
+        // show to viewers without full access.
         await admin
           .from("stories")
-          .update({ cover_image: first.imageUrl })
+          .update({
+            cover_image: first.imageUrl,
+            cover_image_watermarked:
+              first.watermarkedImageUrl ?? first.imageUrl,
+          })
           .eq("id", storyId);
       }
     });

@@ -70,8 +70,12 @@ export default function DigitalUpsell({
           >
             {page.imageUrl ? (
               <div className="relative aspect-square w-full">
+                {/* Preview is shown to a viewer who hasn't paid yet,
+                    so we render the watermarked variant whenever one
+                    exists. Falls back to the original for legacy
+                    pages without a watermarked URL. */}
                 <Image
-                  src={page.imageUrl}
+                  src={page.watermarkedImageUrl || page.imageUrl}
                   alt={`Illustration for page ${page.pageNumber}${
                     page.text ? `: ${page.text.slice(0, 80)}` : ""
                   }`}

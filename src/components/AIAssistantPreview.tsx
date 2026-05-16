@@ -22,6 +22,10 @@ export type PendingImage = {
   kind: "image";
   page: StoryPage;
   newImageUrl: string;
+  // Sibling URL for the watermarked variant. Set when the assist
+  // pipeline produced both (current behavior); legacy callers that
+  // only have the clean URL can leave it undefined.
+  newWatermarkedImageUrl?: string;
 };
 
 // Combined preview produced by /ai/infer when the classifier (or the user's
@@ -32,6 +36,7 @@ export type PendingBoth = {
   page: StoryPage;
   newText?: string;
   newImageUrl?: string;
+  newWatermarkedImageUrl?: string;
 };
 
 export type Pending = PendingText | PendingImage | PendingBoth;

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import Image from "next/image";
 import { getSupabaseServer, getCurrentUser } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
+import { pickStoryCover, storyHasFullAccess } from "@/lib/entitlement";
 
 export const revalidate = 0;
 
@@ -18,7 +20,9 @@ export default async function CanvasIndexPage() {
   const supa = await getSupabaseServer();
   const { data: stories, error } = await supa
     .from("stories")
-    .select("id, title, prompt, cover_image, page_count, created_at")
+    .select(
+      "id, title, prompt, cover_image, cover_image_watermarked, digital_unlocked, is_public, page_count, created_at"
+    )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -52,7 +56,15 @@ export default async function CanvasIndexPage() {
         </p>
       </div>
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {stories.map((story, i) => (
+        {(() => {
+          const adminFlag = isAdminUser(user);
+          return stories.map((story, i) => {
+          // Owner viewing their own story: unwatermarked only after
+          // they've paid (digital or hardcover). Public stories /
+          // beta / admin all clear via storyHasFullAccess.
+          const fullAccess = storyHasFullAccess(story, { isAdmin: adminFlag });
+          const coverSrc = pickStoryCover(story, fullAccess);
+          return (
           <Link
             key={story.id}
             href={`/canvas/${story.id}`}
@@ -60,9 +72,9 @@ export default async function CanvasIndexPage() {
             style={{ animationDelay: `${i * 30}ms` }}
           >
             <div className="relative aspect-square overflow-hidden bg-cream-200">
-              {story.cover_image ? (
+              {coverSrc ? (
                 <Image
-                  src={story.cover_image}
+                  src={coverSrc}
                   alt={story.title}
                   fill
                   className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
@@ -84,7 +96,9 @@ export default async function CanvasIndexPage() {
               </p>
             </div>
           </Link>
-        ))}
+          );
+        });
+        })()}
       </div>
     </div>
   );

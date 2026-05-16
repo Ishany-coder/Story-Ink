@@ -4,8 +4,10 @@ import BookCard from "@/components/BookCard";
 import LandingPage from "@/components/LandingPage";
 import ResumeDraftCard from "@/components/ResumeDraftCard";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
 import { listDraftsForUser } from "@/lib/drafts";
 import { listCharactersForUser } from "@/lib/characters";
+import { pickStoryCover, storyHasFullAccess } from "@/lib/entitlement";
 import type { Character } from "@/lib/types";
 
 export const revalidate = 0;
@@ -15,6 +17,9 @@ interface StoryRow {
   title: string;
   prompt: string;
   cover_image: string | null;
+  cover_image_watermarked: string | null;
+  digital_unlocked: boolean | null;
+  is_public: boolean | null;
   page_count: number;
   created_at: string;
 }
@@ -41,7 +46,9 @@ export default async function Home() {
     listCharactersForUser(user.id).catch(() => [] as Character[]),
     supa
       .from("stories")
-      .select("id, title, prompt, cover_image, page_count, created_at")
+      .select(
+        "id, title, prompt, cover_image, cover_image_watermarked, digital_unlocked, is_public, page_count, created_at"
+      )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     listDraftsForUser(user.id).catch(() => []),
@@ -100,7 +107,12 @@ export default async function Home() {
             actionHref="/read"
           />
           <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {stories.slice(0, 9).map((s, i) => (
+            {stories.slice(0, 9).map((s, i) => {
+              const fullAccess = storyHasFullAccess(s, {
+                isAdmin: isAdminUser(user),
+              });
+              const cover = pickStoryCover(s, fullAccess);
+              return (
               <div
                 key={s.id}
                 className="animate-rise-in"
@@ -110,12 +122,13 @@ export default async function Home() {
                   id={s.id}
                   title={s.title}
                   prompt={s.prompt}
-                  coverImage={s.cover_image}
+                  coverImage={cover}
                   pageCount={s.page_count}
                   createdAt={s.created_at}
                 />
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

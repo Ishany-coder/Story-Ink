@@ -1,7 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { isAdminUser } from "@/lib/admin";
 import CanvasEditor from "@/components/CanvasEditor";
 import type { Pet, Story } from "@/lib/types";
+import { storyHasFullAccess } from "@/lib/entitlement";
 
 export const revalidate = 0;
 
@@ -44,5 +46,10 @@ export default async function CanvasStoryPage({
     pet = petRow ?? null;
   }
 
-  return <CanvasEditor story={story} pet={pet} />;
+  // Owners without a paid digital/print purchase see watermarked
+  // previews in the canvas (same rule as the reader). The editor's
+  // save paths continue to read/write the canonical imageUrl.
+  const fullAccess = storyHasFullAccess(story, { isAdmin: isAdminUser(user) });
+
+  return <CanvasEditor story={story} pet={pet} fullAccess={fullAccess} />;
 }

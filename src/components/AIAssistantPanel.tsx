@@ -45,7 +45,10 @@ interface Props {
   storyAiSystemPrompt: string | null | undefined;
   currentPage: StoryPage;
   onApplyText: (newText: string) => void;
-  onApplyImage: (newImageUrl: string) => void;
+  onApplyImage: (
+    newImageUrl: string,
+    newWatermarkedImageUrl?: string
+  ) => void;
   onStoryPromptSaved: (newPrompt: string | null) => void;
 }
 
@@ -179,6 +182,7 @@ export default function AIAssistantPanel({
         targets: ("text" | "image")[];
         text: string | null;
         imageUrl: string | null;
+        watermarkedImageUrl: string | null;
       }>(jobId);
 
       setInferredTargets(payload.targets);
@@ -196,6 +200,7 @@ export default function AIAssistantPanel({
           page: currentPage,
           newText: payload.text ?? undefined,
           newImageUrl: payload.imageUrl ?? undefined,
+          newWatermarkedImageUrl: payload.watermarkedImageUrl ?? undefined,
         });
       } else if (wantsText) {
         if (payload.text == null) {
@@ -216,6 +221,7 @@ export default function AIAssistantPanel({
           kind: "image",
           page: currentPage,
           newImageUrl: payload.imageUrl,
+          newWatermarkedImageUrl: payload.watermarkedImageUrl ?? undefined,
         });
       }
     } catch (err) {
@@ -242,10 +248,22 @@ export default function AIAssistantPanel({
     // Save the side the user already approved so we can merge after.
     const existing =
       pending.kind === "text"
-        ? { newText: pending.newText, newImageUrl: undefined as string | undefined }
+        ? {
+            newText: pending.newText,
+            newImageUrl: undefined as string | undefined,
+            newWatermarkedImageUrl: undefined as string | undefined,
+          }
         : pending.kind === "image"
-        ? { newText: undefined as string | undefined, newImageUrl: pending.newImageUrl }
-        : { newText: pending.newText, newImageUrl: pending.newImageUrl };
+        ? {
+            newText: undefined as string | undefined,
+            newImageUrl: pending.newImageUrl,
+            newWatermarkedImageUrl: pending.newWatermarkedImageUrl,
+          }
+        : {
+            newText: pending.newText,
+            newImageUrl: pending.newImageUrl,
+            newWatermarkedImageUrl: pending.newWatermarkedImageUrl,
+          };
 
     try {
       const res = await fetch(
@@ -271,6 +289,7 @@ export default function AIAssistantPanel({
         targets: ("text" | "image")[];
         text: string | null;
         imageUrl: string | null;
+        watermarkedImageUrl: string | null;
       }>(jobId);
 
       setPending({
@@ -284,6 +303,10 @@ export default function AIAssistantPanel({
           missing === "image"
             ? payload.imageUrl ?? undefined
             : existing.newImageUrl,
+        newWatermarkedImageUrl:
+          missing === "image"
+            ? payload.watermarkedImageUrl ?? undefined
+            : existing.newWatermarkedImageUrl,
       });
       setInferredTargets((prev) => {
         if (!prev) return ["text", "image"];
@@ -301,11 +324,13 @@ export default function AIAssistantPanel({
   function applyPending() {
     if (!pending) return;
     if (pending.kind === "text") onApplyText(pending.newText);
-    else if (pending.kind === "image") onApplyImage(pending.newImageUrl);
+    else if (pending.kind === "image")
+      onApplyImage(pending.newImageUrl, pending.newWatermarkedImageUrl);
     else {
       // Both mode — apply whichever sides actually produced a result.
       if (pending.newText != null) onApplyText(pending.newText);
-      if (pending.newImageUrl != null) onApplyImage(pending.newImageUrl);
+      if (pending.newImageUrl != null)
+        onApplyImage(pending.newImageUrl, pending.newWatermarkedImageUrl);
     }
     setPending(null);
     setUserPrompt("");

@@ -58,6 +58,7 @@ import {
   type FontOption,
 } from "@/lib/fonts";
 import { useMediaQuery } from "@/lib/useMediaQuery";
+import { pickPageImageUrl } from "@/lib/entitlement";
 import {
   alignLayers,
   distributeLayers,
@@ -81,6 +82,11 @@ interface CanvasEditorProps {
   // (memorial-only layouts hide on living/generic stories) and is
   // surfaced in the editor header.
   pet?: import("@/lib/types").Pet | null;
+  // True when the owner has paid for the story (digital or hardcover)
+  // or is admin/beta/public. When false, the editor renders the
+  // watermarked variant of each page image at every render site while
+  // saves continue to read/write the canonical `imageUrl`.
+  fullAccess?: boolean;
 }
 
 type SidebarTab = "layouts" | "text" | "shapes" | "images" | "layers" | "assistant";
@@ -578,6 +584,7 @@ export default function CanvasEditor(props: CanvasEditorProps) {
 function CanvasEditorDesktop({
   story: initialStory,
   pet = null,
+  fullAccess = true,
 }: CanvasEditorProps) {
   const [story, setStory] = useState<Story>(initialStory);
 
@@ -735,10 +742,25 @@ function CanvasEditorDesktop({
   const currentPage = story.pages[pageIdx];
   // Memoized so the deps of the keyboard-nav useEffect below don't
   // churn on every render (?? produces a fresh empty array each pass).
-  const layers: Layer[] = useMemo(
-    () => currentPage?.overlays ?? [],
-    [currentPage]
-  );
+  // Render-time layer view. When the viewer doesn't have full access,
+  // swap the layout-source background image's `src` to the page's
+  // watermarked variant so the canvas previews paid-only artwork
+  // behind a "StoryInk" mark. All update operations (updateLayer,
+  // delete, etc.) read from `currentPage.overlays` directly, so this
+  // swap never leaks into saves — the canonical imageUrl is preserved
+  // for the print PDF.
+  const layers: Layer[] = useMemo(() => {
+    const raw = currentPage?.overlays ?? [];
+    if (fullAccess) return raw;
+    const watermarked = currentPage?.watermarkedImageUrl;
+    const canonical = currentPage?.imageUrl;
+    if (!watermarked || !canonical) return raw;
+    return raw.map((l) =>
+      l.source === "layout" && l.type === "image" && l.src === canonical
+        ? { ...l, src: watermarked }
+        : l
+    );
+  }, [currentPage, fullAccess]);
   const selectedLayer = layers.find((l) => l.id === selectedId) ?? null;
   const selectedLayers = useMemo(
     () => layers.filter((l) => selectedIds.has(l.id)),
@@ -1075,15 +1097,20 @@ function CanvasEditorDesktop({
     [currentPage, updatePage, snapshotPages]
   );
 
-  // Apply an AI-regenerated image URL: update page.imageUrl (for the reader)
-  // and the layout-tagged image layer's src (for the studio).
+  // Apply an AI-regenerated image URL: update page.imageUrl (for the
+  // reader / print pipeline), the watermarked sibling (for unpaid
+  // previews), and the layout-tagged image layer's src (for the
+  // studio's current rendering). The image overlay's src always
+  // points at the canonical URL — the editor swaps in the watermarked
+  // variant at render time via pickPageImageUrl.
   const applyAssistantImage = useCallback(
-    (newImageUrl: string) => {
+    (newImageUrl: string, newWatermarkedImageUrl?: string) => {
       if (!currentPage) return;
       snapshotPages();
       updatePage(currentPage.pageNumber, (p) => ({
         ...p,
         imageUrl: newImageUrl,
+        watermarkedImageUrl: newWatermarkedImageUrl ?? p.watermarkedImageUrl,
         overlays: (p.overlays ?? []).map((l) =>
           l.source === "layout" && l.type === "image"
             ? { ...l, src: newImageUrl }
@@ -3215,28 +3242,34 @@ function CanvasEditorDesktop({
                   outlineOffset: isActive ? 2 : 0,
                 }}
               >
-                {page.imageUrl ? (
-                  page.imageUrl.startsWith("data:") ? (
+                {(() => {
+                  // Swap to the watermarked variant when the viewer
+                  // hasn't paid. Falls back to imageUrl if no
+                  // watermark exists (legacy pages or in-flight
+                  // generation).
+                  const renderSrc = pickPageImageUrl(page, fullAccess);
+                  if (!renderSrc) return null;
+                  return renderSrc.startsWith("data:") ? (
                     // Data URLs (mid-upload drafts) bypass next/image
                     // — its loader requires a real URL. The persisted
                     // Supabase URL goes through the optimized path
                     // below once the upload finishes.
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={page.imageUrl}
+                      src={renderSrc}
                       alt=""
                       className="absolute inset-0 h-full w-full object-cover opacity-90"
                     />
                   ) : (
                     <Image
-                      src={page.imageUrl}
+                      src={renderSrc}
                       alt=""
                       fill
                       sizes="48px"
                       className="object-cover opacity-90"
                     />
-                  )
-                ) : null}
+                  );
+                })()}
                 {isDirtyPage && !isActive && (
                   <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-clay-500" />
                 )}

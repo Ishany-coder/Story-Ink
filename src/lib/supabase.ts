@@ -44,6 +44,7 @@ export function supabaseAdmin(): SupabaseClient {
 export interface StoryPagePatch {
   text?: string;
   imageUrl?: string;
+  watermarkedImageUrl?: string;
   overlays?: Layer[];
   layoutId?: string;
 }
@@ -66,28 +67,27 @@ export async function updateStoryPageFields(
   }
 }
 
-// Upload a base64 data URI (e.g., from Gemini image gen) to the "uploads"
-// bucket and return its public URL. Keeps the stories.pages JSONB column
-// small — storing inline base64 makes the column too large to round-trip
-// on every overlay save and causes PostgREST to drop the connection.
-export async function uploadGeneratedImage(dataUri: string): Promise<string> {
-  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUri);
-  if (!match) throw new Error("uploadGeneratedImage: not a base64 data URI");
-  const [, mime, b64] = match;
-  const buf = Buffer.from(b64, "base64");
+// Lower-level uploader for image buffers. Shared between
+// uploadGeneratedImage (original AI output) and
+// processAndUploadPageImage (which uploads both an original AND a
+// watermarked variant). Each attempt picks a fresh UUID path under
+// the given prefix so a partially-written object can't collide.
+async function uploadBufferToUploads(
+  buf: Buffer,
+  mime: string,
+  pathPrefix: string
+): Promise<string> {
   const ext =
     mime === "image/svg+xml" ? "svg" : mime.split("/")[1]?.split("+")[0] || "png";
-
   const admin = supabaseAdmin();
   const delays = [500, 1500];
 
-  // Storage uploads occasionally fail with ECONNRESET / fetch failed when
-  // the underlying fetch connection is reset mid-flight. Retry twice with
-  // short backoff before giving up. Each attempt uses a fresh UUID path so
-  // a partially-written object can't collide.
+  // Storage uploads occasionally fail with ECONNRESET / fetch failed
+  // when the underlying fetch connection is reset mid-flight. Retry
+  // twice with short backoff before giving up.
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const path = `generated/${crypto.randomUUID()}.${ext}`;
+    const path = `${pathPrefix}/${crypto.randomUUID()}.${ext}`;
     try {
       const { error } = await admin.storage
         .from("uploads")
@@ -112,6 +112,90 @@ export async function uploadGeneratedImage(dataUri: string): Promise<string> {
     }
   }
   throw lastErr;
+}
+
+function decodeDataUri(dataUri: string): { buf: Buffer; mime: string } {
+  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUri);
+  if (!match) throw new Error("decodeDataUri: not a base64 data URI");
+  const [, mime, b64] = match;
+  return { buf: Buffer.from(b64, "base64"), mime };
+}
+
+// Upload a base64 data URI (e.g., from Gemini image gen) to the "uploads"
+// bucket and return its public URL. Keeps the stories.pages JSONB column
+// small — storing inline base64 makes the column too large to round-trip
+// on every overlay save and causes PostgREST to drop the connection.
+export async function uploadGeneratedImage(dataUri: string): Promise<string> {
+  const { buf, mime } = decodeDataUri(dataUri);
+  return uploadBufferToUploads(buf, mime, "generated");
+}
+
+// Upload the original AND a "StoryInk" watermarked variant of a
+// generated page image. Returns both URLs so the caller (the Inngest
+// per-page step, the AI page-regen routes) can persist them on
+// stories.pages alongside each other.
+//
+// `imageUrl` stays the canonical original used by the print PDF and
+// the canvas editor's save path. `watermarkedImageUrl` is what the
+// reader and canvas render to viewers who haven't paid for the story.
+//
+// Watermark is composited via sharp using an inline SVG: rotated -22°,
+// centered, light-but-big "StoryInk" text. Tunable in one place
+// (WATERMARK_TEXT / opacities / font-size below) without re-running
+// any pipelines for new pages.
+export async function processAndUploadPageImage(
+  dataUri: string
+): Promise<{ imageUrl: string; watermarkedImageUrl: string }> {
+  // Lazy import sharp so the rest of supabase.ts can stay importable
+  // from any runtime context. Sharp is a native module and only
+  // resolves on Node (which is fine for this server-only path).
+  const sharp = (await import("sharp")).default;
+
+  const { buf: originalBuf, mime: originalMime } = decodeDataUri(dataUri);
+
+  // Watermarked variant is always PNG so the overlay text antialiases
+  // cleanly on top of whatever the source format was.
+  let width = 1024;
+  let height = 1024;
+  try {
+    const meta = await sharp(originalBuf).metadata();
+    if (meta.width) width = meta.width;
+    if (meta.height) height = meta.height;
+  } catch {
+    // Fall through with defaults — the resulting SVG just gets sized
+    // a touch wrong on an unrecognized image; sharp will still
+    // composite onto the actual pixel grid.
+  }
+
+  const fontSize = Math.round(width / 7);
+  const overlaySvg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+       <text x="50%" y="50%"
+         font-family="Georgia, serif"
+         font-weight="700"
+         font-size="${fontSize}"
+         text-anchor="middle"
+         dominant-baseline="middle"
+         fill="white" fill-opacity="0.32"
+         stroke="black" stroke-opacity="0.16" stroke-width="2"
+         transform="rotate(-22 ${width / 2} ${height / 2})"
+       >StoryInk</text>
+     </svg>`
+  );
+
+  const watermarkedBuf = await sharp(originalBuf)
+    .composite([{ input: overlaySvg, blend: "over" }])
+    .png()
+    .toBuffer();
+
+  // Run the two uploads in parallel — they're independent and the
+  // page-generation step is already on the slow end of the pipeline.
+  const [imageUrl, watermarkedImageUrl] = await Promise.all([
+    uploadBufferToUploads(originalBuf, originalMime, "generated"),
+    uploadBufferToUploads(watermarkedBuf, "image/png", "generated/watermarked"),
+  ]);
+
+  return { imageUrl, watermarkedImageUrl };
 }
 
 // Upload an arbitrary blob (currently used for print-ready PDFs from

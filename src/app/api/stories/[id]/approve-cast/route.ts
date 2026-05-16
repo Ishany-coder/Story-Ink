@@ -6,6 +6,7 @@ import {
 } from "@/lib/supabase-server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { inngest, EVENTS } from "@/inngest/client";
+import { markProgress } from "@/lib/jobs";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -41,6 +42,20 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
     if (!jobId) {
       return NextResponse.json({ error: "no awaiting job" }, { status: 404 });
     }
+
+    // Flip the job past awaiting_cast_approval BEFORE we return so the
+    // client's progress page poll doesn't see stale state. Without this:
+    //   (a) Status stays "awaiting_cast_approval" until the Inngest
+    //       function actually picks up the event (1–3s), which can
+    //       bounce the user from /progress back to /approve-cast via
+    //       StoryProgressClient's redirect branch.
+    //   (b) result.stage stays "awaiting_cast_approval" until the
+    //       first per-page markProgress fires (~20-40s), so the stepper
+    //       highlights "Awaiting cast approval" while pages are
+    //       actually generating.
+    // markProgress writes status="running" + the new result in one
+    // shot, which covers both.
+    await markProgress(jobId, { stage: "pages", storyId });
 
     await inngest.send({
       name: EVENTS.castApproved,

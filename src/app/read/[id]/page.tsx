@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 // serialized to the client — those leak the owning user's identity and
 // any private notes the owner has stashed in the system prompt.
 const PUBLIC_COLUMNS =
-  "id, title, page_count, pages, cover_image, art_style_id, is_public, digital_unlocked, created_at";
+  "id, title, page_count, pages, cover_image, cover_image_watermarked, art_style_id, is_public, digital_unlocked, created_at";
 
 interface StoryRowWithOwner {
   id: string;
@@ -28,6 +28,7 @@ interface StoryRowWithOwner {
   page_count: number;
   pages: Story["pages"];
   cover_image: string | null;
+  cover_image_watermarked: string | null;
   art_style_id: string;
   is_public: boolean;
   digital_unlocked: boolean;
@@ -63,6 +64,13 @@ export default async function ReadStoryPage({
     .single();
 
   if (error || !visible) {
+    // Surface the underlying Supabase/PostgREST error in the server
+    // logs — without this the only signal is a generic 404 page, which
+    // makes "missing column" / "RLS denied" indistinguishable from a
+    // legitimately deleted row.
+    if (error) {
+      console.error("[read/[id]] story load failed:", error);
+    }
     notFound();
   }
 
@@ -126,7 +134,10 @@ export default async function ReadStoryPage({
 
   return (
     <>
-      <SlideReader story={story as unknown as Story} />
+      <SlideReader
+        story={story as unknown as Story}
+        fullAccess={fullAccess}
+      />
       {admin && <AdminExportPdfButton storyId={story.id} />}
     </>
   );

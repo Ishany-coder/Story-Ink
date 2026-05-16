@@ -8,7 +8,17 @@ import { resolveDisplayLayers } from "@/lib/layouts";
 import { isBetaTesting } from "@/lib/beta-flag";
 import ReadOnlyLayer from "./ReadOnlyLayer";
 
-export default function SlideReader({ story }: { story: Story }) {
+export default function SlideReader({
+  story,
+  fullAccess = true,
+}: {
+  story: Story;
+  // When false, the reader swaps every layout-source background image
+  // for its watermarked variant before rendering. Defaults to true so
+  // existing callers that don't yet thread the prop (admin export,
+  // unit tests) get clean images.
+  fullAccess?: boolean;
+}) {
   const [currentPage, setCurrentPage] = useState(0);
   const pages = story.pages;
 
@@ -48,10 +58,24 @@ export default function SlideReader({ story }: { story: Story }) {
   }, [goNext, goPrev]);
 
   const page = pages[currentPage];
-  const layers = useMemo(
+  const rawLayers = useMemo(
     () => resolveDisplayLayers(page, story.default_text_size),
     [page, story.default_text_size]
   );
+  // Swap the layout-source background image for its watermarked
+  // variant when the viewer doesn't have full access. Matches by
+  // exact src equality with page.imageUrl so user-inserted image
+  // overlays (which carry their own src) are left alone.
+  const layers = useMemo(() => {
+    if (fullAccess) return rawLayers;
+    const watermarked = page?.watermarkedImageUrl;
+    if (!watermarked || !page?.imageUrl) return rawLayers;
+    return rawLayers.map((l) =>
+      l.source === "layout" && l.type === "image" && l.src === page.imageUrl
+        ? { ...l, src: watermarked }
+        : l
+    );
+  }, [rawLayers, fullAccess, page]);
 
   // Pin the reader to the small viewport so the entire spread (canvas
   // + arrows + page dots) fits without a page scroll. `100svh` resolves

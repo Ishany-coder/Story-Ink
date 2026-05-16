@@ -49,7 +49,17 @@ Uptime probe lives at `GET /api/health` — returns `{ ok, supabase, stripe, ema
 
 ## Database
 
-Schema lives in `supabase/schema.sql` and is **idempotent** — re-run it after edits. Tables: `characters`, `character_portraits`, `art_styles`, `story_drafts`, `stories`, `jobs`, `custom_layouts`, `print_orders`. All are RLS-scoped to `auth.uid()`; public reads are gated by `stories.is_public`. The `art_styles` catalog is publicly readable; portraits are owner-scoped via their parent character; drafts and characters are strictly owner-only. Apply the seed once via `supabase/seed-art-styles.sql`.
+Schema is split across `supabase/migrations/*.sql`. The baseline (`000_schema.sql`) holds the original idempotent full-schema script; every later file is a numbered incremental migration (`001_*.sql`, `002_*.sql`, …) that contains ONLY the delta for that change.
+
+**Migration rules — strict:**
+
+- **Never edit `000_schema.sql`** (or any existing migration file) when adding new schema. Treat them as historical artifacts. The baseline is the schema as of the project's last full snapshot.
+- New tables / columns / RPC changes / RLS edits → **add a new `NNN_*.sql` file** with the next number, containing only the delta. Use `add column if not exists` / `create or replace function` / `drop policy if exists` so the file is safe to re-run.
+- One migration file per logical change so the user can read the filename and know what it does (`001_watermark_columns.sql`, `002_character_pet_kind_pet_only.sql`, etc.). Don't bundle unrelated changes.
+- Apply order is lexicographic by filename. If a new migration depends on another, name it with a higher number.
+- After applying locally: `psql "$DATABASE_URL" -f supabase/migrations/NNN_xxx.sql` or paste into the Supabase Studio SQL editor.
+
+Tables currently in scope: `characters`, `character_portraits`, `art_styles`, `story_drafts`, `stories`, `jobs`, `custom_layouts`, `print_orders`. All are RLS-scoped to `auth.uid()`; public reads are gated by `stories.is_public`. The `art_styles` catalog is publicly readable; portraits are owner-scoped via their parent character; drafts and characters are strictly owner-only. Apply the seed once via `supabase/seed-art-styles.sql`.
 
 Storage bucket: `uploads` (public read, writes only via service role).
 

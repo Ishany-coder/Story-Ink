@@ -158,6 +158,13 @@ export interface StoryPage {
   pageNumber: number;
   text: string;
   imageUrl: string;
+  // Sibling URL pointing at a "StoryInk" watermarked variant of the
+  // page image. Populated by processAndUploadPageImage in the Inngest
+  // pages stage (and by AI per-page regen routes) so the reader /
+  // canvas can show watermarked previews to unpaid viewers without
+  // re-encoding on the fly. `imageUrl` remains the canonical original
+  // and is what the print PDF embeds.
+  watermarkedImageUrl?: string;
   overlays?: Layer[];
   layoutId?: string;
 }
@@ -169,6 +176,15 @@ export interface Story {
   page_count: number;
   pages: StoryPage[];
   cover_image: string | null;
+  // Watermarked sibling of cover_image, written by the Inngest
+  // set-cover step from pages[0].watermarkedImageUrl. Used by library
+  // tiles / sample gallery / OG image when the viewer doesn't have
+  // full access. cover_image stays clean for the print PDF.
+  cover_image_watermarked?: string | null;
+  // Digital purchase flag. Flipped to true by /api/ship/stripe/webhook
+  // on either a digital purchase or a hardcover order. Drives the
+  // reader/canvas paid-status gate.
+  digital_unlocked?: boolean;
   created_at: string;
   // User-uploaded images attached to this story. Survives deleting the
   // layer that first referenced an image, so the Studio keeps showing it

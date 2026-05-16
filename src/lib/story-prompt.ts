@@ -190,25 +190,52 @@ Constraints:
 }
 
 // Per-character portrait prompt. Used by Stage 2 (generateCastPortrait).
+// The attached reference photo is treated as a LIKENESS anchor, not as
+// a vibe reference. Earlier versions of this prompt just said
+// "generate a portrait of {name}" and let the model invent fairy
+// godmothers from the traits text; the explicit feature-by-feature
+// instruction below is what forces the model to actually look at the
+// photo and reproduce the person/pet faithfully.
 export function buildCastPortraitPrompt(args: {
   character: Character;
   artStylePromptScaffold: string;
 }): string {
   const { character, artStylePromptScaffold } = args;
-  const subject =
-    character.kind === "person"
-      ? character.name
-      : `${character.name} the ${character.species ?? "pet"}`;
-  const role = character.role_label ? `, depicted as "${character.role_label}"` : "";
-  const traits = character.traits ? `Personality / traits: ${character.traits}.` : "";
-  return `
-Generate a single canonical portrait of ${subject}${role}.
+  const isPet = character.kind === "pet";
+  const subjectNoun = isPet
+    ? `a real pet (${character.species ?? "pet"})`
+    : "a real person";
+  const role = character.role_label
+    ? `Their role in the story is "${character.role_label}".`
+    : "";
+  // Traits inform expression and posture only — never appearance. The
+  // model has gotten confused before and rendered traits like "warm
+  // grandma" as a literal stylized archetype.
+  const traits = character.traits
+    ? `Personality (use only for expression and posture, NOT appearance): ${character.traits}.`
+    : "";
 
-${artStylePromptScaffold}
+  // Feature-by-feature likeness checklist. Different list for people
+  // vs pets so the model has the right vocabulary to anchor on.
+  const likenessFeatures = isPet
+    ? "breed, coat color and pattern, coat length, markings, body type and size, ear shape and carriage, eye color, and any distinguishing features (collar, scars, missing limbs, etc.) — only if they appear in the photo"
+    : "face shape, eye shape and color, hair color and style, skin tone, apparent age, body type, and any distinguishing features (glasses, freckles, facial hair, scars, etc.) — only if they appear in the photo";
+
+  return `
+Generate a portrait of ${subjectNoun}: ${character.name}.
+
+The attached image is a photograph of ${character.name}. Your portrait MUST faithfully match the ${isPet ? "pet" : "person"} in that photo. Reproduce their ${likenessFeatures}. This is a LIKENESS reference, not a vibe reference. Do not stylize away their real features. Do not add costumes, accessories, wings, halos, hats, magical elements, or any other adornments that are not present in the photo. Do not change their age, gender, or species.
+
+${role}
 
 ${traits}
 
-This portrait will be used as the visual reference for ${character.name} on every page of an illustrated storybook — keep features distinctive, well-lit, and centered. Plain neutral background. No text in the image.
+Render in this illustrated style:
+${artStylePromptScaffold}
+
+Framing: ${isPet ? "head-and-shoulders or full-body, whichever best shows the pet's distinguishing features" : "head-and-shoulders, centered, looking toward camera"}. Plain neutral background. Well-lit. No text, captions, or watermarks in the image.
+
+This portrait will be used as the visual anchor for ${character.name} on every page of an illustrated storybook, so the likeness must stay consistent across pages.
 `.trim();
 }
 

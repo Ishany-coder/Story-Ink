@@ -24,12 +24,17 @@ GEMINI_API_KEY=your-gemini-api-key
 
 ### 3. Set up the database
 
-StoryInk stores generated stories in a `public.stories` table. Before the app can save anything, you need to create it.
+StoryInk stores generated stories in a `public.stories` table (and several related tables). Before the app can save anything, you need to apply the database migrations.
 
-Open the [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql) for your project, paste the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it. This creates the table, an index on `created_at`, and permissive RLS policies so the anon key can read and insert.
+Open the [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql) for your project, then run every file in [`supabase/migrations/`](./supabase/migrations/) **in numeric order**:
+
+1. `000_schema.sql` — baseline schema (tables, indexes, RLS policies, RPCs).
+2. `001_*.sql`, `002_*.sql`, … — incremental migrations. Apply each, in filename order.
+
+Every migration file is idempotent (`create ... if not exists` / `create or replace function` / `drop policy if exists`), so re-running an already-applied file is safe.
 
 > **Troubleshooting — `PGRST205: Could not find the table 'public.stories' in the schema cache`**
-> This error means the schema script hasn't been applied yet (or PostgREST's cache is stale). Run `supabase/schema.sql` as described above. If the error persists right after creating the table, click **"Reload schema cache"** in the Supabase dashboard or wait ~30 seconds for PostgREST to refresh.
+> This error means the migrations haven't been applied yet (or PostgREST's cache is stale). Run every file in `supabase/migrations/` as described above. If the error persists right after applying, click **"Reload schema cache"** in the Supabase dashboard or wait ~30 seconds for PostgREST to refresh.
 
 ### 4. Run the dev server
 
@@ -47,4 +52,4 @@ Open [http://localhost:3000](http://localhost:3000).
 - `src/components/SlideReader.tsx` — keyboard-navigable slide viewer
 - `src/lib/gemini.ts` — Gemini text + image generation
 - `src/lib/supabase.ts` — Supabase client
-- `supabase/schema.sql` — database schema
+- `supabase/migrations/` — database schema baseline (`000_schema.sql`) + incremental migrations (`NNN_*.sql`)
