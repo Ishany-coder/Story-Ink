@@ -48,7 +48,7 @@ export default async function Navbar() {
             <>
               <div className="hidden items-center gap-3 md:flex">
                 <Link
-                  href="/create"
+                  href="/create/new"
                   className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-4 py-1.5 text-sm font-semibold text-cream-50 shadow-sm transition-all hover:bg-moss-900"
                 >
                   <PlusIcon />

@@ -3,7 +3,9 @@ import HeroSection from "@/components/HeroSection";
 import HomeCreate from "@/components/HomeCreate";
 import BookCard from "@/components/BookCard";
 import LandingPage from "@/components/LandingPage";
+import ResumeDraftCard from "@/components/ResumeDraftCard";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
+import { listDraftsForUser } from "@/lib/drafts";
 import type { Pet } from "@/lib/types";
 
 export const revalidate = 0;
@@ -35,7 +37,7 @@ export default async function Home() {
   }
 
   const supa = await getSupabaseServer();
-  const [petsRes, storiesRes] = await Promise.all([
+  const [petsRes, storiesRes, drafts] = await Promise.all([
     supa
       .from("pets")
       .select("*")
@@ -46,6 +48,7 @@ export default async function Home() {
       .select("id, title, prompt, cover_image, page_count, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
+    listDraftsForUser(user.id).catch(() => []),
   ]);
 
   const pets = (petsRes.data ?? []) as Pet[];
@@ -63,9 +66,28 @@ export default async function Home() {
         </section>
       )}
 
-      {stories.length > 0 && (
+      {drafts.length > 0 && (
         <section
           className={`animate-rise-in ${dashboardMode ? "mt-2" : "mt-20"}`}
+          style={{ animationDelay: "100ms" }}
+        >
+          <SectionHeading
+            title="Resume a draft"
+            subtitle={`${drafts.length} in progress`}
+          />
+          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {drafts.map((d) => (
+              <ResumeDraftCard key={d.id} draft={d} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {stories.length > 0 && (
+        <section
+          className={`animate-rise-in ${
+            dashboardMode && drafts.length === 0 ? "mt-2" : "mt-20"
+          }`}
           style={{ animationDelay: "120ms" }}
         >
           <SectionHeading
@@ -153,7 +175,7 @@ function DashboardHeader() {
         </p>
       </div>
       <Link
-        href="/create"
+        href="/create/new"
         className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
       >
         <PlusIcon />
