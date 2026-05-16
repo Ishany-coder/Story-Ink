@@ -32,6 +32,12 @@ interface Tab {
 const TABS: Tab[] = [
   { label: "Home", href: "/", matches: (p) => p === "/", flag: "home" },
   {
+    label: "Characters",
+    href: "/characters",
+    matches: (p) => p.startsWith("/characters"),
+    flag: "characters",
+  },
+  {
     label: "Pets",
     href: "/pets",
     matches: (p) => p.startsWith("/pets"),

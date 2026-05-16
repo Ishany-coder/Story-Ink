@@ -43,13 +43,14 @@ export default function StoryGeneratingScreen({ jobId }: Props) {
     };
   }, []);
 
-  const progress =
-    state.kind === "running" &&
-    state.result &&
-    typeof state.result.current === "number" &&
-    typeof state.result.total === "number"
-      ? { current: state.result.current, total: state.result.total }
-      : null;
+  const progress = (() => {
+    if (state.kind !== "running" || !state.result) return null;
+    const r = state.result as { current?: unknown; total?: unknown };
+    if (typeof r.current === "number" && typeof r.total === "number") {
+      return { current: r.current, total: r.total };
+    }
+    return null;
+  })();
 
   if (state.kind === "failed" || state.kind === "stalled") {
     const heading =

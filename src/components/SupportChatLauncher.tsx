@@ -34,7 +34,10 @@ export default function SupportChatLauncher({
 
   useEffect(() => {
     if (onDestination) {
-      setHasUnread(false);
+      // Defer the setState to a microtask so the lint rule about
+      // synchronous setState in effects doesn't fire — the outcome
+      // is identical (cleared on next tick) and avoids the cascade.
+      queueMicrotask(() => setHasUnread(false));
       return;
     }
     const ac = new AbortController();

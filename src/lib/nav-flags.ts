@@ -10,6 +10,7 @@
 
 export interface NavFlags {
   home: boolean;
+  characters: boolean;
   pets: boolean;
   read: boolean;
   studio: boolean;
@@ -33,6 +34,7 @@ function flag(name: string, defaultValue = true): boolean {
 export function readNavFlags(): NavFlags {
   return {
     home: flag("SHOW_HOME"),
+    characters: flag("SHOW_CHARACTERS"),
     pets: flag("SHOW_PETS"),
     read: flag("SHOW_READ"),
     studio: flag("SHOW_STUDIO"),
