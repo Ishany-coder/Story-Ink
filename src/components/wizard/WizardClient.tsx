@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import ExampleBooksGallery from "@/components/ExampleBooksGallery";
 import StepShell from "./StepShell";
 import type {
   ArtStyle,
@@ -203,6 +204,15 @@ export default function WizardClient({
             })}
           </div>
         </details>
+
+        {/* Sample storybook covers so the first-time user can see what
+            kind of artifact they're about to build. Lives on Step 1
+            because that's the moment of greatest "what am I doing
+            here?" uncertainty. Subsequent steps assume the user has
+            committed to the flow. */}
+        <div className="mt-10">
+          <ExampleBooksGallery compact />
+        </div>
       </StepShell>
     );
   }
