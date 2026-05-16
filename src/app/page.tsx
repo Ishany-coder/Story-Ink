@@ -83,9 +83,15 @@ export default async function Home() {
             title="Resume a draft"
             subtitle={`${drafts.length} in progress`}
           />
-          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {drafts.map((d) => (
-              <ResumeDraftCard key={d.id} draft={d} />
+          <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {drafts.map((d, i) => (
+              <div
+                key={d.id}
+                className="animate-rise-in"
+                style={{ animationDelay: `${140 + i * 40}ms` }}
+              >
+                <ResumeDraftCard draft={d} />
+              </div>
             ))}
           </div>
         </section>
