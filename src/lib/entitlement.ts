@@ -32,6 +32,22 @@ export function storyHasFullAccess(
   return false;
 }
 
+// Watermark gate. Returns true when the viewer should see the clean
+// (unwatermarked) page images. Same logic as storyHasFullAccess
+// MINUS the beta flag — beta testers are supposed to dogfood the
+// unpaid funnel, so they see watermarked previews like a real
+// not-yet-paid customer would. Admin is retained so ops can review
+// real artwork.
+export function storyImagesAreClean(
+  story: { digital_unlocked?: boolean | null; is_public?: boolean | null },
+  opts: { isAdmin?: boolean } = {}
+): boolean {
+  if (story.digital_unlocked === true) return true;
+  if (story.is_public === true) return true;
+  if (opts.isAdmin === true) return true;
+  return false;
+}
+
 // Pick the right image URL for a page given a viewer's access level.
 // Fallback to imageUrl when no watermarked variant exists yet (covers
 // pages generated before this rollout).

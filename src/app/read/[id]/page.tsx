@@ -7,6 +7,7 @@ import AdminExportPdfButton from "@/components/AdminExportPdfButton";
 import DigitalUpsell from "@/components/DigitalUpsell";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
 import { isBetaTesting } from "@/lib/beta-flag";
+import { storyImagesAreClean } from "@/lib/entitlement";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -67,9 +68,31 @@ export default async function ReadStoryPage({
     // Surface the underlying Supabase/PostgREST error in the server
     // logs — without this the only signal is a generic 404 page, which
     // makes "missing column" / "RLS denied" indistinguishable from a
-    // legitimately deleted row.
+    // legitimately deleted row. Default console.error of a
+    // PostgrestError serializes to `{}` because its properties aren't
+    // own-enumerable, so we pull them out by name and JSON-stringify.
     if (error) {
-      console.error("[read/[id]] story load failed:", error);
+      const e = error as {
+        code?: string;
+        message?: string;
+        details?: string;
+        hint?: string;
+      };
+      console.error("[read/[id]] story load failed:", {
+        id,
+        userId: user?.id ?? null,
+        usedAdminClient: admin,
+        code: e.code,
+        message: e.message,
+        details: e.details,
+        hint: e.hint,
+        raw: JSON.stringify(error, Object.getOwnPropertyNames(error)),
+      });
+    } else {
+      console.error(
+        "[read/[id]] story load returned no row (likely RLS or missing id):",
+        { id, userId: user?.id ?? null, usedAdminClient: admin }
+      );
     }
     notFound();
   }
@@ -132,11 +155,17 @@ export default async function ReadStoryPage({
     );
   }
 
+  // Watermark gate is a separate check from `fullAccess`: beta-testing
+  // bypasses the paywall (so beta accounts can read every page) but
+  // still shows the watermark, so the funnel can be dogfooded with
+  // real previews.
+  const cleanImages = storyImagesAreClean(story, { isAdmin: admin });
+
   return (
     <>
       <SlideReader
         story={story as unknown as Story}
-        fullAccess={fullAccess}
+        fullAccess={cleanImages}
       />
       {admin && <AdminExportPdfButton storyId={story.id} />}
     </>

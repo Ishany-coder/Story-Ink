@@ -167,17 +167,26 @@ export async function processAndUploadPageImage(
     // composite onto the actual pixel grid.
   }
 
-  const fontSize = Math.round(width / 7);
+  // Watermark visibility was tuned up after the first pass read too
+  // faint in the reader. Numbers below are the knobs to retune later
+  // if needed — keep them in sync with the comment so we don't drift.
+  //   - font-size ≈ width / 5.5  → "big" so the eye lands on it
+  //   - fill white @ 70%         → clearly visible on dark scenes
+  //   - stroke black @ 55%, 4px  → contrast on light scenes
+  //   - rotation -22°            → defeats easy diagonal crop
+  const fontSize = Math.round(width / 5.5);
+  const strokeWidth = Math.max(3, Math.round(width / 320));
   const overlaySvg = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
        <text x="50%" y="50%"
          font-family="Georgia, serif"
-         font-weight="700"
+         font-weight="800"
          font-size="${fontSize}"
          text-anchor="middle"
          dominant-baseline="middle"
-         fill="white" fill-opacity="0.32"
-         stroke="black" stroke-opacity="0.16" stroke-width="2"
+         fill="white" fill-opacity="0.70"
+         stroke="black" stroke-opacity="0.55" stroke-width="${strokeWidth}"
+         paint-order="stroke fill"
          transform="rotate(-22 ${width / 2} ${height / 2})"
        >StoryInk</text>
      </svg>`

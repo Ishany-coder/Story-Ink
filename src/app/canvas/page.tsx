@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { getSupabaseServer, getCurrentUser } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
-import { pickStoryCover, storyHasFullAccess } from "@/lib/entitlement";
+import { pickStoryCover, storyImagesAreClean } from "@/lib/entitlement";
 
 export const revalidate = 0;
 
@@ -60,10 +60,13 @@ export default async function CanvasIndexPage() {
           const adminFlag = isAdminUser(user);
           return stories.map((story, i) => {
           // Owner viewing their own story: unwatermarked only after
-          // they've paid (digital or hardcover). Public stories /
-          // beta / admin all clear via storyHasFullAccess.
-          const fullAccess = storyHasFullAccess(story, { isAdmin: adminFlag });
-          const coverSrc = pickStoryCover(story, fullAccess);
+          // they've paid (digital or hardcover) — beta does NOT
+          // bypass the watermark on covers so dogfooders see what an
+          // unpaid customer would see. Admin retained for ops review.
+          const cleanCover = storyImagesAreClean(story, {
+            isAdmin: adminFlag,
+          });
+          const coverSrc = pickStoryCover(story, cleanCover);
           return (
           <Link
             key={story.id}

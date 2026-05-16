@@ -8,7 +8,12 @@
 //     CTA in the UI
 //   - hides the "Ship" and "My orders" nav tabs
 //   - auto-grants full reader access (treats `isBetaTesting()` as
-//     equivalent to `digital_unlocked` in `src/app/read/[id]/page.tsx`)
+//     equivalent to `digital_unlocked` in `src/app/read/[id]/page.tsx`,
+//     i.e. beta testers can read every page without paying)
+//   - does NOT bypass the StoryInk watermark — beta testers still see
+//     watermarked previews so they dogfood the same artwork an unpaid
+//     customer would see. See `storyImagesAreClean` in
+//     `src/lib/entitlement.ts`.
 //   - empties the sitemap and disallows all in robots.txt
 //   - shows a small banner explaining hardcover orders are paused
 //

@@ -7,7 +7,7 @@ import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import { listDraftsForUser } from "@/lib/drafts";
 import { listCharactersForUser } from "@/lib/characters";
-import { pickStoryCover, storyHasFullAccess } from "@/lib/entitlement";
+import { pickStoryCover, storyImagesAreClean } from "@/lib/entitlement";
 import type { Character } from "@/lib/types";
 
 export const revalidate = 0;
@@ -108,10 +108,12 @@ export default async function Home() {
           />
           <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {stories.slice(0, 9).map((s, i) => {
-              const fullAccess = storyHasFullAccess(s, {
+              // Library tile cover: watermarked unless paid/public/admin.
+              // Beta excluded so dogfooders see the unpaid look.
+              const cleanCover = storyImagesAreClean(s, {
                 isAdmin: isAdminUser(user),
               });
-              const cover = pickStoryCover(s, fullAccess);
+              const cover = pickStoryCover(s, cleanCover);
               return (
               <div
                 key={s.id}
