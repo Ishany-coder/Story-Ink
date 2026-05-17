@@ -22,9 +22,11 @@ import {
   assistRegenerateImage,
   assistRegenerateText,
   classifyAssistIntent,
+  generateAiCastPortrait,
   generateCastPortrait,
   generatePageImageWithCastRefs,
   generateScript,
+  inferAiCastDescription,
   GeminiRateLimitError,
   GeminiSafetyBlockedError,
   regeneratePageText,
@@ -619,6 +621,23 @@ interface CastPortraitEntry {
   cached: boolean;
 }
 
+// AI-cast portrait entry. Distinct shape from CastPortraitEntry: no
+// characterId (the source-of-truth id lives on story_ai_cast), and
+// includes the role label so the approval gate can display it.
+interface AiCastPortraitEntry {
+  aiCastId: string;
+  name: string;
+  roleLabel: string | null;
+  kind: "person" | "pet";
+  portraitUrl: string;
+}
+
+// Discriminator for "is this characterId a user-cast UUID or a
+// script-invented name?" — used by Stage 1.5 to partition
+// script.pages[].characterIds.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const generateStoryV2Fn = inngest.createFunction(
   {
     id: "story-generate-v2",
@@ -697,6 +716,98 @@ export const generateStoryV2Fn = inngest.createFunction(
       return s;
     });
 
+    // Stage 1.5: extract AI cast members from the script. Any
+    // characterId in script.pages that isn't a UUID of a user-cast
+    // character is treated as a script-invented name and gets a
+    // story_ai_cast row + Flash-inferred {role, kind, description}.
+    // Idempotent: pre-existing rows for the same name are reused.
+    const aiCastRows = await step.run("extract-ai-cast", async () => {
+      const admin = supabaseAdmin();
+      const userCastIds = new Set(ctx.cast.map((c) => c.id));
+
+      // Collect every non-UUID id and the sceneDescriptions where it
+      // appears. Names are taken verbatim — the script prompt asks
+      // the model to be consistent about a given character's name
+      // across pages, but we tolerate light variation by lower-case
+      // matching against existing rows below.
+      const nameToScenes = new Map<string, string[]>();
+      for (const page of script.pages) {
+        for (const id of page.characterIds) {
+          if (UUID_RE.test(id)) {
+            if (!userCastIds.has(id)) {
+              console.warn(
+                "[stage 1.5] script references unknown UUID:",
+                id
+              );
+            }
+            continue;
+          }
+          const scenes = nameToScenes.get(id) ?? [];
+          scenes.push(page.sceneDescription);
+          nameToScenes.set(id, scenes);
+        }
+      }
+
+      if (nameToScenes.size === 0) {
+        return [] as import("@/lib/types").AiCastMember[];
+      }
+
+      // Look up existing AI-cast rows for this story so a re-run
+      // doesn't duplicate them. Match case-insensitively on name.
+      const { data: existing } = await admin
+        .from("story_ai_cast")
+        .select("id, name")
+        .eq("story_id", storyId);
+      const existingByName = new Map<string, string>();
+      for (const row of existing ?? []) {
+        existingByName.set(row.name.toLowerCase(), row.id);
+      }
+
+      const toInsert: Array<{
+        story_id: string;
+        name: string;
+        role_label: string | null;
+        kind: "person" | "pet";
+        description: string;
+      }> = [];
+      for (const [name, scenes] of nameToScenes) {
+        if (existingByName.has(name.toLowerCase())) continue;
+        const inferred = await inferAiCastDescription({
+          name,
+          sceneDescriptions: scenes,
+          recipientType: ctx.story.recipient_type,
+          occasion: ctx.story.occasion ?? undefined,
+        });
+        // Degrade gracefully: if the Flash call fails, insert a row
+        // with a generic description so Stage 2.5 still has something
+        // to render. Better than aborting the whole job.
+        toInsert.push({
+          story_id: storyId,
+          name,
+          role_label: inferred?.role ?? "supporting character",
+          kind: inferred?.kind ?? "person",
+          description:
+            inferred?.description ??
+            `${name} appears in this storybook as a supporting character. Render with consistent features across pages.`,
+        });
+      }
+
+      if (toInsert.length > 0) {
+        const { error } = await admin.from("story_ai_cast").insert(toInsert);
+        if (error) throw new Error(`insert ai cast: ${error.message}`);
+      }
+
+      // Re-read so we get a unified list (existing + just-inserted)
+      // with portrait_url + user_prompt_addition populated for the
+      // next step. Don't trust the insert response — re-runs need
+      // existing rows too.
+      const { data: all } = await admin
+        .from("story_ai_cast")
+        .select("*")
+        .eq("story_id", storyId);
+      return (all ?? []) as import("@/lib/types").AiCastMember[];
+    });
+
     const portraits: CastPortraitEntry[] = await step.run(
       "generate-cast-portraits",
       async () => {
@@ -763,10 +874,57 @@ export const generateStoryV2Fn = inngest.createFunction(
       }
     );
 
+    // Stage 2.5: portraits for the AI-cast rows extracted in Stage
+    // 1.5. Each row stores its own portrait_url (no cross-story
+    // caching — descriptions are per-story). Rows that already have
+    // a portrait_url (re-run, or earlier successful generation)
+    // skip regeneration.
+    const aiPortraits: AiCastPortraitEntry[] = await step.run(
+      "generate-ai-cast-portraits",
+      async () => {
+        if (aiCastRows.length === 0) return [];
+        const admin = supabaseAdmin();
+        return Promise.all(
+          aiCastRows.map(async (row): Promise<AiCastPortraitEntry> => {
+            if (row.portrait_url) {
+              return {
+                aiCastId: row.id,
+                name: row.name,
+                roleLabel: row.role_label,
+                kind: row.kind,
+                portraitUrl: row.portrait_url,
+              };
+            }
+            const dataUri = await generateAiCastPortrait({
+              name: row.name,
+              kind: row.kind,
+              roleLabel: row.role_label,
+              description: row.description,
+              userPromptAddition: row.user_prompt_addition,
+              artStylePromptScaffold: ctx.style.prompt_scaffold,
+            });
+            const portraitUrl = await uploadGeneratedImage(dataUri);
+            await admin
+              .from("story_ai_cast")
+              .update({ portrait_url: portraitUrl })
+              .eq("id", row.id);
+            return {
+              aiCastId: row.id,
+              name: row.name,
+              roleLabel: row.role_label,
+              kind: row.kind,
+              portraitUrl,
+            };
+          })
+        );
+      }
+    );
+
     await markAwaitingCastApproval(jobId, {
       stage: "awaiting_cast_approval",
       storyId,
       portraits,
+      aiPortraits,
     });
 
     return { jobId, storyId, awaitingCastApproval: true };
@@ -825,6 +983,15 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         .select("id, name")
         .in("id", story.cast_character_ids);
 
+      // AI-cast for this story (Spec A). Pages reference these by
+      // name (verbatim string in characterIds). Pull them alongside
+      // user-cast portraits so the per-page step can resolve either.
+      const { data: aiCast } = await admin
+        .from("story_ai_cast")
+        .select("id, name, portrait_url")
+        .eq("story_id", storyId)
+        .not("portrait_url", "is", null);
+
       // Re-parse the wizard prompt payload so the per-page step has
       // access to memory photo URLs + captions. The script-stage
       // refinement already guarantees every memory id is referenced at
@@ -853,15 +1020,33 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         style,
         portraits: portraits ?? [],
         cast: cast ?? [],
+        aiCast: aiCast ?? [],
         memories,
       };
     });
 
-    const portraitByCharId = new Map<string, string>();
-    for (const p of ctx.portraits)
-      portraitByCharId.set(p.character_id, p.portrait_url);
+    // Unified resolution map: characterId-or-name → {name, portraitUrl}.
+    // User-cast entries live under their UUID; AI-cast entries live
+    // under their name (the script's verbatim string). Per-page lookup
+    // tries the same key against this map regardless of which type.
+    type ResolvedRef = { name: string; portraitUrl: string };
+    const resolveById = new Map<string, ResolvedRef>();
     const nameByCharId = new Map<string, string>();
     for (const c of ctx.cast) nameByCharId.set(c.id, c.name);
+    for (const p of ctx.portraits) {
+      const name = nameByCharId.get(p.character_id);
+      if (name) {
+        resolveById.set(p.character_id, { name, portraitUrl: p.portrait_url });
+      }
+    }
+    for (const a of ctx.aiCast) {
+      if (a.portrait_url) {
+        resolveById.set(a.name, {
+          name: a.name,
+          portraitUrl: a.portrait_url,
+        });
+      }
+    }
     const memoryById = new Map<string, MemoryReference>();
     for (const m of ctx.memories) memoryById.set(m.id, m);
 
@@ -870,11 +1055,7 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
       pages.map((p) =>
         step.run(`generate-page-${p.pageNumber}`, async () => {
           const castOnPage = p.characterIds
-            .map((id) => {
-              const portraitUrl = portraitByCharId.get(id);
-              const name = nameByCharId.get(id);
-              return portraitUrl && name ? { name, portraitUrl } : null;
-            })
+            .map((id) => resolveById.get(id) ?? null)
             .filter(
               (x): x is { name: string; portraitUrl: string } => x !== null
             );
@@ -1039,6 +1220,333 @@ export const regenerateCastPortraitFn = inngest.createFunction(
   }
 );
 
+// Spec A: regenerate a single AI-cast portrait. Mirrors
+// regenerateCastPortraitFn but reads from story_ai_cast (where the
+// description + optional user_prompt_addition live) instead of
+// characters + character_portraits.
+export const regenerateAiCastPortraitFn = inngest.createFunction(
+  {
+    id: "regenerate-ai-cast-portrait",
+    name: "Regenerate one AI cast portrait",
+    retries: IMAGE_RETRIES,
+    triggers: [{ event: EVENTS.aiCastRegenerate }],
+    onFailure: async ({ event, error }) => onInngestFailure(event, error),
+  },
+  async ({ event, step }) => {
+    const { jobId, storyId, aiCastId, promptAddition } = event.data as {
+      jobId: string;
+      storyId: string;
+      aiCastId: string;
+      promptAddition?: string;
+    };
+    await markRunning(jobId);
+
+    await step.run("regen", async () => {
+      const admin = supabaseAdmin();
+      const { data: story } = await admin
+        .from("stories")
+        .select("art_style_id")
+        .eq("id", storyId)
+        .single<{ art_style_id: string }>();
+      if (!story) throw new Error("story missing");
+
+      const { data: row } = await admin
+        .from("story_ai_cast")
+        .select("*")
+        .eq("id", aiCastId)
+        .single<import("@/lib/types").AiCastMember>();
+      if (!row) throw new Error("ai cast row missing");
+
+      const { data: style } = await admin
+        .from("art_styles")
+        .select("prompt_scaffold")
+        .eq("id", story.art_style_id)
+        .single<{ prompt_scaffold: string }>();
+      if (!style) throw new Error("style missing");
+
+      // If the caller passed promptAddition, persist it before
+      // regenerating so the new portrait actually reflects it AND a
+      // future regenerate (with no override) replays the same prompt.
+      // Passing an empty string clears the addition.
+      const effectiveAddition =
+        promptAddition === undefined ? row.user_prompt_addition : promptAddition;
+      if (promptAddition !== undefined) {
+        await admin
+          .from("story_ai_cast")
+          .update({ user_prompt_addition: promptAddition || null })
+          .eq("id", aiCastId);
+      }
+
+      const dataUri = await generateAiCastPortrait({
+        name: row.name,
+        kind: row.kind,
+        roleLabel: row.role_label,
+        description: row.description,
+        userPromptAddition: effectiveAddition,
+        artStylePromptScaffold: style.prompt_scaffold,
+      });
+      const portraitUrl = await uploadGeneratedImage(dataUri);
+
+      const { error: updateErr } = await admin
+        .from("story_ai_cast")
+        .update({ portrait_url: portraitUrl })
+        .eq("id", aiCastId);
+      if (updateErr) {
+        throw new Error(`ai cast portrait update: ${updateErr.message}`);
+      }
+
+      await markDone(jobId, {
+        stage: "ai_cast_regenerated",
+        aiCastId,
+        portraitUrl,
+      });
+    });
+  }
+);
+
+// Spec A: re-run Stage 1 (script) after the user removes an AI-cast
+// member at the approval gate. The removed name is added to the
+// script prompt's excludedAiCharacterNames; the new script may
+// surface a different supporting cast. Stage 1.5 + Stage 2.5 then
+// reconcile story_ai_cast against the new script.
+export const regenerateScriptAfterAiCastRemovalFn = inngest.createFunction(
+  {
+    id: "regenerate-script-after-ai-cast-removal",
+    name: "Re-run script + AI cast after removal",
+    retries: TEXT_RETRIES,
+    triggers: [{ event: EVENTS.aiCastRemoved }],
+    onFailure: async ({ event, error }) => onInngestFailure(event, error),
+  },
+  async ({ event, step }) => {
+    const { jobId, storyId, removedName } = event.data as {
+      jobId: string;
+      storyId: string;
+      removedName: string;
+    };
+    await markRunning(jobId);
+
+    const ctx: StoryV2Context = await step.run("load-context", async () => {
+      const admin = supabaseAdmin();
+      const { data: story, error: storyErr } = await admin
+        .from("stories")
+        .select(
+          "id, user_id, title, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids, default_text_size"
+        )
+        .eq("id", storyId)
+        .single<StoryV2Context["story"]>();
+      if (storyErr || !story) throw new Error(`load story: ${storyErr?.message}`);
+
+      const { data: cast } = await admin
+        .from("characters")
+        .select("*")
+        .in("id", story.cast_character_ids);
+
+      const { data: style, error: styleErr } = await admin
+        .from("art_styles")
+        .select("id, display_name, prompt_scaffold")
+        .eq("id", story.art_style_id)
+        .single<StoryV2Context["style"]>();
+      if (styleErr || !style) throw new Error(`load style: ${styleErr?.message}`);
+
+      return {
+        story,
+        cast: (cast ?? []) as import("@/lib/types").Character[],
+        style,
+      };
+    });
+
+    // Collect every name currently excluded for this story. We
+    // store this in stories.prompt? No — keep it as a one-shot
+    // payload (the spec calls this out). For now, gather the
+    // removedName plus any OTHER previously-removed names by
+    // diff'ing the live story_ai_cast against the script's
+    // characterIds.
+    const excludedAiCharacterNames = await step.run(
+      "collect-excluded-names",
+      async () => {
+        return [removedName];
+      }
+    );
+
+    // Drop any cached AI-cast rows. They'll be re-extracted from
+    // the new script. (User-cast portraits in character_portraits
+    // stay — they're keyed by character_id, not by script.)
+    await step.run("clear-ai-cast", async () => {
+      const admin = supabaseAdmin();
+      const { error } = await admin
+        .from("story_ai_cast")
+        .delete()
+        .eq("story_id", storyId);
+      if (error) throw new Error(`clear ai cast: ${error.message}`);
+    });
+
+    const script = await step.run("regen-script", async () => {
+      const { outline, memories } = parsePromptPayload(ctx.story.prompt);
+      const s = await generateScript({
+        recipientType: ctx.story.recipient_type,
+        occasion: ctx.story.occasion ?? undefined,
+        storyTone: ctx.story.story_tone,
+        cast: ctx.cast,
+        outline,
+        memories,
+        pageCount: ctx.story.page_count,
+        excludedAiCharacterNames,
+      });
+      const userTitle = ctx.story.title?.trim();
+      const finalTitle =
+        userTitle && userTitle !== "Untitled story" ? userTitle : s.title;
+      const { error } = await supabaseAdmin()
+        .from("stories")
+        .update({ script: s, title: finalTitle })
+        .eq("id", storyId);
+      if (error) throw new Error(`persist script: ${error.message}`);
+      return s;
+    });
+
+    // Stage 1.5 again — extract AI cast from the new script.
+    const newAiCastRows = await step.run("re-extract-ai-cast", async () => {
+      const admin = supabaseAdmin();
+      const userCastIds = new Set(ctx.cast.map((c) => c.id));
+      const nameToScenes = new Map<string, string[]>();
+      for (const page of script.pages) {
+        for (const id of page.characterIds) {
+          if (UUID_RE.test(id)) continue;
+          const scenes = nameToScenes.get(id) ?? [];
+          scenes.push(page.sceneDescription);
+          nameToScenes.set(id, scenes);
+        }
+        // Hallucinated UUIDs warning (rare)
+        for (const id of page.characterIds) {
+          if (UUID_RE.test(id) && !userCastIds.has(id)) {
+            console.warn(
+              "[stage 1.5 re-run] script references unknown UUID:",
+              id
+            );
+          }
+        }
+      }
+      if (nameToScenes.size === 0)
+        return [] as import("@/lib/types").AiCastMember[];
+
+      const toInsert: Array<{
+        story_id: string;
+        name: string;
+        role_label: string | null;
+        kind: "person" | "pet";
+        description: string;
+      }> = [];
+      for (const [name, scenes] of nameToScenes) {
+        const inferred = await inferAiCastDescription({
+          name,
+          sceneDescriptions: scenes,
+          recipientType: ctx.story.recipient_type,
+          occasion: ctx.story.occasion ?? undefined,
+        });
+        toInsert.push({
+          story_id: storyId,
+          name,
+          role_label: inferred?.role ?? "supporting character",
+          kind: inferred?.kind ?? "person",
+          description:
+            inferred?.description ??
+            `${name} appears in this storybook as a supporting character. Render with consistent features across pages.`,
+        });
+      }
+      if (toInsert.length > 0) {
+        const { error } = await admin.from("story_ai_cast").insert(toInsert);
+        if (error) throw new Error(`insert ai cast: ${error.message}`);
+      }
+      const { data: all } = await admin
+        .from("story_ai_cast")
+        .select("*")
+        .eq("story_id", storyId);
+      return (all ?? []) as import("@/lib/types").AiCastMember[];
+    });
+
+    // Stage 2.5 again — generate portraits for any newly-extracted
+    // AI cast. Existing user-cast portraits in character_portraits
+    // are still valid (keyed by character_id, not by script content)
+    // so this re-run does NOT touch them.
+    const aiPortraits: AiCastPortraitEntry[] = await step.run(
+      "re-generate-ai-cast-portraits",
+      async () => {
+        if (newAiCastRows.length === 0) return [];
+        const admin = supabaseAdmin();
+        return Promise.all(
+          newAiCastRows.map(async (row): Promise<AiCastPortraitEntry> => {
+            const dataUri = await generateAiCastPortrait({
+              name: row.name,
+              kind: row.kind,
+              roleLabel: row.role_label,
+              description: row.description,
+              userPromptAddition: row.user_prompt_addition,
+              artStylePromptScaffold: ctx.style.prompt_scaffold,
+            });
+            const portraitUrl = await uploadGeneratedImage(dataUri);
+            await admin
+              .from("story_ai_cast")
+              .update({ portrait_url: portraitUrl })
+              .eq("id", row.id);
+            return {
+              aiCastId: row.id,
+              name: row.name,
+              roleLabel: row.role_label,
+              kind: row.kind,
+              portraitUrl,
+            };
+          })
+        );
+      }
+    );
+
+    // Re-read user-cast portraits so the new awaiting-approval payload
+    // matches the format generateStoryV2Fn produces. Stage 3 reads
+    // straight from the DB so it doesn't depend on this payload, but
+    // the approve-cast UI does.
+    const portraits = await step.run("read-user-cast-portraits", async () => {
+      const admin = supabaseAdmin();
+      const usedIds = new Set<string>();
+      for (const p of script.pages)
+        for (const id of p.characterIds) {
+          if (UUID_RE.test(id)) usedIds.add(id);
+        }
+      const usedCast = ctx.cast.filter((c) => usedIds.has(c.id));
+      if (usedCast.length === 0) return [] as CastPortraitEntry[];
+      const { data: rows } = await admin
+        .from("character_portraits")
+        .select("character_id, portrait_url")
+        .in(
+          "character_id",
+          usedCast.map((c) => c.id)
+        )
+        .eq("art_style_id", ctx.style.id);
+      const byId = new Map((rows ?? []).map((r) => [r.character_id, r.portrait_url]));
+      return usedCast
+        .map((c): CastPortraitEntry | null => {
+          const url = byId.get(c.id);
+          return url
+            ? {
+                characterId: c.id,
+                name: c.name,
+                portraitUrl: url,
+                cached: true,
+              }
+            : null;
+        })
+        .filter((x): x is CastPortraitEntry => x !== null);
+    });
+
+    await markAwaitingCastApproval(jobId, {
+      stage: "awaiting_cast_approval",
+      storyId,
+      portraits,
+      aiPortraits,
+    });
+
+    return { jobId, storyId, awaitingCastApproval: true };
+  }
+);
+
 // Insert a freshly-generated portrait, tolerating the UNIQUE
 // (character_id, art_style_id) constraint when a concurrent worker
 // raced us. On conflict we silently re-fetch the winning row's
@@ -1087,4 +1595,6 @@ export const allFunctions = [
   generateStoryV2Fn,
   generatePagesAfterApprovalFn,
   regenerateCastPortraitFn,
+  regenerateAiCastPortraitFn,
+  regenerateScriptAfterAiCastRemovalFn,
 ];

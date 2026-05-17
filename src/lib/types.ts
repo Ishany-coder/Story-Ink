@@ -270,6 +270,23 @@ export interface CharacterPortrait {
   generated_at: string;
 }
 
+// AI-invented supporting characters. Created by Stage 1.5 of the
+// generation pipeline when the script references characters not in
+// the user's manually-supplied cast. Stored per-story (no cross-
+// story caching — the description is story-specific).
+export interface AiCastMember {
+  id: string;
+  story_id: string;
+  name: string;
+  role_label: string | null;
+  kind: CharacterKind;
+  description: string;
+  user_prompt_addition: string | null;
+  portrait_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ArtStyle {
   id: string;
   display_name: string;

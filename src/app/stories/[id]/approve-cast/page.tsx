@@ -9,6 +9,15 @@ interface JobResult {
   stage: string;
   storyId?: string;
   portraits: Array<{ characterId: string; name: string; portraitUrl: string }>;
+  // Spec A: AI-cast portraits also live on the job result. Older
+  // jobs from before this field existed are tolerated as undefined.
+  aiPortraits?: Array<{
+    aiCastId: string;
+    name: string;
+    roleLabel: string | null;
+    kind: "person" | "pet";
+    portraitUrl: string;
+  }>;
 }
 
 export default async function ApproveCastPage({ params }: Props) {
@@ -51,7 +60,27 @@ export default async function ApproveCastPage({ params }: Props) {
     );
   }
 
-  const portraits = (job.result as JobResult).portraits;
+  const result = job.result as JobResult;
+  const portraits = result.portraits;
+  // Always read the AI-cast list fresh from the DB (not the cached
+  // job payload) — the user may have renamed entries since the job
+  // wrote its result, and re-reads after a regen/remove flow.
+  const { data: aiCastRows } = await admin
+    .from("story_ai_cast")
+    .select("id, name, role_label, kind, portrait_url, user_prompt_addition")
+    .eq("story_id", story.id)
+    .not("portrait_url", "is", null)
+    .order("created_at", { ascending: true });
+  const aiPortraits = (aiCastRows ?? [])
+    .filter((r): r is typeof r & { portrait_url: string } => r.portrait_url !== null)
+    .map((r) => ({
+      aiCastId: r.id,
+      name: r.name,
+      roleLabel: r.role_label,
+      kind: r.kind as "person" | "pet",
+      portraitUrl: r.portrait_url,
+      promptAddition: r.user_prompt_addition,
+    }));
 
   return (
     <main className="mx-auto max-w-3xl px-4 pt-8 sm:pt-12 pb-12 sm:pb-16">
@@ -63,7 +92,11 @@ export default async function ApproveCastPage({ params }: Props) {
         anyone looks wrong, regenerate just that character before the pages
         render.
       </p>
-      <ApproveCastClient storyId={story.id} portraits={portraits} />
+      <ApproveCastClient
+        storyId={story.id}
+        portraits={portraits}
+        aiPortraits={aiPortraits}
+      />
     </main>
   );
 }

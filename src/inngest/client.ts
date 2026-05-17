@@ -29,4 +29,7 @@ export const EVENTS = {
   storyGenerateV2: "story/generate.v2.requested",
   castApproved: "story/cast.approved",
   characterRegenerate: "character/portrait.regenerate.requested",
+  // AI-cast (Spec A) augmentation flow
+  aiCastRegenerate: "story/ai-cast.regenerate.requested",
+  aiCastRemoved: "story/ai-cast.removed",
 } as const;

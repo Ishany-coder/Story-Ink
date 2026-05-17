@@ -25,6 +25,10 @@ interface BuildPromptArgs {
   // plan where each photo belongs.
   memories: MemoryReference[];
   pageCount: number;
+  // Names of AI-cast characters to ban from the script. Used when
+  // the user removes an AI-cast member at the approval gate and we
+  // re-run Stage 1 — the new script must not re-introduce them.
+  excludedAiCharacterNames?: string[];
 }
 
 function castSummary(cast: Character[]): string {
@@ -169,7 +173,8 @@ Output a single JSON object with this shape:
 Constraints:
 - Exactly ${args.pageCount} pages.
 - Every character that appears in a sceneDescription must be listed in characterIds.
-- Use only the cast above. Do not invent named additional characters.
+- The cast above is the user-provided roster. Reference user-cast characters by their UUID (verbatim from the "id=" prefix in the cast list). If the story genuinely needs additional supporting characters (parents at a wedding, the priest, the child's best friend, the antagonist), invent them with a clear simple name (e.g. "Sarah", "Mr. Patel", "the bride's father") and reference them in characterIds using that exact name (not a UUID). In the first sceneDescription that mentions an invented character, give a specific, consistent visual description (age range, build, hair, distinctive features) so a portrait can be generated.
+- Output ALL characters that appear on any page in characterIds, whether they were in the user-provided cast (use UUIDs) or invented for the story (use names). Don't pad: only invent characters that actually appear in at least one scene.${args.excludedAiCharacterNames && args.excludedAiCharacterNames.length > 0 ? `\n- DO NOT include the following character names in any page or characterIds. Rewrite scenes that would otherwise need them: ${args.excludedAiCharacterNames.map((n) => `"${n}"`).join(", ")}.` : ""}
 - Each page is self-contained but contributes to a continuous arc.
 `.trim();
 
@@ -236,6 +241,86 @@ ${artStylePromptScaffold}
 Framing: ${isPet ? "head-and-shoulders or full-body, whichever best shows the pet's distinguishing features" : "head-and-shoulders, centered, looking toward camera"}. Plain neutral background. Well-lit. No text, captions, or watermarks in the image.
 
 This portrait will be used as the visual anchor for ${character.name} on every page of an illustrated storybook, so the likeness must stay consistent across pages.
+`.trim();
+}
+
+// Portrait prompt for AI-invented supporting characters (no user-
+// supplied reference photo). Drives Stage 2 portrait generation for
+// every row in story_ai_cast. The script-derived `description`
+// supplies the feature-level likeness anchor; the optional
+// `userPromptAddition` is appended verbatim when the user types
+// adjustments via the approval-gate pencil icon ("older, with grey
+// hair", etc.).
+export function buildAiCastPortraitPrompt(args: {
+  name: string;
+  kind: "person" | "pet";
+  roleLabel: string | null;
+  description: string;
+  userPromptAddition: string | null;
+  artStylePromptScaffold: string;
+}): string {
+  const { name, kind, roleLabel, description, userPromptAddition, artStylePromptScaffold } = args;
+  const isPet = kind === "pet";
+  const subjectNoun = isPet ? "a pet" : "a person";
+  const role = roleLabel ? `Role in the story: ${roleLabel}.` : "";
+  const userAddition = userPromptAddition && userPromptAddition.trim().length > 0
+    ? `\n\nAdditional adjustments from the user (apply these on top of the description above): ${userPromptAddition.trim()}`
+    : "";
+
+  return `
+Generate a portrait of ${subjectNoun}: ${name}.
+
+This is a supporting character invented for an illustrated storybook (no reference photo). Render them based on this likeness specification:
+
+${description}${userAddition}
+
+${role}
+
+Render in this illustrated style:
+${artStylePromptScaffold}
+
+Framing: ${isPet ? "head-and-shoulders or full-body, whichever best shows the pet's distinguishing features" : "head-and-shoulders, centered, looking toward camera"}. Plain neutral background. Well-lit. No text, captions, or watermarks in the image.
+
+This portrait will be used as the visual anchor for ${name} on every page of the storybook, so the likeness must stay consistent across pages.
+`.trim();
+}
+
+// Prompt for the Stage 1.5 Flash call that infers an AI cast
+// member's role + kind + appearance description from the script.
+// Input: the invented character's name + all sceneDescriptions
+// where the name appears + a tiny bit of story context. Output:
+// JSON the caller validates and inserts into story_ai_cast.
+export function buildInferAiCastDescriptionPrompt(args: {
+  name: string;
+  sceneDescriptions: string[];
+  recipientType: RecipientType;
+  occasion?: Occasion;
+}): string {
+  const scenes = args.sceneDescriptions
+    .map((s, i) => `  ${i + 1}. ${s}`)
+    .join("\n");
+
+  return `
+You analyze a single character mentioned in an illustrated storybook script and infer their likeness for a portrait generator.
+
+Character name (verbatim from the script): ${args.name}
+Book is for: ${recipientLabel(args.recipientType)}
+Occasion: ${args.occasion ?? "general"}
+
+Every scene in the script that mentions this character:
+${scenes || "(none — the character is named but never described)"}
+
+Output a single JSON object:
+{
+  "role": string,           // 1-4 word descriptor of who they are in the story (e.g. "the bride's father", "best friend", "the antagonist", "Sarah's dog")
+  "kind": "person" | "pet", // pet only if scenes clearly indicate an animal companion; otherwise person
+  "description": string     // a single paragraph of 2-4 sentences. Concrete physical features only (age range, build, hair color/style, skin tone, distinctive features like glasses/beard/scars/collar). Do NOT include personality, mood, clothing-of-the-moment, or scene-specific context — just the stable likeness that should hold across every page they appear in.
+}
+
+Rules:
+- If the scenes don't describe the character's appearance, invent reasonable features that fit the role (e.g. "the bride's father" → an older man) and commit. Do NOT leave the description vague.
+- Never invent features that contradict explicit details in the scenes (if scene says "a young woman with red hair", the description must match).
+- Output JSON only, no surrounding prose.
 `.trim();
 }
 
