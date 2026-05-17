@@ -266,10 +266,11 @@ export default function WizardClient({
   };
 
   const selectRecipient = (id: RecipientType) => {
-    // Picking a tile only updates selection; advancing is done via the
-    // top-right Next button so the user can change their mind without
-    // bouncing between steps. Clearing `outline` here keeps the custom
-    // storybook state from leaking into a templated pick.
+    // Clearing `outline` here keeps any prior custom-storybook draft
+    // from leaking into a templated pick. Templated picks (PRIMARY /
+    // MORE recipients) auto-advance via the wrapping click handler;
+    // the "other" / custom path goes through its own textarea +
+    // Continue button instead.
     set({ recipientType: id, outline: undefined });
     setCustomOpen(false);
   };
@@ -354,26 +355,19 @@ export default function WizardClient({
     const moreSelected = MORE_RECIPIENTS.some(
       (r) => r.id === payload.recipientType
     );
-    // Top-right Next is gated on having a selection. The "other" custom
-    // path additionally requires a non-empty outline since the AI has
-    // nothing to work with otherwise.
-    const nextDisabled =
-      !payload.recipientType ||
-      (payload.recipientType === "other" && !customDraft.trim());
+    // Picking a templated recipient on step 1 auto-advances. The
+    // "other" / custom path keeps its own Continue button inside the
+    // textarea section because typing has no implicit "done" event.
+    const pickAndAdvance = (id: RecipientType) => {
+      selectRecipient(id);
+      goNext(2);
+    };
     return (
       <StepShell
         step={1}
         totalSteps={totalSteps}
         title="Who is this book for?"
-        onNext={() => {
-          if (payload.recipientType === "other") {
-            // Commit the custom textarea text on advance.
-            set({ outline: customDraft.trim() });
-          }
-          goNext(2);
-        }}
         nextAtTop
-        nextDisabled={nextDisabled}
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
@@ -387,10 +381,10 @@ export default function WizardClient({
               <button
                 key={r.id}
                 type="button"
-                onClick={() => selectRecipient(r.id)}
-                className={`text-left rounded-2xl border bg-cream-50 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
+                onClick={() => pickAndAdvance(r.id)}
+                className={`text-left rounded-2xl border-2 bg-cream-50 overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
                   selected
-                    ? "border-moss-500 ring-2 ring-moss-700 bg-moss-100/40"
+                    ? "border-moss-500 bg-moss-100/40"
                     : "border-cream-300"
                 }`}
               >
@@ -423,10 +417,10 @@ export default function WizardClient({
                 <button
                   key={r.id}
                   type="button"
-                  onClick={() => selectRecipient(r.id)}
-                  className={`px-4 py-1.5 rounded-full border text-sm transition ${
+                  onClick={() => pickAndAdvance(r.id)}
+                  className={`px-4 py-1.5 rounded-full border-2 text-sm transition ${
                     selected
-                      ? "bg-moss-100/60 border-moss-500 text-moss-900 ring-2 ring-moss-700"
+                      ? "bg-moss-100/60 border-moss-500 text-moss-900"
                       : "bg-cream-50 border-cream-300 text-ink-700 hover:border-gold-500"
                   }`}
                 >
@@ -457,9 +451,9 @@ export default function WizardClient({
                 set({ recipientType: undefined, outline: undefined });
               }
             }}
-            className={`w-full text-left rounded-2xl border bg-cream-50 px-4 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
+            className={`w-full text-left rounded-2xl border-2 bg-cream-50 px-4 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
               customOpen || payload.recipientType === "other"
-                ? "border-moss-500 ring-2 ring-moss-700"
+                ? "border-moss-500 bg-moss-100/40"
                 : "border-cream-300"
             }`}
             aria-expanded={customOpen}
@@ -494,7 +488,7 @@ export default function WizardClient({
           </button>
 
           {customOpen && (
-            <div className="mt-2 rounded-2xl border border-cream-300 bg-cream-50 p-3 sm:p-4">
+            <div className="mt-2 rounded-2xl border border-cream-300 bg-cream-50 p-3 sm:p-4 space-y-3">
               <textarea
                 value={customDraft}
                 onChange={(e) => setCustomDraft(e.target.value)}
@@ -502,6 +496,21 @@ export default function WizardClient({
                 className="w-full rounded-xl border border-cream-300 bg-cream-50 p-3 text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
                 placeholder="A whimsical book about my best friend Sam, his vintage Vespa, and the imaginary city he commutes to every morning…"
               />
+              {/* Custom path needs an explicit advance — typing has no
+                  "done" event the way picking a card does. */}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={!customDraft.trim()}
+                  onClick={() => {
+                    set({ outline: customDraft.trim() });
+                    goNext(2);
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {returnToReview ? "Save changes" : "Continue"}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -510,19 +519,24 @@ export default function WizardClient({
   }
 
   if (step === 2) {
+    // Pick an occasion → auto-advance. Title stays whatever the user
+    // typed (or empty) and pre-fills the step-7 review field.
+    const pickOccasionAndAdvance = (id: Occasion) => {
+      set({ occasion: id });
+      goNext(3);
+    };
     return (
       <StepShell
         step={2}
         totalSteps={totalSteps}
         title="What's the occasion?"
-        subtitle="Pick one — or skip if it doesn't apply."
+        subtitle="Name your book (optional), then pick the occasion — or skip if it doesn't apply."
         onBack={() => goBack(1)}
-        onNext={() => goNext(3)}
         nextAtTop
-        nextDisabled={!payload.occasion}
-        nextLabel={returnToReview ? "Save changes" : "Next"}
+        skipLabel={returnToReview ? "Save changes" : "Skip"}
         onSkip={() => {
-          // Honor "Skip" by clearing any prior occasion selection.
+          // Honor "Skip" by clearing any prior occasion selection. The
+          // book title (if the user typed one) is preserved.
           set({ occasion: undefined });
           goNext(3);
         }}
@@ -532,6 +546,26 @@ export default function WizardClient({
           navigateBack(7);
         }}
       >
+        {/* Story title — optional, pre-fills the step-7 review field. */}
+        <div className="mb-5">
+          <label
+            htmlFor="story-title-step2"
+            className="block text-sm font-medium text-ink-700 mb-1.5"
+          >
+            What should we call the book?{" "}
+            <span className="text-ink-300 font-normal">(optional)</span>
+          </label>
+          <input
+            id="story-title-step2"
+            type="text"
+            value={payload.title ?? ""}
+            onChange={(e) => set({ title: e.target.value })}
+            maxLength={120}
+            placeholder="Untitled story"
+            className="w-full rounded-xl border border-cream-300 bg-cream-50 px-4 py-2.5 text-base text-ink-900 placeholder:text-ink-300 transition focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
+          />
+        </div>
+
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {OCCASIONS.map((o) => {
             const selected = payload.occasion === o.id;
@@ -539,10 +573,10 @@ export default function WizardClient({
               <button
                 key={o.id}
                 type="button"
-                onClick={() => set({ occasion: o.id })}
-                className={`group flex flex-col items-center justify-center gap-2 p-5 rounded-2xl border bg-cream-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
+                onClick={() => pickOccasionAndAdvance(o.id)}
+                className={`group flex flex-col items-center justify-center gap-2 p-5 rounded-2xl border-2 bg-cream-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-gold-500 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)] ${
                   selected
-                    ? "border-moss-500 ring-2 ring-moss-700 bg-moss-100/40"
+                    ? "border-moss-500 bg-moss-100/40"
                     : "border-cream-300"
                 }`}
               >
@@ -806,6 +840,11 @@ export default function WizardClient({
   }
 
   if (step === 5) {
+    // Pick an art style → auto-advance.
+    const pickStyleAndAdvance = (id: string) => {
+      set({ artStyleId: id });
+      goNext(6);
+    };
     return (
       <StepShell
         step={5}
@@ -813,10 +852,7 @@ export default function WizardClient({
         title="Pick your art style"
         subtitle="Choose how you'd like your story illustrated."
         onBack={() => goBack(4)}
-        onNext={() => goNext(6)}
         nextAtTop
-        nextLabel={returnToReview ? "Save changes" : "Next"}
-        nextDisabled={!payload.artStyleId}
         editingReview={returnToReview}
         onExitReview={() => {
           setReturnToReview(false);
@@ -830,10 +866,10 @@ export default function WizardClient({
               <button
                 key={s.id}
                 type="button"
-                onClick={() => set({ artStyleId: s.id })}
-                className={`text-left rounded-2xl border bg-cream-50 overflow-hidden transition ${
+                onClick={() => pickStyleAndAdvance(s.id)}
+                className={`text-left rounded-2xl border-2 bg-cream-50 overflow-hidden transition ${
                   selected
-                    ? "border-moss-500 ring-2 ring-moss-700"
+                    ? "border-moss-500 bg-moss-100/40"
                     : "border-cream-300 hover:border-gold-500 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(14,26,43,0.08)]"
                 }`}
               >

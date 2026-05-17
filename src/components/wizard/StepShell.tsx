@@ -82,7 +82,7 @@ export default function StepShell({
       )}
       {showTopActions && (
         <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-4 min-h-[2rem]">
+          <div className="flex items-center min-h-[2rem]">
             {onBack && (
               <button
                 type="button"
@@ -92,26 +92,31 @@ export default function StepShell({
                 ← Back
               </button>
             )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Skip uses the same primary-pill styling as Next so it
+                reads as a clear, deliberate action ("yes, skip this
+                step") instead of a small text link. */}
             {onSkip && (
               <button
                 type="button"
                 onClick={onSkip}
-                className="text-ink-500 hover:text-ink-700 transition text-sm font-medium underline-offset-4 hover:underline"
+                className={nextClasses}
               >
                 {skipLabel}
               </button>
             )}
+            {onNext && (
+              <button
+                type="button"
+                onClick={onNext}
+                disabled={nextDisabled}
+                className={nextClasses}
+              >
+                {nextLabel}
+              </button>
+            )}
           </div>
-          {onNext && (
-            <button
-              type="button"
-              onClick={onNext}
-              disabled={nextDisabled}
-              className={`${nextClasses} shrink-0`}
-            >
-              {nextLabel}
-            </button>
-          )}
         </div>
       )}
       <div className="mb-5">
@@ -139,10 +144,10 @@ export default function StepShell({
       {showBottomRow && (
         <div
           className={`flex flex-col-reverse gap-3 sm:flex-row sm:items-center ${
-            onBack || onSkip ? "sm:justify-between" : "sm:justify-end"
+            onBack ? "sm:justify-between" : "sm:justify-end"
           }`}
         >
-          <div className="flex items-center gap-4">
+          <div className="flex items-center">
             {onBack && (
               <button
                 type="button"
@@ -152,26 +157,28 @@ export default function StepShell({
                 ← Back
               </button>
             )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
             {onSkip && (
               <button
                 type="button"
                 onClick={onSkip}
-                className="text-ink-500 hover:text-ink-700 transition text-sm font-medium underline-offset-4 hover:underline"
+                className={nextClasses}
               >
                 {skipLabel}
               </button>
             )}
+            {onNext && !nextAtTop && (
+              <button
+                type="button"
+                onClick={onNext}
+                disabled={nextDisabled}
+                className={nextClasses}
+              >
+                {nextLabel}
+              </button>
+            )}
           </div>
-          {onNext && !nextAtTop && (
-            <button
-              type="button"
-              onClick={onNext}
-              disabled={nextDisabled}
-              className={nextClasses}
-            >
-              {nextLabel}
-            </button>
-          )}
         </div>
       )}
     </div>
