@@ -313,7 +313,7 @@ export default function CharacterForm({ initial, nextHref }: Props) {
                     : `Upload ${kind === "pet" ? "your pet's" : "their"} photo`}
               </div>
               <div className="text-xs text-ink-500">
-                Click or drag an image. JPG or PNG.
+                Click or drag an image. JPG, PNG, or WebP.
               </div>
               <input
                 type="file"
