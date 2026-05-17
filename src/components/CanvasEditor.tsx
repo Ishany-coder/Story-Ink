@@ -668,6 +668,15 @@ function CanvasEditorDesktop({
   const [dirty, setDirty] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Inline title editing — kept separate from the page-save loop so a
+  // title typo doesn't gate layer saves and vice versa. `titleValue`
+  // is the local draft (input is controlled); `titleSavedValue` is
+  // the most recent server-confirmed value used for the "revert"
+  // affordance on Escape + dirty check.
+  const [titleValue, setTitleValue] = useState(story.title);
+  const [titleSavedValue, setTitleSavedValue] = useState(story.title);
+  const [titleSaving, setTitleSaving] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [regenPending, setRegenPending] = useState(false);
   const [shapeSearch, setShapeSearch] = useState("");
 
@@ -1828,6 +1837,47 @@ function CanvasEditorDesktop({
 
   // ---- Save ---------------------------------------------------------------
 
+  // Commit a title edit. Called from the header input on blur, on
+  // Enter (via blur()), or when the user clicks away. Skips the
+  // round-trip if the trimmed value matches the last server-confirmed
+  // value or if it's empty (input rolls back to titleSavedValue).
+  async function saveTitle() {
+    const trimmed = titleValue.trim();
+    if (trimmed.length === 0) {
+      // Don't allow blank titles. Revert the input to the last good
+      // value rather than letting the user save garbage.
+      setTitleValue(titleSavedValue);
+      setTitleError(null);
+      return;
+    }
+    if (trimmed === titleSavedValue) {
+      setTitleError(null);
+      return;
+    }
+    setTitleSaving(true);
+    setTitleError(null);
+    try {
+      const res = await fetch(`/api/stories/${story.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(body?.error ?? `Failed to save title (HTTP ${res.status})`);
+      }
+      const body = (await res.json()) as { title: string };
+      setTitleSavedValue(body.title);
+      setTitleValue(body.title);
+    } catch (err) {
+      setTitleError(err instanceof Error ? err.message : "Failed to save title");
+    } finally {
+      setTitleSaving(false);
+    }
+  }
+
   async function savePage() {
     if (!currentPage) return;
     setSaving(true);
@@ -2166,11 +2216,41 @@ function CanvasEditorDesktop({
             ← All stories &nbsp;·&nbsp; Studio
           </Link>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <h1 className="font-[family-name:var(--font-display)] text-[32px] font-semibold leading-tight tracking-tight text-bark-900">
-              {story.title}
-            </h1>
+            {/* Inline-editable title. Looks like a heading until the
+                user hovers (subtle hairline) or focuses (sage outline).
+                Saves on blur and on Enter via the input's own blur().
+                Escape reverts to the last server-confirmed value. */}
+            <input
+              type="text"
+              value={titleValue}
+              onChange={(e) => setTitleValue(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  (e.currentTarget as HTMLInputElement).blur();
+                } else if (e.key === "Escape") {
+                  setTitleValue(titleSavedValue);
+                  setTitleError(null);
+                  // Defer blur so React has applied the value reset
+                  // before focus moves away (avoids triggering save
+                  // with the pre-reset value).
+                  const el = e.currentTarget as HTMLInputElement;
+                  requestAnimationFrame(() => el.blur());
+                }
+              }}
+              maxLength={120}
+              aria-label="Story title"
+              spellCheck={false}
+              className="font-[family-name:var(--font-display)] text-[32px] font-semibold leading-tight tracking-tight text-bark-900 bg-transparent rounded-md px-1 -mx-1 border border-transparent hover:border-stone-500/20 focus:border-sage-500 focus:outline-none transition-colors [field-sizing:content] min-w-[200px] max-w-full"
+            />
             <span className="text-xs text-stone-500">
-              {story.pages.length} pages &nbsp;·&nbsp; draft &nbsp;·&nbsp; {lastSaved}
+              {story.pages.length} pages &nbsp;·&nbsp; draft &nbsp;·&nbsp;{" "}
+              {titleSaving ? "saving title…" : titleError ? (
+                <span className="font-medium text-clay-500">{titleError}</span>
+              ) : (
+                lastSaved
+              )}
             </span>
           </div>
         </div>
