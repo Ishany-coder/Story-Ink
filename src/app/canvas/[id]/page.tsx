@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getCurrentUser, getSupabaseServer } from "@/lib/supabase-server";
 import { isAdminUser } from "@/lib/admin";
 import CanvasEditor from "@/components/CanvasEditor";
+import StudioReaderFontsLink from "@/components/StudioReaderFontsLink";
 import type { Pet, Story } from "@/lib/types";
 import { storyImagesAreClean } from "@/lib/entitlement";
 
@@ -55,5 +56,10 @@ export default async function CanvasStoryPage({
     isAdmin: isAdminUser(user),
   });
 
-  return <CanvasEditor story={story} pet={pet} fullAccess={fullAccess} />;
+  return (
+    <>
+      <StudioReaderFontsLink />
+      <CanvasEditor story={story} pet={pet} fullAccess={fullAccess} />
+    </>
+  );
 }

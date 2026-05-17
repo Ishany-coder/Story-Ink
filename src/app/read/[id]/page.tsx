@@ -5,6 +5,7 @@ import { Story } from "@/lib/types";
 import SlideReader from "@/components/SlideReader";
 import AdminExportPdfButton from "@/components/AdminExportPdfButton";
 import DigitalUpsell from "@/components/DigitalUpsell";
+import StudioReaderFontsLink from "@/components/StudioReaderFontsLink";
 import { DIGITAL_PRICE_USD } from "@/lib/pricing";
 import { isBetaTesting } from "@/lib/beta-flag";
 import { storyImagesAreClean } from "@/lib/entitlement";
@@ -163,6 +164,7 @@ export default async function ReadStoryPage({
 
   return (
     <>
+      <StudioReaderFontsLink />
       <SlideReader
         story={story as unknown as Story}
         fullAccess={cleanImages}

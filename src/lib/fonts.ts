@@ -8,12 +8,15 @@
 //               by the picker to group options into scannable sections.
 //
 // Loading strategy:
-//   These families are loaded site-wide via a single Google Fonts CSS
-//   import in `src/app/layout.tsx` (see GOOGLE_FONTS_HREF below). The
-//   request body is just CSS — actual font binaries only download when
-//   a glyph is rendered in that family, so the cost of loading 50
-//   families on every page is negligible until the user opens the
-//   picker.
+//   The CSS stylesheet covering every family is rendered ONLY on the
+//   Studio (`/canvas/[id]`) and Reader (`/read/[id]`) routes — those
+//   are the only surfaces that render TextLayers in a picker font.
+//   See `src/components/StudioReaderFontsLink.tsx` for the consumer.
+//   The root layout used to include the stylesheet on every page; that
+//   was wasteful on the marketing / signup / dashboard surfaces, which
+//   never render with these fonts. Preconnect tags to fonts.googleapis
+//   and fonts.gstatic are still in the root layout so the handshake is
+//   warm by the time a user clicks into Studio or Reader.
 
 export type FontCategory =
   | "sans"
