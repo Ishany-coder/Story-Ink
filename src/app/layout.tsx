@@ -7,7 +7,6 @@ import BetaBanner from "@/components/BetaBanner";
 import SentryInit from "@/components/SentryInit";
 import CookieConsent from "@/components/CookieConsent";
 import CookieSettingsLink from "@/components/CookieSettingsLink";
-import { GOOGLE_FONTS_HREF } from "@/lib/fonts";
 import "./globals.css";
 
 // Nunito stays for body — friendly enough for the kid-facing reading
@@ -71,19 +70,20 @@ export default function RootLayout({
       className={`${nunito.variable} ${playfair.variable} h-full`}
     >
       <head>
-        {/* Google Fonts CDN. Single CSS import covering all 50
-            families in src/lib/fonts.ts at weights 400 + 700. Font
-            binaries only download when actually rendered — the cost
-            of importing this on every page is just the small CSS
-            file (cached aggressively by the browser). preconnect
-            shaves ~100ms off first-paint of any used font. */}
+        {/* Google Fonts preconnect kept site-wide so the Studio /
+            Reader stylesheet (loaded only on those routes — see
+            src/lib/fonts.ts) starts its TLS handshake as soon as a
+            user clicks into one of them. The stylesheet itself is
+            ~1.4KB but render-blocking, so we used to load it on
+            every page; only Studio + Reader actually render with the
+            picker fonts, so the marketing + signup + dashboard surfaces
+            no longer pay that cost. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
           href="https://fonts.gstatic.com"
           crossOrigin="anonymous"
         />
-        <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
       </head>
       <body className="min-h-full bg-cream-100 font-[family-name:var(--font-nunito)] text-ink-700 antialiased">
         <SentryInit />
