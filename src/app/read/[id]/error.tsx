@@ -43,13 +43,13 @@ export default function ReadSegmentError({
         <button
           type="button"
           onClick={reset}
-          className="rounded-full bg-moss-700 px-5 py-2 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+          className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Try again
         </button>
         <Link
           href="/"
-          className="rounded-full border border-cream-300 px-5 py-2 text-sm font-medium text-ink-700 transition-colors hover:bg-cream-200"
+          className="inline-flex items-center gap-1.5 rounded-full border border-cream-300 bg-cream-50 px-5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50"
         >
           Back home
         </Link>

@@ -48,10 +48,14 @@ export default function StepShell({
   // full mobile width (back when it lived at the bottom of the step);
   // since Step 7 now mounts it in the top action row alongside Back,
   // we drop the w-full so it doesn't shove the Back link off-screen.
+  //
+  // Both variants conform to the CLAUDE.md primary-button spec — same
+  // rounded-full pill, focus-visible ring, disabled pair, transition-colors
+  // — they differ only in size (lg vs md) and shadow weight.
   const nextClasses =
     nextVariant === "prominent"
-      ? "px-8 py-3 bg-moss-700 text-cream-50 rounded-xl text-base font-semibold shadow-[0_4px_14px_rgba(31,61,46,0.25)] hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed"
-      : "px-6 py-2 bg-moss-700 text-cream-50 rounded-xl font-medium hover:bg-moss-900 transition disabled:opacity-50 disabled:cursor-not-allowed";
+      ? "inline-flex items-center justify-center gap-1.5 rounded-full bg-moss-700 px-6 py-3 text-base font-semibold text-cream-50 shadow-[0_4px_14px_rgba(31,61,46,0.25)] transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      : "inline-flex items-center justify-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
 
   // When nextAtTop is set, Back/Skip/Next all live in a single top action
   // row so the user gets the wizard controls at a fixed eyeline and the

@@ -83,13 +83,13 @@ function LandingHero() {
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <Link
           href="/login"
-          className="rounded-full bg-moss-700 px-8 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+          className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-6 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Create your first story
         </Link>
         <a
           href="#how-it-works"
-          className="rounded-full border border-cream-300 bg-cream-50 px-8 py-3 text-base font-semibold text-ink-700 transition-colors hover:border-gold-500 hover:text-ink-900"
+          className="inline-flex items-center gap-1.5 rounded-full border border-cream-300 bg-cream-50 px-6 py-3 text-base font-semibold text-ink-700 shadow-sm transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50"
         >
           See how it works
         </a>
@@ -504,7 +504,7 @@ function FinalCTASection() {
         </p>
         <Link
           href="/login"
-          className="mt-8 inline-block rounded-full bg-moss-700 px-8 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900"
+          className="mt-8 inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-6 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Get started &mdash; it&rsquo;s free
         </Link>
