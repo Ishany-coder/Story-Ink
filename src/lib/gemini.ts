@@ -554,7 +554,9 @@ Respond ONLY as JSON: { "targets": ["text"] } OR { "targets": ["image"] } OR { "
 import type { Character, MemoryReference, Script } from "@/lib/types";
 import { parseScript } from "@/lib/script-schema";
 import {
+  buildAiCastPortraitPrompt,
   buildCastPortraitPrompt,
+  buildInferAiCastDescriptionPrompt,
   buildPagePrompt,
   buildScriptPrompt,
   type BuiltPrompt,
@@ -573,6 +575,10 @@ export interface GenerateScriptArgs {
   outline: string;
   memories: MemoryReference[];
   pageCount: number;
+  // Names of AI-cast characters that MUST NOT appear in the
+  // generated script. Set when re-running Stage 1 after the user
+  // removes an AI-cast member at the approval gate.
+  excludedAiCharacterNames?: string[];
 }
 
 export async function generateScript(args: GenerateScriptArgs): Promise<Script> {
@@ -668,6 +674,104 @@ export async function generateCastPortrait(args: {
   );
   assertSafeFinish(result, "generateCastPortrait");
   return extractFirstImageDataUri(result);
+}
+
+// V2 AI-cast portrait. Generates a portrait for a supporting
+// character invented by Stage 1 (no user-supplied reference photo).
+// Returns a base64 data URI; caller uploads via uploadGeneratedImage
+// to the uploads bucket and persists the URL on story_ai_cast.
+export async function generateAiCastPortrait(args: {
+  name: string;
+  kind: "person" | "pet";
+  roleLabel: string | null;
+  description: string;
+  userPromptAddition: string | null;
+  artStylePromptScaffold: string;
+}): Promise<string> {
+  const prompt = buildAiCastPortraitPrompt(args);
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.1-flash-image-preview",
+  });
+
+  const result = await withTimeout(
+    model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        // @ts-expect-error - field not declared in legacy SDK types
+        responseModalities: ["IMAGE", "TEXT"],
+      },
+    }),
+    GEMINI_IMAGE_TIMEOUT_MS,
+    "generateAiCastPortrait"
+  );
+  assertSafeFinish(result, "generateAiCastPortrait");
+  return extractFirstImageDataUri(result);
+}
+
+// Stage 1.5 helper. Given a script-invented character name plus the
+// scene descriptions that mention them, ask a Flash model to infer
+// {role, kind, description}. Returns the parsed JSON or null on
+// any failure (the pipeline degrades gracefully — a row with a
+// generic "person" + bland description is better than failing the
+// whole job).
+export async function inferAiCastDescription(args: {
+  name: string;
+  sceneDescriptions: string[];
+  recipientType: RecipientType;
+  occasion?: Occasion;
+}): Promise<{
+  role: string;
+  kind: "person" | "pet";
+  description: string;
+} | null> {
+  const prompt = buildInferAiCastDescriptionPrompt(args);
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    generationConfig: {
+      responseMimeType: "application/json",
+    },
+  });
+
+  try {
+    const result = await withTimeout(
+      model.generateContent(prompt),
+      GEMINI_TEXT_TIMEOUT_MS,
+      "inferAiCastDescription"
+    );
+    assertSafeFinish(result, "inferAiCastDescription");
+    const text = result.response.text();
+    const parsed = parseJsonResponse(text) as {
+      role?: unknown;
+      kind?: unknown;
+      description?: unknown;
+    };
+    if (
+      typeof parsed.role !== "string" ||
+      (parsed.kind !== "person" && parsed.kind !== "pet") ||
+      typeof parsed.description !== "string"
+    ) {
+      console.error(
+        "[gemini] inferAiCastDescription: malformed JSON",
+        parsed
+      );
+      return null;
+    }
+    return {
+      role: parsed.role,
+      kind: parsed.kind,
+      description: parsed.description,
+    };
+  } catch (err) {
+    if (err instanceof GeminiSafetyBlockedError) throw err;
+    console.error("[gemini] inferAiCastDescription failed:", err);
+    return null;
+  }
 }
 
 // V2 page image — passes the canonical cast portraits AND any memory
