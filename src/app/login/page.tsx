@@ -386,7 +386,7 @@ function LoginPageInner() {
                     type="button"
                     onClick={handleGoogleSignIn}
                     disabled={googlePending || pending}
-                    className="flex w-full items-center justify-center gap-3 rounded-full border border-cream-300 bg-white px-4 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition-colors hover:bg-cream-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex w-full items-center justify-center gap-3 rounded-full border border-cream-300 bg-cream-50 px-4 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <GoogleIcon />
                     {googlePending
@@ -483,7 +483,7 @@ function LoginPageInner() {
                     (mode !== "forgot" && !password) ||
                     (mode === "signup" && !agreedToTerms)
                   }
-                  className="w-full rounded-full bg-moss-700 px-6 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {pending
                     ? mode === "signin"

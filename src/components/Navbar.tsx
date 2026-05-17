@@ -49,7 +49,7 @@ export default async function Navbar() {
               <div className="hidden items-center gap-3 md:flex">
                 <Link
                   href="/create/new"
-                  className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-4 py-1.5 text-sm font-semibold text-cream-50 shadow-sm transition-all hover:bg-moss-900"
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-moss-700 px-3 py-1.5 text-xs font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <PlusIcon />
                   New story
@@ -57,10 +57,15 @@ export default async function Navbar() {
                 <form action="/auth/signout" method="post">
                   <button
                     type="submit"
-                    className="flex items-center gap-2 rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-500 transition-colors hover:border-cream-400 hover:bg-cream-200"
+                    className="flex items-center gap-2 whitespace-nowrap rounded-full border border-cream-300 bg-cream-50 px-3 py-1.5 text-xs font-medium text-ink-700 shadow-sm transition-colors hover:border-cream-400 hover:bg-cream-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
                     title={user.email ?? "Signed in"}
                   >
-                    <span className="hidden text-ink-300 lg:inline">
+                    {/* Email shown at lg+ but truncated so a long
+                        address doesn't squeeze "+ New story" into a
+                        wrapping two-line pill. ch is the width of the
+                        "0" glyph in the current font — 18ch fits a
+                        typical-length email plus an ellipsis. */}
+                    <span className="hidden max-w-[18ch] truncate text-ink-300 lg:inline">
                       {user.email}
                     </span>
                     <span className="hidden text-cream-400 lg:inline">·</span>
