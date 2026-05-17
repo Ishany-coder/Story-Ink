@@ -399,7 +399,7 @@ export default function WizardClient({
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={r.imageUrl}
-                      alt={r.label}
+                      alt=""
                       className="w-full h-full object-cover"
                     />
                   )}
@@ -579,7 +579,7 @@ export default function WizardClient({
       <StepShell
         step={3}
         totalSteps={totalSteps}
-        title="Build Your Cast"
+        title="Build your cast"
         subtitle="Add at least one character. Their photos let the AI keep them looking like them on every page."
         onBack={() => goBack(2)}
         onNext={() => goNext(4)}
@@ -842,7 +842,7 @@ export default function WizardClient({
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={s.sample_image_urls[0]}
-                      alt={s.display_name}
+                      alt=""
                       className="w-full h-full object-cover"
                     />
                   )}
@@ -1142,7 +1142,7 @@ export default function WizardClient({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={c.reference_photo_urls[0]}
-                        alt={c.name}
+                        alt=""
                         className="w-full h-full object-cover"
                       />
                     )}
@@ -1569,7 +1569,7 @@ function MemoryReferencesEditor({
           </div>
           {value.length === 0 && (
             <div className="text-xs text-ink-500">
-              Click to choose images. JPG or PNG, up to {MAX_MEMORY_PHOTOS}.
+              Click to choose images. JPG, PNG, or WebP, up to {MAX_MEMORY_PHOTOS}.
             </div>
           )}
           <input

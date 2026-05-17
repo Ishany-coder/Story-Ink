@@ -29,7 +29,7 @@ values
   ('folk_tale_storybook','Folk Tale Storybook','Stylized folk-art prints with rich pattern work.',
     'folk-art storybook illustration, ornamental patterns, rich earthy palette, flat stylized figures',
     array['/art-style-samples/folk_tale_storybook.webp'], 7, true),
-  ('studio_ghibli',      'Studio Ghibli',      'Hand-painted anime backgrounds with magical realism.',
+  ('studio_ghibli',      'Soft Anime Landscapes', 'Hand-painted anime backgrounds with magical realism.',
     'hand-painted illustration in the style of classic Japanese animated films, atmospheric lighting, painterly backgrounds, gentle realism',
     array['/art-style-samples/studio_ghibli.webp'], 8, true),
   ('soft_romantic',      'Soft Romantic',      'Pastel, blushy romantic illustration.',
