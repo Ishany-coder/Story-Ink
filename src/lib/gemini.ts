@@ -584,6 +584,14 @@ export interface GenerateScriptArgs {
   // script. Set when re-running Stage 1 after the user removes a
   // background at the approval gate.
   excludedBackgroundLabels?: string[];
+  // Pre-existing AI cast members that MUST appear in the new
+  // script (forwarded to buildScriptPrompt). Used on rewrites
+  // where user-added supporting cast needs to be incorporated.
+  preExistingAiCast?: Array<{
+    name: string;
+    roleLabel: string | null;
+    description: string;
+  }>;
 }
 
 export async function generateScript(args: GenerateScriptArgs): Promise<Script> {

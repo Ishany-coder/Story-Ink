@@ -33,6 +33,17 @@ interface BuildPromptArgs {
   // user removes a background at the approval gate and we re-run
   // Stage 1 — the new script must not re-introduce them.
   excludedBackgroundLabels?: string[];
+  // Pre-existing AI cast members (rows in story_ai_cast that
+  // already exist when we re-run Stage 1). These come from user-
+  // adds at the approval gate OR previous Stage 1.5 extractions
+  // that should be preserved. The script writer MUST use each of
+  // these in at least one scene, referencing them by their exact
+  // name in characterIds.
+  preExistingAiCast?: Array<{
+    name: string;
+    roleLabel: string | null;
+    description: string;
+  }>;
 }
 
 function castSummary(cast: Character[]): string {
@@ -149,8 +160,17 @@ ${occasionFrame(args.occasion, hasPetOnly)}
 
 ${toneInstruction(args.storyTone)}
 
-Cast (these are the only characters that may appear; use their names verbatim and reference them by id when filling characterIds):
+Cast (use their names verbatim and reference them by id when filling characterIds):
 ${castSummary(args.cast)}
+${args.preExistingAiCast && args.preExistingAiCast.length > 0 ? `
+
+Pre-existing supporting characters from this story (you MUST use each of these in at least one scene, reference them by their exact name in characterIds, and render them consistently with the description below):
+${args.preExistingAiCast
+  .map(
+    (c) =>
+      `- ${c.name}${c.roleLabel ? ` (${c.roleLabel})` : ""}: ${c.description}`
+  )
+  .join("\n")}` : ""}
 
 ${memoryRules}
 
