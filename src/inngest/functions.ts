@@ -1050,34 +1050,52 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
     };
     await markRunning(jobId);
 
-    // Defer-remove fix: the user can remove AI-cast members or
-    // backgrounds at the approval gate without triggering a rewrite
-    // on each delete (used to live in regenerateScriptAfterRemovalFn,
-    // now removed). Detect those removals here by diffing the script
-    // against the rows that still exist, and rewrite + re-extract
-    // inline before per-page generation. Empty diffs = no-op, fast
-    // path is identical to today.
+    // Defer-rewrite-to-approve: the user can add/remove AI-cast,
+    // main-cast, or backgrounds at the approval gate without
+    // triggering a per-action rewrite. We detect ANY mismatch
+    // between the script and the current rows here, then run the
+    // rewrite-and-regen cycle inline before per-page generation.
+    // Detection covers:
+    //  - excludedAiCharacterNames: names in script.characterIds
+    //    that are no longer in story_ai_cast (user removed)
+    //  - excludedBackgroundLabels: setting labels not in
+    //    story_backgrounds (user removed)
+    //  - missingUserCastNames: UUIDs in script.characterIds not in
+    //    cast_character_ids (user removed main cast)
+    //  - addedUserCastUuids: UUIDs in cast_character_ids that the
+    //    script never references (user added main cast — needs
+    //    rewrite to incorporate)
+    //  - addedAiCastNames: rows in story_ai_cast whose name is not
+    //    referenced by any page (user added supporting cast)
+    // Empty diffs = no-op, identical to pre-feature speed.
     const exclusions = await step.run("detect-exclusions", async () => {
       const admin = supabaseAdmin();
       const { data: storyRow } = await admin
         .from("stories")
-        .select("script")
+        .select("script, cast_character_ids")
         .eq("id", storyId)
-        .single<{ script: import("@/lib/types").Script | null }>();
+        .single<{
+          script: import("@/lib/types").Script | null;
+          cast_character_ids: string[];
+        }>();
       const script = storyRow?.script;
+      const currentCastIds = new Set(storyRow?.cast_character_ids ?? []);
       if (!script) {
-        return { excludedAiCharacterNames: [], excludedBackgroundLabels: [] };
+        return {
+          excludedAiCharacterNames: [] as string[],
+          excludedBackgroundLabels: [] as string[],
+          hasChanges: false,
+        };
       }
 
-      // Names referenced in characterIds that are not UUIDs (i.e.
-      // AI-cast names) — set.
       const referencedNames = new Set<string>();
+      const referencedUuids = new Set<string>();
       for (const page of script.pages) {
         for (const id of page.characterIds) {
-          if (!UUID_RE.test(id)) referencedNames.add(id);
+          if (UUID_RE.test(id)) referencedUuids.add(id);
+          else referencedNames.add(id);
         }
       }
-      // Background labels referenced in setting fields — set.
       const referencedLabels = new Set<string>();
       for (const page of script.pages) {
         const s = page.setting?.trim();
@@ -1105,17 +1123,42 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
       const excludedBackgroundLabels = Array.from(referencedLabels).filter(
         (l) => !existingBgLabels.has(l)
       );
-      return { excludedAiCharacterNames, excludedBackgroundLabels };
+
+      // Removed main cast: UUIDs in script not in current roster.
+      const removedUserCast = Array.from(referencedUuids).filter(
+        (u) => !currentCastIds.has(u)
+      );
+      // Added main cast: UUIDs in current roster but script doesn't
+      // reference them yet — script must be rewritten to use them.
+      const addedUserCast = Array.from(currentCastIds).filter(
+        (u) => !referencedUuids.has(u)
+      );
+      // Added AI cast: rows in story_ai_cast whose name doesn't
+      // appear in the script.
+      const addedAiNames = Array.from(existingAiNames).filter(
+        (n) => !referencedNames.has(n)
+      );
+
+      const hasChanges =
+        excludedAiCharacterNames.length > 0 ||
+        excludedBackgroundLabels.length > 0 ||
+        removedUserCast.length > 0 ||
+        addedUserCast.length > 0 ||
+        addedAiNames.length > 0;
+
+      return {
+        excludedAiCharacterNames,
+        excludedBackgroundLabels,
+        hasChanges,
+      };
     });
 
-    // Rewrite-cycle: only runs when the user removed something at
-    // the approval gate. Mirrors the structure of generateStoryV2Fn
-    // (Stage 1 → 1.5 → 1.6 → 2.5 → 2.6), then falls through to the
-    // existing per-page generation logic on the (now updated) state.
-    if (
-      exclusions.excludedAiCharacterNames.length > 0 ||
-      exclusions.excludedBackgroundLabels.length > 0
-    ) {
+    // Rewrite-cycle: runs whenever the user adjusted the cast/bg
+    // composition at the approval gate. Mirrors the structure of
+    // generateStoryV2Fn (Stage 1 → 1.5 → 1.6 → 2.5 → 2.6), then
+    // falls through to the existing per-page generation logic on
+    // the (now updated) state.
+    if (exclusions.hasChanges) {
       const rwCtx: StoryV2Context = await step.run(
         "rewrite-load-context",
         async () => {
@@ -1148,13 +1191,33 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         }
       );
 
-      // Drop any remaining AI-cast + background rows — they'll be
-      // re-extracted from the new script. The user-cast portraits
-      // in character_portraits stay (keyed by character_id, not by
-      // script content).
-      await step.run("rewrite-clear-derived", async () => {
+      // Snapshot pre-existing AI cast BEFORE clearing backgrounds.
+      // These are user-added supporting characters (or surviving
+      // Stage 1.5 extractions) that the new script must continue
+      // to use. The script prompt receives them as a "MUST appear"
+      // list so they don't get orphaned in story_ai_cast.
+      const preExistingAiCast = await step.run(
+        "rewrite-snapshot-ai-cast",
+        async () => {
+          const admin = supabaseAdmin();
+          const { data: rows } = await admin
+            .from("story_ai_cast")
+            .select("name, role_label, description")
+            .eq("story_id", storyId);
+          return (rows ?? []).map((r) => ({
+            name: r.name as string,
+            roleLabel: r.role_label as string | null,
+            description: r.description as string,
+          }));
+        }
+      );
+
+      // Clear backgrounds (no user-add feature yet, safe to nuke).
+      // story_ai_cast is preserved so user-added rows survive — the
+      // re-extract step below is idempotent on case-insensitive
+      // name match.
+      await step.run("rewrite-clear-bg", async () => {
         const admin = supabaseAdmin();
-        await admin.from("story_ai_cast").delete().eq("story_id", storyId);
         await admin
           .from("story_backgrounds")
           .delete()
@@ -1173,6 +1236,7 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
           pageCount: rwCtx.story.page_count,
           excludedAiCharacterNames: exclusions.excludedAiCharacterNames,
           excludedBackgroundLabels: exclusions.excludedBackgroundLabels,
+          preExistingAiCast,
         });
         const userTitle = rwCtx.story.title?.trim();
         const finalTitle =

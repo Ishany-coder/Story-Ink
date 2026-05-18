@@ -90,6 +90,29 @@ export default function ApproveCastClient({
   const [renamingBgId, setRenamingBgId] = useState<string | null>(null);
   const [bgLabelDraft, setBgLabelDraft] = useState("");
 
+  // Add-main-cast modal. Lazy-loads the user's library on open;
+  // filters out characters already in the story.
+  const [addMainOpen, setAddMainOpen] = useState(false);
+  const [library, setLibrary] = useState<
+    Array<{
+      id: string;
+      name: string;
+      kind: "person" | "pet";
+      reference_photo_urls: string[];
+    }>
+  >([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+
+  // Add-supporting (AI) modal. Inline form.
+  const [addSupportingOpen, setAddSupportingOpen] = useState(false);
+  const [supName, setSupName] = useState("");
+  const [supRole, setSupRole] = useState("");
+  const [supKind, setSupKind] = useState<"person" | "pet">("person");
+  const [supDescription, setSupDescription] = useState("");
+  const [supSubmitting, setSupSubmitting] = useState(false);
+  const [supError, setSupError] = useState<string | null>(null);
+
   const cancelledRef = useRef(false);
   useEffect(
     () => () => {
@@ -475,6 +498,222 @@ export default function ApproveCastClient({
     }
   }
 
+  // -------------------- USER-CAST remove (instant) -----------------------
+  //
+  // Removes the UUID from stories.cast_character_ids. The character
+  // row itself stays in the user's library. Same defer-rewrite
+  // semantics as AI-cast / background remove: detect-exclusions at
+  // approve time picks up the missing UUID and rewrites.
+
+  async function removeUserCast(p: UserPortrait) {
+    setError(null);
+    setPortraits((prev) => prev.filter((x) => x.characterId !== p.characterId));
+    try {
+      const res = await fetch(
+        `/api/stories/${storyId}/cast/${p.characterId}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) throw new Error(await res.text());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "remove failed");
+      setPortraits((prev) => [...prev, p]);
+    }
+  }
+
+  // -------------------- ADD main cast (from library) ---------------------
+
+  async function openAddMain() {
+    setAddMainOpen(true);
+    setLibraryError(null);
+    if (library.length > 0) return; // already loaded
+    setLibraryLoading(true);
+    try {
+      const res = await fetch("/api/characters", { cache: "no-store" });
+      if (!res.ok) throw new Error(await res.text());
+      const body = (await res.json()) as {
+        characters: Array<{
+          id: string;
+          name: string;
+          kind: "person" | "pet";
+          reference_photo_urls: string[];
+        }>;
+      };
+      setLibrary(body.characters ?? []);
+    } catch (err) {
+      setLibraryError(err instanceof Error ? err.message : "load failed");
+    } finally {
+      setLibraryLoading(false);
+    }
+  }
+
+  async function addMainFromLibrary(charId: string) {
+    setError(null);
+    // Close the modal immediately for snappy feel.
+    setAddMainOpen(false);
+    try {
+      const res = await fetch(`/api/stories/${storyId}/cast/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ characterIds: [charId] }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const body = (await res.json()) as {
+        added: Array<{
+          characterId: string;
+          name: string;
+          jobId?: string;
+          portraitUrl?: string;
+        }>;
+      };
+      for (const entry of body.added) {
+        if (entry.portraitUrl) {
+          // Cache hit — render the card immediately.
+          setPortraits((prev) => [
+            ...prev,
+            {
+              characterId: entry.characterId,
+              name: entry.name,
+              portraitUrl: entry.portraitUrl!,
+            },
+          ]);
+        } else if (entry.jobId) {
+          // Cache miss — insert a placeholder card in "regenerating"
+          // state and poll for the result.
+          setPortraits((prev) => [
+            ...prev,
+            {
+              characterId: entry.characterId,
+              name: entry.name,
+              // 1x1 transparent PNG so the <img> renders something
+              // while the spinner overlay covers it.
+              portraitUrl:
+                "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+            },
+          ]);
+          setRegenById((m) => ({
+            ...m,
+            [entry.characterId]: {
+              jobId: entry.jobId!,
+              status: "regenerating",
+            },
+          }));
+          const cid = entry.characterId;
+          const jid = entry.jobId;
+          void pollUntilDone(jid, ({ newUrl, error: err }) => {
+            if (err) {
+              setRegenById((m) => ({
+                ...m,
+                [cid]: { jobId: jid, status: "failed", error: err },
+              }));
+              return;
+            }
+            if (newUrl) {
+              setPortraits((prev) =>
+                prev.map((p) =>
+                  p.characterId === cid ? { ...p, portraitUrl: newUrl } : p
+                )
+              );
+            }
+            setRegenById((m) => {
+              const next = { ...m };
+              delete next[cid];
+              return next;
+            });
+          });
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "add failed");
+    }
+  }
+
+  // -------------------- ADD supporting cast (AI-generate) ----------------
+
+  function closeAddSupporting() {
+    setAddSupportingOpen(false);
+    setSupName("");
+    setSupRole("");
+    setSupKind("person");
+    setSupDescription("");
+    setSupError(null);
+  }
+
+  async function submitAddSupporting() {
+    setSupError(null);
+    if (supName.trim().length === 0) {
+      setSupError("Name is required");
+      return;
+    }
+    if (supDescription.trim().length === 0) {
+      setSupError("Description is required");
+      return;
+    }
+    setSupSubmitting(true);
+    try {
+      const res = await fetch(`/api/stories/${storyId}/ai-cast/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: supName.trim(),
+          roleLabel: supRole.trim() || undefined,
+          kind: supKind,
+          description: supDescription.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const body = (await res.json()) as {
+        aiCastId: string;
+        jobId: string;
+        name: string;
+        roleLabel: string | null;
+        kind: "person" | "pet";
+      };
+      // Add a placeholder card + poll the regen job.
+      const placeholder: AiPortrait = {
+        aiCastId: body.aiCastId,
+        name: body.name,
+        roleLabel: body.roleLabel,
+        kind: body.kind,
+        portraitUrl:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+        promptAddition: null,
+      };
+      setAiPortraits((prev) => [...prev, placeholder]);
+      setRegenById((m) => ({
+        ...m,
+        [body.aiCastId]: { jobId: body.jobId, status: "regenerating" },
+      }));
+      const aiId = body.aiCastId;
+      const jid = body.jobId;
+      void pollUntilDone(jid, ({ newUrl, error: err }) => {
+        if (err) {
+          setRegenById((m) => ({
+            ...m,
+            [aiId]: { jobId: jid, status: "failed", error: err },
+          }));
+          return;
+        }
+        if (newUrl) {
+          setAiPortraits((prev) =>
+            prev.map((p) =>
+              p.aiCastId === aiId ? { ...p, portraitUrl: newUrl } : p
+            )
+          );
+        }
+        setRegenById((m) => {
+          const next = { ...m };
+          delete next[aiId];
+          return next;
+        });
+      });
+      closeAddSupporting();
+    } catch (err) {
+      setSupError(err instanceof Error ? err.message : "add failed");
+    } finally {
+      setSupSubmitting(false);
+    }
+  }
+
   // -------------------- approve all --------------------------------------
 
   async function approveAll() {
@@ -495,9 +734,28 @@ export default function ApproveCastClient({
 
   return (
     <div>
-      {/* User-cast grid */}
-      {portraits.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+      {/* User-cast (main cast) — always render header + Add button.
+          Grid is empty when no main cast (user can still add). */}
+      <div className="mb-6">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="text-[11px] uppercase tracking-[0.18em] text-ink-300">
+            Your cast
+          </h2>
+          <button
+            type="button"
+            onClick={openAddMain}
+            className="inline-flex items-center gap-1 text-sm font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline"
+          >
+            + Add main cast
+          </button>
+        </div>
+        {portraits.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-center text-sm text-ink-500">
+            No main cast yet. Add a character from your library — they&rsquo;ll
+            appear on the storybook pages with their real likeness.
+          </div>
+        ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {portraits.map((p) => {
             const regen = regenById[p.characterId];
             const isRegenerating = regen?.status === "regenerating";
@@ -516,24 +774,36 @@ export default function ApproveCastClient({
                   />
                   {isRegenerating && <RegenOverlay />}
                 </div>
-                <div className="flex items-center justify-between p-3">
-                  <span className="font-medium text-ink-900">{p.name}</span>
+                <div className="p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-ink-900 truncate">{p.name}</span>
+                  </div>
                   {!isEditingPrompt && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // Mirrors the AI-cast pattern (post-PR-#66):
-                        // Regenerate opens a prompt editor first so
-                        // the user never accidentally re-rolls
-                        // without a chance to tweak.
-                        setEditingUserPromptFor(p.characterId);
-                        setUserPromptDraft("");
-                      }}
-                      disabled={isRegenerating}
-                      className="text-sm font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline disabled:opacity-50"
-                    >
-                      {isRegenerating ? "Working…" : "Regenerate"}
-                    </button>
+                    <div className="mt-2 flex items-center gap-3 text-sm">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Mirrors the AI-cast pattern (post-PR-#66):
+                          // Regenerate opens a prompt editor first so
+                          // the user never accidentally re-rolls
+                          // without a chance to tweak.
+                          setEditingUserPromptFor(p.characterId);
+                          setUserPromptDraft("");
+                        }}
+                        disabled={isRegenerating}
+                        className="font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline disabled:opacity-50"
+                      >
+                        {isRegenerating ? "Working…" : "Regenerate"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeUserCast(p)}
+                        disabled={isRegenerating}
+                        className="font-medium text-rose-600 underline-offset-2 transition-colors hover:text-rose-700 hover:underline disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   )}
                 </div>
                 {isEditingPrompt && (
@@ -589,14 +859,29 @@ export default function ApproveCastClient({
             );
           })}
         </div>
-      )}
+        )}
+      </div>
 
-      {/* AI-cast grid */}
-      {aiPortraits.length > 0 && (
-        <div className="mb-6">
-          <h2 className="mb-3 text-[11px] uppercase tracking-[0.18em] text-ink-300">
+      {/* AI-cast (supporting) — always render header + Add button. */}
+      <div className="mb-6">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="text-[11px] uppercase tracking-[0.18em] text-ink-300">
             AI-imagined supporting cast
           </h2>
+          <button
+            type="button"
+            onClick={() => setAddSupportingOpen(true)}
+            className="inline-flex items-center gap-1 text-sm font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline"
+          >
+            + Add supporting cast
+          </button>
+        </div>
+        {aiPortraits.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-cream-300 bg-cream-50 px-4 py-6 text-center text-sm text-ink-500">
+            No supporting cast yet. Add one and the AI invents the likeness
+            from your description.
+          </div>
+        ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {aiPortraits.map((p) => {
               const regen = regenById[p.aiCastId];
@@ -751,8 +1036,8 @@ export default function ApproveCastClient({
               );
             })}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Backgrounds (Spec B) */}
       {backgrounds.length > 0 && (
@@ -922,6 +1207,234 @@ export default function ApproveCastClient({
       >
         {approving ? "Sending…" : "Approve all & generate pages"}
       </button>
+
+      {/* Add-main-cast modal — picks from the user's library. */}
+      {addMainOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm px-4"
+          onClick={() => setAddMainOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl bg-cream-50 p-6 shadow-2xl max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+                Add main cast
+              </h2>
+              <button
+                type="button"
+                onClick={() => setAddMainOpen(false)}
+                aria-label="Close"
+                className="text-ink-500 hover:text-ink-900 text-2xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+            <p className="text-sm text-ink-500 mb-4">
+              Pick a character from your library. Their real photo
+              becomes the likeness anchor on every page they appear in.
+            </p>
+            {libraryLoading && (
+              <div className="py-8 text-center text-sm text-ink-500">
+                Loading…
+              </div>
+            )}
+            {libraryError && (
+              <div className="py-2 text-sm text-rose-600">{libraryError}</div>
+            )}
+            {!libraryLoading &&
+              !libraryError &&
+              (() => {
+                const usedIds = new Set(portraits.map((p) => p.characterId));
+                const available = library.filter((c) => !usedIds.has(c.id));
+                if (available.length === 0) {
+                  return (
+                    <div className="py-4 text-sm text-ink-500">
+                      All your library characters are already in this story.{" "}
+                      <a
+                        href={`/characters/new?next=${encodeURIComponent(
+                          `/stories/${storyId}/approve-cast`
+                        )}`}
+                        className="font-medium text-moss-700 underline hover:text-moss-900"
+                      >
+                        Create a new character
+                      </a>
+                      .
+                    </div>
+                  );
+                }
+                return (
+                  <div className="grid grid-cols-2 gap-3 overflow-y-auto">
+                    {available.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => addMainFromLibrary(c.id)}
+                        className="overflow-hidden rounded-xl border border-cream-300 bg-cream-50 text-left transition-all hover:border-gold-500 hover:shadow-[0_4px_12px_rgba(14,26,43,0.06)]"
+                      >
+                        <div className="aspect-square bg-cream-200">
+                          {c.reference_photo_urls[0] && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={c.reference_photo_urls[0]}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </div>
+                        <div className="p-2">
+                          <div className="text-sm font-medium text-ink-900 truncate">
+                            {c.name}
+                          </div>
+                          <div className="text-[10px] uppercase tracking-wide text-ink-300">
+                            {c.kind}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+            <div className="mt-4 border-t border-cream-300 pt-3">
+              <a
+                href={`/characters/new?next=${encodeURIComponent(
+                  `/stories/${storyId}/approve-cast`
+                )}`}
+                className="text-sm font-medium text-moss-700 underline hover:text-moss-900"
+              >
+                + Create a new character (with photo)
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add-supporting-cast modal — AI-generate form. */}
+      {addSupportingOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm px-4"
+          onClick={closeAddSupporting}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-cream-50 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
+                Add supporting character
+              </h2>
+              <button
+                type="button"
+                onClick={closeAddSupporting}
+                aria-label="Close"
+                className="text-ink-500 hover:text-ink-900 text-2xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+            <p className="text-sm text-ink-500 mb-4">
+              The AI will invent this character&rsquo;s likeness from your
+              description and use them consistently across pages.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-ink-700 mb-1">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={supName}
+                  onChange={(e) => setSupName(e.target.value)}
+                  maxLength={120}
+                  placeholder="e.g. Sarah, Mr. Patel, the priest"
+                  className="w-full rounded-md border border-cream-300 bg-cream-50 px-3 py-2 text-sm text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink-700 mb-1">
+                  Role <span className="text-ink-300 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={supRole}
+                  onChange={(e) => setSupRole(e.target.value)}
+                  maxLength={120}
+                  placeholder="e.g. best friend, the antagonist"
+                  className="w-full rounded-md border border-cream-300 bg-cream-50 px-3 py-2 text-sm text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink-700 mb-1">
+                  Kind
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSupKind("person")}
+                    className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                      supKind === "person"
+                        ? "border-moss-500 bg-moss-100/40 text-moss-900"
+                        : "border-cream-300 bg-cream-50 text-ink-700 hover:border-gold-500"
+                    }`}
+                  >
+                    Person
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSupKind("pet")}
+                    className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                      supKind === "pet"
+                        ? "border-moss-500 bg-moss-100/40 text-moss-900"
+                        : "border-cream-300 bg-cream-50 text-ink-700 hover:border-gold-500"
+                    }`}
+                  >
+                    Pet
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink-700 mb-1">
+                  Description
+                </label>
+                <textarea
+                  rows={3}
+                  value={supDescription}
+                  onChange={(e) => setSupDescription(e.target.value)}
+                  placeholder="e.g. a tall older man with greying hair, wire-rimmed glasses, warm smile"
+                  className="w-full rounded-md border border-cream-300 bg-cream-50 px-3 py-2 text-sm text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
+                />
+                <p className="mt-1 text-[11px] text-ink-300">
+                  Focus on stable physical features (age, build, hair,
+                  distinguishing marks) — what should stay consistent on
+                  every page.
+                </p>
+              </div>
+              {supError && (
+                <div className="text-sm text-rose-600">{supError}</div>
+              )}
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeAddSupporting}
+                disabled={supSubmitting}
+                className="text-sm font-medium text-ink-500 hover:text-ink-900 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitAddSupporting}
+                disabled={supSubmitting}
+                className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-5 py-2.5 text-sm font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {supSubmitting ? "Adding…" : "Add character"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
