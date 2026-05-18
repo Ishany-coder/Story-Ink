@@ -80,27 +80,15 @@ export default function ApproveCastClient({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
 
-  // Remove-confirmation modal state. Holds the AI-cast row being
-  // removed (so we can show its name in the confirmation copy).
-  const [pendingRemove, setPendingRemove] = useState<AiPortrait | null>(null);
-
-  // Spec B: parallel state for background editing / removing. Kept
-  // separate from AI-cast state so the two sections never share a
-  // pencil-editor or rename target.
+  // Spec B: parallel state for background editing. Kept separate
+  // from AI-cast state so the two sections never share a pencil-
+  // editor or rename target.
   const [editingBgPromptFor, setEditingBgPromptFor] = useState<string | null>(
     null
   );
   const [bgPromptDraft, setBgPromptDraft] = useState("");
   const [renamingBgId, setRenamingBgId] = useState<string | null>(null);
   const [bgLabelDraft, setBgLabelDraft] = useState("");
-  const [pendingBgRemove, setPendingBgRemove] = useState<Background | null>(
-    null
-  );
-
-  // True while the Stage-1 re-run is in flight. Full-page overlay
-  // blocks interaction so the user can't approve cast that's about
-  // to be regenerated.
-  const [rerunning, setRerunning] = useState(false);
 
   const cancelledRef = useRef(false);
   useEffect(
@@ -442,71 +430,49 @@ export default function ApproveCastClient({
     }
   }
 
-  // -------------------- BACKGROUND remove (Stage 1 re-run) ---------------
+  // -------------------- BACKGROUND remove (instant, no rewrite) ----------
+  //
+  // Removal is synchronous + UI-only. The DELETE endpoint hard-deletes
+  // the row but does NOT trigger a script rewrite — that's deferred
+  // to approve time (generatePagesAfterApprovalFn detects missing
+  // rows vs script references and runs the rewrite inline before
+  // pages). This lets the user remove multiple items quickly
+  // without waiting on a per-removal Gemini rewrite.
 
-  async function confirmBgRemove() {
-    if (!pendingBgRemove) return;
-    const removingId = pendingBgRemove.bgId;
-    setRerunning(true);
+  async function removeBackground(bg: Background) {
     setError(null);
-    setPendingBgRemove(null);
-    let jobId: string;
+    // Optimistically drop from local state; restore on failure.
+    setBackgrounds((prev) => prev.filter((b) => b.bgId !== bg.bgId));
     try {
       const res = await fetch(
-        `/api/stories/${storyId}/backgrounds/${removingId}`,
+        `/api/stories/${storyId}/backgrounds/${bg.bgId}`,
         { method: "DELETE" }
       );
       if (!res.ok) throw new Error(await res.text());
-      const body = (await res.json()) as { jobId: string };
-      jobId = body.jobId;
     } catch (err) {
       setError(err instanceof Error ? err.message : "remove failed");
-      setRerunning(false);
-      return;
+      // Restore — put the card back where it was.
+      setBackgrounds((prev) => [...prev, bg]);
     }
-    void pollUntilDone(jobId, ({ error: err }) => {
-      if (err) {
-        setError(err);
-        setRerunning(false);
-        return;
-      }
-      router.refresh();
-      setRerunning(false);
-    });
   }
 
-  // -------------------- AI-CAST remove (Stage 1 re-run) ------------------
+  // -------------------- AI-CAST remove (instant, no rewrite) -------------
 
-  async function confirmRemove() {
-    if (!pendingRemove) return;
-    const removingId = pendingRemove.aiCastId;
-    setRerunning(true);
+  async function removeAiCast(member: AiPortrait) {
     setError(null);
-    setPendingRemove(null);
-    let jobId: string;
+    setAiPortraits((prev) =>
+      prev.filter((p) => p.aiCastId !== member.aiCastId)
+    );
     try {
       const res = await fetch(
-        `/api/stories/${storyId}/ai-cast/${removingId}`,
+        `/api/stories/${storyId}/ai-cast/${member.aiCastId}`,
         { method: "DELETE" }
       );
       if (!res.ok) throw new Error(await res.text());
-      const body = (await res.json()) as { jobId: string };
-      jobId = body.jobId;
     } catch (err) {
       setError(err instanceof Error ? err.message : "remove failed");
-      setRerunning(false);
-      return;
+      setAiPortraits((prev) => [...prev, member]);
     }
-    void pollUntilDone(jobId, ({ error: err }) => {
-      if (err) {
-        setError(err);
-        setRerunning(false);
-        return;
-      }
-      // Reload the approve-cast page to read the new AI cast roster.
-      router.refresh();
-      setRerunning(false);
-    });
   }
 
   // -------------------- approve all --------------------------------------
@@ -729,8 +695,8 @@ export default function ApproveCastClient({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPendingRemove(p)}
-                          disabled={isRegenerating || rerunning}
+                          onClick={() => removeAiCast(p)}
+                          disabled={isRegenerating}
                           className="font-medium text-rose-600 underline-offset-2 transition-colors hover:text-rose-700 hover:underline disabled:opacity-50"
                         >
                           Remove
@@ -880,8 +846,8 @@ export default function ApproveCastClient({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPendingBgRemove(b)}
-                          disabled={isRegenerating || rerunning}
+                          onClick={() => removeBackground(b)}
+                          disabled={isRegenerating}
                           className="font-medium text-rose-600 underline-offset-2 transition-colors hover:text-rose-700 hover:underline disabled:opacity-50"
                         >
                           Remove
@@ -946,94 +912,16 @@ export default function ApproveCastClient({
       <button
         type="button"
         onClick={approveAll}
-        disabled={approving || anyRegenerating || rerunning}
+        disabled={approving || anyRegenerating}
         className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-6 py-3 text-base font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         title={
           anyRegenerating
             ? "Wait for portraits to finish regenerating"
-            : rerunning
-              ? "Rewriting the story…"
-              : undefined
+            : undefined
         }
       >
         {approving ? "Sending…" : "Approve all & generate pages"}
       </button>
-
-      {/* Remove-confirmation modal */}
-      {pendingRemove && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm px-4">
-          <div className="w-full max-w-md rounded-2xl bg-cream-50 p-6 shadow-2xl">
-            <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-              Remove {pendingRemove.name}?
-            </h2>
-            <p className="mt-2 text-sm text-ink-700">
-              Removing {pendingRemove.name} will rewrite the story without
-              them. This takes about 15 seconds and may change other pages.
-            </p>
-            <div className="mt-5 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setPendingRemove(null)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-cream-300 bg-cream-50 px-5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmRemove}
-                className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 px-5 py-2.5 text-sm font-semibold text-rose-600 shadow-sm transition-colors hover:bg-rose-100 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2"
-              >
-                Remove and rewrite
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Spec B: background remove-confirmation modal */}
-      {pendingBgRemove && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm px-4">
-          <div className="w-full max-w-md rounded-2xl bg-cream-50 p-6 shadow-2xl">
-            <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold text-ink-900">
-              Remove {pendingBgRemove.label}?
-            </h2>
-            <p className="mt-2 text-sm text-ink-700">
-              Removing {pendingBgRemove.label} will rewrite the story without
-              this setting. Pages set there will move to another location or
-              be rewritten. This takes about 15 seconds.
-            </p>
-            <div className="mt-5 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setPendingBgRemove(null)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-cream-300 bg-cream-50 px-5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition-colors hover:bg-cream-100 hover:border-cream-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmBgRemove}
-                className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 px-5 py-2.5 text-sm font-semibold text-rose-600 shadow-sm transition-colors hover:bg-rose-100 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2"
-              >
-                Remove and rewrite
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Full-page overlay while the Stage-1 re-run is in flight */}
-      {rerunning && (
-        <div className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-cream-50/90 backdrop-blur-sm">
-          <Spinner />
-          <span className="font-[family-name:var(--font-display)] text-lg font-semibold text-ink-900">
-            Rewriting your story…
-          </span>
-          <span className="text-sm text-ink-500">
-            This takes about 15 seconds.
-          </span>
-        </div>
-      )}
     </div>
   );
 }

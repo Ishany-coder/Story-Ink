@@ -5,8 +5,6 @@ import {
   UnauthorizedError,
 } from "@/lib/supabase-server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { createJob } from "@/lib/jobs";
-import { inngest, EVENTS } from "@/inngest/client";
 
 type RouteContext = {
   params: Promise<{ id: string; aiCastId: string }>;
@@ -74,14 +72,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 }
 
-// Remove an AI-cast member. Triggers a Stage 1 re-run with this
-// name in `excludedAiCharacterNames`. Pre-Stage-3 only — once the
-// user clicks "Approve all & generate pages" and Stage 3 starts,
-// the AI cast set is frozen. Returns 409 Conflict if the parent
-// job has moved past awaiting_cast_approval.
+// Remove an AI-cast member. Synchronous row delete only — does NOT
+// trigger a script rewrite. The rewrite is deferred to approve
+// time: generatePagesAfterApprovalFn detects exclusions by diffing
+// the script's characterIds against story_ai_cast rows that still
+// exist, then runs the rewrite + cast/bg regen inline before
+// per-page generation. This way the user can remove multiple items
+// quickly without paying a per-removal rewrite cost.
 //
-// Returns: { jobId } — the client polls /api/jobs/[id] to know when
-// the new approval-gate state is ready.
+// Pre-Stage-3 only — once "Approve all & generate pages" has
+// started, the cast set is frozen (returns 409).
 export async function DELETE(_req: NextRequest, ctx: RouteContext) {
   try {
     const user = await requireUser();
@@ -91,7 +91,6 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
 
     const admin = supabaseAdmin();
 
-    // Snapshot the row so we know the name to exclude on re-run.
     const { data: row } = await admin
       .from("story_ai_cast")
       .select("id, name")
@@ -105,10 +104,9 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       );
     }
 
-    // Block if the parent story has any job past awaiting-approval —
-    // i.e. Stage 3 has started or finished. Removing AI cast after
-    // page generation would orphan portraits referenced from rendered
-    // pages.
+    // Block if the parent story has a job past awaiting-approval
+    // (Stage 3 running or done). Removing cast after pages have
+    // started would orphan portraits referenced from rendered pages.
     const { data: laterJobs } = await admin
       .from("jobs")
       .select("id, status, result")
@@ -120,8 +118,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       const r = j.result as { storyId?: string } | null;
       return (
         r?.storyId === storyId &&
-        (j.status === "running" ||
-          j.status === "done") // only treat done/running as locking
+        (j.status === "running" || j.status === "done")
       );
     });
     if (blocking) {
@@ -131,9 +128,6 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       );
     }
 
-    // Delete the row first so re-extraction doesn't see it.
-    // story_ai_cast portrait_url is the only persisted reference;
-    // pages haven't generated yet so nothing else depends on it.
     const { error: deleteErr } = await admin
       .from("story_ai_cast")
       .delete()
@@ -146,12 +140,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       );
     }
 
-    const jobId = await createJob("ai-cast.removed", user.id);
-    await inngest.send({
-      name: EVENTS.aiCastRemoved,
-      data: { jobId, storyId, removedName: row.name },
-    });
-    return NextResponse.json({ jobId }, { status: 202 });
+    return NextResponse.json({ ok: true, removedName: row.name });
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: err.message }, { status: 401 });

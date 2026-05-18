@@ -31,8 +31,6 @@ export const EVENTS = {
   characterRegenerate: "character/portrait.regenerate.requested",
   // AI-cast (Spec A) augmentation flow
   aiCastRegenerate: "story/ai-cast.regenerate.requested",
-  aiCastRemoved: "story/ai-cast.removed",
   // Backgrounds (Spec B) flow
   backgroundRegenerate: "story/background.regenerate.requested",
-  backgroundRemoved: "story/background.removed",
 } as const;
