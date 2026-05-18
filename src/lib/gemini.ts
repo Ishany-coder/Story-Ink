@@ -647,6 +647,12 @@ function extractFirstImageDataUri(result: {
 export async function generateCastPortrait(args: {
   character: Character;
   artStylePromptScaffold: string;
+  // Optional one-shot prompt addition the user typed at the
+  // approval-gate Regenerate prompt box. NOT persisted on
+  // character_portraits — the cached portrait is just the latest
+  // upsert. If the user wants the addition to "stick" they can
+  // type it again on next regenerate.
+  userPromptAddition?: string | null;
 }): Promise<string> {
   const prompt = buildCastPortraitPrompt(args);
 

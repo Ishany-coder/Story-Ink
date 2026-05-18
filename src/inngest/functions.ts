@@ -1295,10 +1295,15 @@ export const regenerateCastPortraitFn = inngest.createFunction(
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, storyId, characterId } = event.data as {
+    const { jobId, storyId, characterId, promptAddition } = event.data as {
       jobId: string;
       storyId: string;
       characterId: string;
+      // Optional one-shot user prompt addition typed at the
+      // approval-gate Regenerate prompt box. NOT persisted —
+      // character_portraits.portrait_url just gets overwritten by
+      // the new render.
+      promptAddition?: string;
     };
     await markRunning(jobId);
 
@@ -1328,6 +1333,7 @@ export const regenerateCastPortraitFn = inngest.createFunction(
       const dataUri = await generateCastPortrait({
         character,
         artStylePromptScaffold: style.prompt_scaffold,
+        userPromptAddition: promptAddition ?? null,
       });
       const portraitUrl = await uploadGeneratedImage(dataUri);
 

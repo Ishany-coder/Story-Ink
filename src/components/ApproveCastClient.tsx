@@ -65,6 +65,16 @@ export default function ApproveCastClient({
   );
   const [promptDraft, setPromptDraft] = useState("");
 
+  // User-cast Regenerate prompt-editor state. Same shape as the
+  // AI-cast editor but keyed by characterId. The user's prompt is
+  // a one-shot tweak — not persisted on the character row. The
+  // user's photo stays the canonical likeness; this prompt only
+  // adjusts wardrobe / pose / mood for the next regeneration.
+  const [editingUserPromptFor, setEditingUserPromptFor] = useState<
+    string | null
+  >(null);
+  const [userPromptDraft, setUserPromptDraft] = useState("");
+
   // AI-cast inline-rename state. Holds the aiCastId being edited and
   // the in-progress name value.
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -148,9 +158,12 @@ export default function ApproveCastClient({
     callback({ error: "Timed out. Try again." });
   }
 
-  // -------------------- USER-CAST regenerate (unchanged) -----------------
+  // -------------------- USER-CAST regenerate (with optional prompt) -----
 
-  async function regenerateUser(characterId: string) {
+  async function regenerateUser(
+    characterId: string,
+    promptAddition?: string
+  ) {
     if (regenById[characterId]?.status === "regenerating") return;
     setError(null);
     setRegenById((m) => ({
@@ -162,7 +175,13 @@ export default function ApproveCastClient({
     try {
       const res = await fetch(
         `/api/stories/${storyId}/cast/${characterId}/regenerate`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            promptAddition !== undefined ? { promptAddition } : {}
+          ),
+        }
       );
       if (!res.ok) throw new Error(await res.text());
       const body = (await res.json()) as { jobId: string };
@@ -516,6 +535,7 @@ export default function ApproveCastClient({
           {portraits.map((p) => {
             const regen = regenById[p.characterId];
             const isRegenerating = regen?.status === "regenerating";
+            const isEditingPrompt = editingUserPromptFor === p.characterId;
             return (
               <div
                 key={p.characterId}
@@ -532,15 +552,68 @@ export default function ApproveCastClient({
                 </div>
                 <div className="flex items-center justify-between p-3">
                   <span className="font-medium text-ink-900">{p.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => regenerateUser(p.characterId)}
-                    disabled={isRegenerating}
-                    className="text-sm font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline disabled:opacity-50"
-                  >
-                    {isRegenerating ? "Working…" : "Regenerate"}
-                  </button>
+                  {!isEditingPrompt && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Mirrors the AI-cast pattern (post-PR-#66):
+                        // Regenerate opens a prompt editor first so
+                        // the user never accidentally re-rolls
+                        // without a chance to tweak.
+                        setEditingUserPromptFor(p.characterId);
+                        setUserPromptDraft("");
+                      }}
+                      disabled={isRegenerating}
+                      className="text-sm font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline disabled:opacity-50"
+                    >
+                      {isRegenerating ? "Working…" : "Regenerate"}
+                    </button>
+                  )}
                 </div>
+                {isEditingPrompt && (
+                  <div className="border-t border-cream-300 bg-cream-100 px-3 py-3">
+                    <label className="block text-[11px] font-medium uppercase tracking-wide text-ink-500 mb-1">
+                      Tweak {p.name}&rsquo;s portrait{" "}
+                      <span className="text-ink-300 font-normal normal-case">
+                        (optional)
+                      </span>
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={userPromptDraft}
+                      onChange={(e) => setUserPromptDraft(e.target.value)}
+                      placeholder="e.g. wearing a blue jacket, happier expression"
+                      className="w-full rounded-md border border-cream-300 bg-cream-50 px-2 py-1.5 text-sm text-ink-900 placeholder:text-ink-300 focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-700/20"
+                    />
+                    <p className="mt-1 text-[11px] text-ink-300">
+                      Their facial features stay anchored to your photo.
+                    </p>
+                    <div className="mt-2 flex items-center justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingUserPromptFor(null);
+                          setUserPromptDraft("");
+                        }}
+                        className="text-xs font-medium text-ink-500 hover:text-ink-900"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          regenerateUser(p.characterId, userPromptDraft);
+                          setEditingUserPromptFor(null);
+                          setUserPromptDraft("");
+                        }}
+                        disabled={isRegenerating}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-moss-700 px-3 py-1.5 text-xs font-semibold text-cream-50 shadow-sm transition-colors hover:bg-moss-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-moss-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Regenerate
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {regen?.status === "failed" && (
                   <div className="px-3 pb-2 text-xs text-rose-600">
                     {regen.error}
