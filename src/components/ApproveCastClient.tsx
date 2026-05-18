@@ -466,7 +466,18 @@ export default function ApproveCastClient({
                       <div className="mt-2 flex items-center gap-3 text-sm">
                         <button
                           type="button"
-                          onClick={() => regenerateAi(p.aiCastId)}
+                          onClick={() => {
+                            // Regenerate always opens the prompt
+                            // editor first — same affordance as the
+                            // pencil icon. The user confirms the
+                            // (possibly unchanged) prompt by clicking
+                            // "Regenerate with this" inside the box,
+                            // so a fast-path "regen without thinking"
+                            // can't ship a portrait the user didn't
+                            // explicitly approve.
+                            setEditingPromptFor(p.aiCastId);
+                            setPromptDraft(p.promptAddition ?? "");
+                          }}
                           disabled={isRegenerating}
                           className="font-medium text-moss-700 underline-offset-2 transition-colors hover:text-moss-900 hover:underline disabled:opacity-50"
                         >
