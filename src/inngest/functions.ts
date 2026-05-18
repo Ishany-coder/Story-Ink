@@ -23,6 +23,7 @@ import {
   assistRegenerateText,
   classifyAssistIntent,
   generateAiCastPortrait,
+  generateBackgroundPortrait,
   generateCastPortrait,
   generatePageImageWithCastRefs,
   generateScript,
@@ -632,6 +633,16 @@ interface AiCastPortraitEntry {
   portraitUrl: string;
 }
 
+// Spec B: background portrait entry for the approval-gate job
+// payload. story_backgrounds is the source of truth for everything
+// else (description, user_prompt_addition); this is just enough for
+// the gate to render the Settings section without re-querying.
+interface BackgroundPortraitEntry {
+  bgId: string;
+  label: string;
+  portraitUrl: string;
+}
+
 // Discriminator for "is this characterId a user-cast UUID or a
 // script-invented name?" — used by Stage 1.5 to partition
 // script.pages[].characterIds.
@@ -874,6 +885,58 @@ export const generateStoryV2Fn = inngest.createFunction(
       }
     );
 
+    // Stage 1.6: extract canonical backgrounds from the script's
+    // top-level backgrounds[] array (Spec B). Pure validate-and-
+    // insert — the model already grouped + described in Stage 1.
+    // Schema-level refinement in parseScript already validated that
+    // every page's `setting` matches one of these labels.
+    const bgRows = await step.run("extract-backgrounds", async () => {
+      const admin = supabaseAdmin();
+      const bgs = script.backgrounds ?? [];
+      if (bgs.length === 0) {
+        return [] as import("@/lib/types").Background[];
+      }
+
+      // Idempotency: a previous successful run for this story may
+      // have already inserted these. Look up + skip duplicates by
+      // case-insensitive label match.
+      const { data: existing } = await admin
+        .from("story_backgrounds")
+        .select("id, label")
+        .eq("story_id", storyId);
+      const existingByLabel = new Map<string, string>();
+      for (const row of existing ?? []) {
+        existingByLabel.set(row.label.toLowerCase(), row.id);
+      }
+
+      const toInsert: Array<{
+        story_id: string;
+        label: string;
+        description: string;
+      }> = [];
+      for (const bg of bgs) {
+        if (existingByLabel.has(bg.label.toLowerCase())) continue;
+        toInsert.push({
+          story_id: storyId,
+          label: bg.label,
+          description: bg.description,
+        });
+      }
+
+      if (toInsert.length > 0) {
+        const { error } = await admin
+          .from("story_backgrounds")
+          .insert(toInsert);
+        if (error) throw new Error(`insert backgrounds: ${error.message}`);
+      }
+
+      const { data: all } = await admin
+        .from("story_backgrounds")
+        .select("*")
+        .eq("story_id", storyId);
+      return (all ?? []) as import("@/lib/types").Background[];
+    });
+
     // Stage 2.5: portraits for the AI-cast rows extracted in Stage
     // 1.5. Each row stores its own portrait_url (no cross-story
     // caching — descriptions are per-story). Rows that already have
@@ -920,11 +983,52 @@ export const generateStoryV2Fn = inngest.createFunction(
       }
     );
 
+    // Stage 2.6: portraits for the backgrounds extracted in Stage
+    // 1.6. Each row stores its own portrait_url (no cross-story
+    // caching). Same null-check semantics as Stage 2.5: rows with
+    // an existing portrait_url skip regeneration so retries/resumes
+    // don't redo finished work.
+    const bgPortraits: BackgroundPortraitEntry[] = await step.run(
+      "generate-background-portraits",
+      async () => {
+        if (bgRows.length === 0) return [];
+        const admin = supabaseAdmin();
+        return Promise.all(
+          bgRows.map(async (row): Promise<BackgroundPortraitEntry> => {
+            if (row.portrait_url) {
+              return {
+                bgId: row.id,
+                label: row.label,
+                portraitUrl: row.portrait_url,
+              };
+            }
+            const dataUri = await generateBackgroundPortrait({
+              label: row.label,
+              description: row.description,
+              userPromptAddition: row.user_prompt_addition,
+              artStylePromptScaffold: ctx.style.prompt_scaffold,
+            });
+            const portraitUrl = await uploadGeneratedImage(dataUri);
+            await admin
+              .from("story_backgrounds")
+              .update({ portrait_url: portraitUrl })
+              .eq("id", row.id);
+            return {
+              bgId: row.id,
+              label: row.label,
+              portraitUrl,
+            };
+          })
+        );
+      }
+    );
+
     await markAwaitingCastApproval(jobId, {
       stage: "awaiting_cast_approval",
       storyId,
       portraits,
       aiPortraits,
+      bgPortraits,
     });
 
     return { jobId, storyId, awaitingCastApproval: true };
@@ -992,6 +1096,15 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         .eq("story_id", storyId)
         .not("portrait_url", "is", null);
 
+      // Backgrounds for this story (Spec B). Pages reference these
+      // by `setting` label. Stage 3 attaches the matching portrait
+      // as the first image part in the page-image call.
+      const { data: backgrounds } = await admin
+        .from("story_backgrounds")
+        .select("label, portrait_url")
+        .eq("story_id", storyId)
+        .not("portrait_url", "is", null);
+
       // Re-parse the wizard prompt payload so the per-page step has
       // access to memory photo URLs + captions. The script-stage
       // refinement already guarantees every memory id is referenced at
@@ -1021,6 +1134,7 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         portraits: portraits ?? [],
         cast: cast ?? [],
         aiCast: aiCast ?? [],
+        backgrounds: backgrounds ?? [],
         memories,
       };
     });
@@ -1044,6 +1158,19 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
         resolveById.set(a.name, {
           name: a.name,
           portraitUrl: a.portrait_url,
+        });
+      }
+    }
+    // Spec B: background label → portrait URL. Per-page lookup tries
+    // the page's `setting` against this map; misses (empty setting,
+    // or a label without a generated portrait) fall through to
+    // "no background ref" — same as today's pre-Spec-B behavior.
+    const bgByLabel = new Map<string, { label: string; portraitUrl: string }>();
+    for (const bg of ctx.backgrounds) {
+      if (bg.portrait_url) {
+        bgByLabel.set(bg.label, {
+          label: bg.label,
+          portraitUrl: bg.portrait_url,
         });
       }
     }
@@ -1081,11 +1208,21 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
                 x !== null
             );
 
+          // Resolve this page's setting → canonical background
+          // portrait (Spec B). Empty / missing / unmatched setting
+          // falls through to no background ref.
+          const settingLabel = p.setting?.trim();
+          const backgroundPortrait =
+            settingLabel && bgByLabel.has(settingLabel)
+              ? bgByLabel.get(settingLabel)
+              : null;
+
           const dataUri = await generatePageImageWithCastRefs({
             sceneDescription: p.sceneDescription,
             artStylePromptScaffold: ctx.style.prompt_scaffold,
             castPortraitsOnPage: castOnPage,
             memoryRefsOnPage,
+            backgroundPortrait,
           });
           // Upload original + StoryInk-watermarked variant. The
           // reader / canvas pick between the two based on the
@@ -1304,25 +1441,35 @@ export const regenerateAiCastPortraitFn = inngest.createFunction(
   }
 );
 
-// Spec A: re-run Stage 1 (script) after the user removes an AI-cast
-// member at the approval gate. The removed name is added to the
-// script prompt's excludedAiCharacterNames; the new script may
-// surface a different supporting cast. Stage 1.5 + Stage 2.5 then
-// reconcile story_ai_cast against the new script.
-export const regenerateScriptAfterAiCastRemovalFn = inngest.createFunction(
+// Spec A + Spec B: re-run Stage 1 (script) after the user removes
+// an AI-cast member OR a background at the approval gate. The
+// removed name/label is added to the matching exclusion list on
+// the script prompt; the new script may surface a different
+// supporting cast and/or different backgrounds. Stages 1.5, 1.6,
+// 2.5, 2.6 reconcile story_ai_cast + story_backgrounds against
+// the new script. Both triggers route here so the script + cast +
+// backgrounds always end up in sync after any single removal.
+export const regenerateScriptAfterRemovalFn = inngest.createFunction(
   {
-    id: "regenerate-script-after-ai-cast-removal",
-    name: "Re-run script + AI cast after removal",
+    id: "regenerate-script-after-removal",
+    name: "Re-run script + cast + backgrounds after removal",
     retries: TEXT_RETRIES,
-    triggers: [{ event: EVENTS.aiCastRemoved }],
+    triggers: [
+      { event: EVENTS.aiCastRemoved },
+      { event: EVENTS.backgroundRemoved },
+    ],
     onFailure: async ({ event, error }) => onInngestFailure(event, error),
   },
   async ({ event, step }) => {
-    const { jobId, storyId, removedName } = event.data as {
+    const data = event.data as {
       jobId: string;
       storyId: string;
-      removedName: string;
+      removedName?: string; // aiCastRemoved payload
+      removedLabel?: string; // backgroundRemoved payload
     };
+    const { jobId, storyId } = data;
+    const excludedAiCharacterNames = data.removedName ? [data.removedName] : [];
+    const excludedBackgroundLabels = data.removedLabel ? [data.removedLabel] : [];
     await markRunning(jobId);
 
     const ctx: StoryV2Context = await step.run("load-context", async () => {
@@ -1355,29 +1502,22 @@ export const regenerateScriptAfterAiCastRemovalFn = inngest.createFunction(
       };
     });
 
-    // Collect every name currently excluded for this story. We
-    // store this in stories.prompt? No — keep it as a one-shot
-    // payload (the spec calls this out). For now, gather the
-    // removedName plus any OTHER previously-removed names by
-    // diff'ing the live story_ai_cast against the script's
-    // characterIds.
-    const excludedAiCharacterNames = await step.run(
-      "collect-excluded-names",
-      async () => {
-        return [removedName];
-      }
-    );
-
-    // Drop any cached AI-cast rows. They'll be re-extracted from
-    // the new script. (User-cast portraits in character_portraits
-    // stay — they're keyed by character_id, not by script.)
-    await step.run("clear-ai-cast", async () => {
+    // Drop any cached AI-cast + background rows. They'll be re-
+    // extracted from the new script. (User-cast portraits in
+    // character_portraits stay — they're keyed by character_id,
+    // not by script content.)
+    await step.run("clear-derived-rows", async () => {
       const admin = supabaseAdmin();
-      const { error } = await admin
+      const { error: castErr } = await admin
         .from("story_ai_cast")
         .delete()
         .eq("story_id", storyId);
-      if (error) throw new Error(`clear ai cast: ${error.message}`);
+      if (castErr) throw new Error(`clear ai cast: ${castErr.message}`);
+      const { error: bgErr } = await admin
+        .from("story_backgrounds")
+        .delete()
+        .eq("story_id", storyId);
+      if (bgErr) throw new Error(`clear backgrounds: ${bgErr.message}`);
     });
 
     const script = await step.run("regen-script", async () => {
@@ -1391,6 +1531,7 @@ export const regenerateScriptAfterAiCastRemovalFn = inngest.createFunction(
         memories,
         pageCount: ctx.story.page_count,
         excludedAiCharacterNames,
+        excludedBackgroundLabels,
       });
       const userTitle = ctx.story.title?.trim();
       const finalTitle =
@@ -1499,6 +1640,59 @@ export const regenerateScriptAfterAiCastRemovalFn = inngest.createFunction(
       }
     );
 
+    // Stage 1.6 again — re-extract backgrounds from the new script.
+    const newBgRows = await step.run("re-extract-backgrounds", async () => {
+      const admin = supabaseAdmin();
+      const bgs = script.backgrounds ?? [];
+      if (bgs.length === 0)
+        return [] as import("@/lib/types").Background[];
+
+      const toInsert = bgs.map((bg) => ({
+        story_id: storyId,
+        label: bg.label,
+        description: bg.description,
+      }));
+      const { error } = await admin
+        .from("story_backgrounds")
+        .insert(toInsert);
+      if (error) throw new Error(`insert backgrounds: ${error.message}`);
+      const { data: all } = await admin
+        .from("story_backgrounds")
+        .select("*")
+        .eq("story_id", storyId);
+      return (all ?? []) as import("@/lib/types").Background[];
+    });
+
+    // Stage 2.6 again — generate portraits for the new background
+    // rows.
+    const bgPortraits: BackgroundPortraitEntry[] = await step.run(
+      "re-generate-background-portraits",
+      async () => {
+        if (newBgRows.length === 0) return [];
+        const admin = supabaseAdmin();
+        return Promise.all(
+          newBgRows.map(async (row): Promise<BackgroundPortraitEntry> => {
+            const dataUri = await generateBackgroundPortrait({
+              label: row.label,
+              description: row.description,
+              userPromptAddition: row.user_prompt_addition,
+              artStylePromptScaffold: ctx.style.prompt_scaffold,
+            });
+            const portraitUrl = await uploadGeneratedImage(dataUri);
+            await admin
+              .from("story_backgrounds")
+              .update({ portrait_url: portraitUrl })
+              .eq("id", row.id);
+            return {
+              bgId: row.id,
+              label: row.label,
+              portraitUrl,
+            };
+          })
+        );
+      }
+    );
+
     // Re-read user-cast portraits so the new awaiting-approval payload
     // matches the format generateStoryV2Fn produces. Stage 3 reads
     // straight from the DB so it doesn't depend on this payload, but
@@ -1541,9 +1735,93 @@ export const regenerateScriptAfterAiCastRemovalFn = inngest.createFunction(
       storyId,
       portraits,
       aiPortraits,
+      bgPortraits,
     });
 
     return { jobId, storyId, awaitingCastApproval: true };
+  }
+);
+
+// Spec B: regenerate a single background portrait. Mirrors
+// regenerateAiCastPortraitFn — owner-side state lives on
+// story_backgrounds (description + optional user_prompt_addition).
+export const regenerateBackgroundFn = inngest.createFunction(
+  {
+    id: "regenerate-background",
+    name: "Regenerate one background portrait",
+    retries: IMAGE_RETRIES,
+    triggers: [{ event: EVENTS.backgroundRegenerate }],
+    onFailure: async ({ event, error }) => onInngestFailure(event, error),
+  },
+  async ({ event, step }) => {
+    const { jobId, storyId, bgId, promptAddition } = event.data as {
+      jobId: string;
+      storyId: string;
+      bgId: string;
+      promptAddition?: string;
+    };
+    await markRunning(jobId);
+
+    await step.run("regen", async () => {
+      const admin = supabaseAdmin();
+      const { data: story } = await admin
+        .from("stories")
+        .select("art_style_id")
+        .eq("id", storyId)
+        .single<{ art_style_id: string }>();
+      if (!story) throw new Error("story missing");
+
+      const { data: row } = await admin
+        .from("story_backgrounds")
+        .select("*")
+        .eq("id", bgId)
+        .single<import("@/lib/types").Background>();
+      if (!row) throw new Error("background row missing");
+
+      const { data: style } = await admin
+        .from("art_styles")
+        .select("prompt_scaffold")
+        .eq("id", story.art_style_id)
+        .single<{ prompt_scaffold: string }>();
+      if (!style) throw new Error("style missing");
+
+      // Same prompt-addition handling as regenerateAiCastPortraitFn:
+      // persist on the row before regenerating so a follow-up
+      // regenerate (no override) replays the same prompt. Empty
+      // string clears.
+      const effectiveAddition =
+        promptAddition === undefined
+          ? row.user_prompt_addition
+          : promptAddition;
+      if (promptAddition !== undefined) {
+        await admin
+          .from("story_backgrounds")
+          .update({ user_prompt_addition: promptAddition || null })
+          .eq("id", bgId);
+      }
+
+      const dataUri = await generateBackgroundPortrait({
+        label: row.label,
+        description: row.description,
+        userPromptAddition: effectiveAddition,
+        artStylePromptScaffold: style.prompt_scaffold,
+      });
+      const portraitUrl = await uploadGeneratedImage(dataUri);
+
+      const { error: updateErr } = await admin
+        .from("story_backgrounds")
+        .update({ portrait_url: portraitUrl })
+        .eq("id", bgId);
+      if (updateErr) {
+        throw new Error(`background portrait update: ${updateErr.message}`);
+      }
+
+      await markDone(jobId, {
+        stage: "background_regenerated",
+        bgId,
+        portraitUrl,
+      });
+    });
   }
 );
 
@@ -1596,5 +1874,6 @@ export const allFunctions = [
   generatePagesAfterApprovalFn,
   regenerateCastPortraitFn,
   regenerateAiCastPortraitFn,
-  regenerateScriptAfterAiCastRemovalFn,
+  regenerateBackgroundFn,
+  regenerateScriptAfterRemovalFn,
 ];

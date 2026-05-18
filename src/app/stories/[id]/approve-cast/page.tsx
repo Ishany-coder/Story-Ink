@@ -82,20 +82,39 @@ export default async function ApproveCastPage({ params }: Props) {
       promptAddition: r.user_prompt_addition,
     }));
 
+  // Spec B: backgrounds. Same fresh-read-from-DB pattern as AI
+  // cast — renames/regens land here before the cached job payload
+  // catches up.
+  const { data: bgRows } = await admin
+    .from("story_backgrounds")
+    .select("id, label, portrait_url, user_prompt_addition")
+    .eq("story_id", story.id)
+    .not("portrait_url", "is", null)
+    .order("created_at", { ascending: true });
+  const backgrounds = (bgRows ?? [])
+    .filter((r): r is typeof r & { portrait_url: string } => r.portrait_url !== null)
+    .map((r) => ({
+      bgId: r.id,
+      label: r.label,
+      portraitUrl: r.portrait_url,
+      promptAddition: r.user_prompt_addition,
+    }));
+
   return (
     <main className="mx-auto max-w-3xl px-4 pt-8 sm:pt-12 pb-12 sm:pb-16">
       <h1 className="mb-2 font-[family-name:var(--font-display)] text-2xl font-semibold text-ink-900">
-        Approve your cast
+        Approve your story
       </h1>
       <p className="mb-6 text-sm text-ink-500">
-        These portraits will be used as the visual reference for every page. If
-        anyone looks wrong, regenerate just that character before the pages
+        These portraits and settings will be used as the visual reference for
+        every page. If anything looks wrong, regenerate it before the pages
         render.
       </p>
       <ApproveCastClient
         storyId={story.id}
         portraits={portraits}
         aiPortraits={aiPortraits}
+        backgrounds={backgrounds}
       />
     </main>
   );

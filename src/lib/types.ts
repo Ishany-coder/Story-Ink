@@ -287,6 +287,22 @@ export interface AiCastMember {
   updated_at: string;
 }
 
+// Canonical backgrounds: one row per distinct location used in a
+// story. Stage 1.6 extracts them from the script's top-level
+// `backgrounds[]` array. Stage 2.6 generates a wide-angle portrait.
+// Stage 3 attaches the portrait as a visual anchor on every page
+// whose `setting` matches `label`.
+export interface Background {
+  id: string;
+  story_id: string;
+  label: string;
+  description: string;
+  user_prompt_addition: string | null;
+  portrait_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ArtStyle {
   id: string;
   display_name: string;
