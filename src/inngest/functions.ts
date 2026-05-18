@@ -1050,6 +1050,260 @@ export const generatePagesAfterApprovalFn = inngest.createFunction(
     };
     await markRunning(jobId);
 
+    // Defer-remove fix: the user can remove AI-cast members or
+    // backgrounds at the approval gate without triggering a rewrite
+    // on each delete (used to live in regenerateScriptAfterRemovalFn,
+    // now removed). Detect those removals here by diffing the script
+    // against the rows that still exist, and rewrite + re-extract
+    // inline before per-page generation. Empty diffs = no-op, fast
+    // path is identical to today.
+    const exclusions = await step.run("detect-exclusions", async () => {
+      const admin = supabaseAdmin();
+      const { data: storyRow } = await admin
+        .from("stories")
+        .select("script")
+        .eq("id", storyId)
+        .single<{ script: import("@/lib/types").Script | null }>();
+      const script = storyRow?.script;
+      if (!script) {
+        return { excludedAiCharacterNames: [], excludedBackgroundLabels: [] };
+      }
+
+      // Names referenced in characterIds that are not UUIDs (i.e.
+      // AI-cast names) — set.
+      const referencedNames = new Set<string>();
+      for (const page of script.pages) {
+        for (const id of page.characterIds) {
+          if (!UUID_RE.test(id)) referencedNames.add(id);
+        }
+      }
+      // Background labels referenced in setting fields — set.
+      const referencedLabels = new Set<string>();
+      for (const page of script.pages) {
+        const s = page.setting?.trim();
+        if (s) referencedLabels.add(s);
+      }
+
+      const { data: existingAi } = await admin
+        .from("story_ai_cast")
+        .select("name")
+        .eq("story_id", storyId);
+      const existingAiNames = new Set(
+        (existingAi ?? []).map((r) => r.name)
+      );
+      const { data: existingBg } = await admin
+        .from("story_backgrounds")
+        .select("label")
+        .eq("story_id", storyId);
+      const existingBgLabels = new Set(
+        (existingBg ?? []).map((r) => r.label)
+      );
+
+      const excludedAiCharacterNames = Array.from(referencedNames).filter(
+        (n) => !existingAiNames.has(n)
+      );
+      const excludedBackgroundLabels = Array.from(referencedLabels).filter(
+        (l) => !existingBgLabels.has(l)
+      );
+      return { excludedAiCharacterNames, excludedBackgroundLabels };
+    });
+
+    // Rewrite-cycle: only runs when the user removed something at
+    // the approval gate. Mirrors the structure of generateStoryV2Fn
+    // (Stage 1 → 1.5 → 1.6 → 2.5 → 2.6), then falls through to the
+    // existing per-page generation logic on the (now updated) state.
+    if (
+      exclusions.excludedAiCharacterNames.length > 0 ||
+      exclusions.excludedBackgroundLabels.length > 0
+    ) {
+      const rwCtx: StoryV2Context = await step.run(
+        "rewrite-load-context",
+        async () => {
+          const admin = supabaseAdmin();
+          const { data: story, error: storyErr } = await admin
+            .from("stories")
+            .select(
+              "id, user_id, title, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids, default_text_size"
+            )
+            .eq("id", storyId)
+            .single<StoryV2Context["story"]>();
+          if (storyErr || !story)
+            throw new Error(`load story: ${storyErr?.message}`);
+          const { data: cast } = await admin
+            .from("characters")
+            .select("*")
+            .in("id", story.cast_character_ids);
+          const { data: style, error: styleErr } = await admin
+            .from("art_styles")
+            .select("id, display_name, prompt_scaffold")
+            .eq("id", story.art_style_id)
+            .single<StoryV2Context["style"]>();
+          if (styleErr || !style)
+            throw new Error(`load style: ${styleErr?.message}`);
+          return {
+            story,
+            cast: (cast ?? []) as import("@/lib/types").Character[],
+            style,
+          };
+        }
+      );
+
+      // Drop any remaining AI-cast + background rows — they'll be
+      // re-extracted from the new script. The user-cast portraits
+      // in character_portraits stay (keyed by character_id, not by
+      // script content).
+      await step.run("rewrite-clear-derived", async () => {
+        const admin = supabaseAdmin();
+        await admin.from("story_ai_cast").delete().eq("story_id", storyId);
+        await admin
+          .from("story_backgrounds")
+          .delete()
+          .eq("story_id", storyId);
+      });
+
+      const newScript = await step.run("rewrite-script", async () => {
+        const { outline, memories } = parsePromptPayload(rwCtx.story.prompt);
+        const s = await generateScript({
+          recipientType: rwCtx.story.recipient_type,
+          occasion: rwCtx.story.occasion ?? undefined,
+          storyTone: rwCtx.story.story_tone,
+          cast: rwCtx.cast,
+          outline,
+          memories,
+          pageCount: rwCtx.story.page_count,
+          excludedAiCharacterNames: exclusions.excludedAiCharacterNames,
+          excludedBackgroundLabels: exclusions.excludedBackgroundLabels,
+        });
+        const userTitle = rwCtx.story.title?.trim();
+        const finalTitle =
+          userTitle && userTitle !== "Untitled story" ? userTitle : s.title;
+        const { error } = await supabaseAdmin()
+          .from("stories")
+          .update({ script: s, title: finalTitle })
+          .eq("id", storyId);
+        if (error) throw new Error(`persist script: ${error.message}`);
+        return s;
+      });
+
+      // Stage 1.5 again — extract AI cast from the new script.
+      const rwAiRows = await step.run("rewrite-extract-ai-cast", async () => {
+        const admin = supabaseAdmin();
+        const nameToScenes = new Map<string, string[]>();
+        for (const page of newScript.pages) {
+          for (const id of page.characterIds) {
+            if (UUID_RE.test(id)) continue;
+            const scenes = nameToScenes.get(id) ?? [];
+            scenes.push(page.sceneDescription);
+            nameToScenes.set(id, scenes);
+          }
+        }
+        if (nameToScenes.size === 0)
+          return [] as import("@/lib/types").AiCastMember[];
+
+        const toInsert: Array<{
+          story_id: string;
+          name: string;
+          role_label: string | null;
+          kind: "person" | "pet";
+          description: string;
+        }> = [];
+        for (const [name, scenes] of nameToScenes) {
+          const inferred = await inferAiCastDescription({
+            name,
+            sceneDescriptions: scenes,
+            recipientType: rwCtx.story.recipient_type,
+            occasion: rwCtx.story.occasion ?? undefined,
+          });
+          toInsert.push({
+            story_id: storyId,
+            name,
+            role_label: inferred?.role ?? "supporting character",
+            kind: inferred?.kind ?? "person",
+            description:
+              inferred?.description ??
+              `${name} appears in this storybook as a supporting character. Render with consistent features across pages.`,
+          });
+        }
+        if (toInsert.length > 0) {
+          const { error } = await admin
+            .from("story_ai_cast")
+            .insert(toInsert);
+          if (error) throw new Error(`insert ai cast: ${error.message}`);
+        }
+        const { data: all } = await admin
+          .from("story_ai_cast")
+          .select("*")
+          .eq("story_id", storyId);
+        return (all ?? []) as import("@/lib/types").AiCastMember[];
+      });
+
+      // Stage 2.5 again — portraits for new AI cast.
+      await step.run("rewrite-gen-ai-cast-portraits", async () => {
+        if (rwAiRows.length === 0) return;
+        const admin = supabaseAdmin();
+        await Promise.all(
+          rwAiRows.map(async (row) => {
+            const dataUri = await generateAiCastPortrait({
+              name: row.name,
+              kind: row.kind,
+              roleLabel: row.role_label,
+              description: row.description,
+              userPromptAddition: row.user_prompt_addition,
+              artStylePromptScaffold: rwCtx.style.prompt_scaffold,
+            });
+            const portraitUrl = await uploadGeneratedImage(dataUri);
+            await admin
+              .from("story_ai_cast")
+              .update({ portrait_url: portraitUrl })
+              .eq("id", row.id);
+          })
+        );
+      });
+
+      // Stage 1.6 again — extract backgrounds from the new script.
+      const rwBgRows = await step.run("rewrite-extract-bg", async () => {
+        const admin = supabaseAdmin();
+        const bgs = newScript.backgrounds ?? [];
+        if (bgs.length === 0)
+          return [] as import("@/lib/types").Background[];
+        const toInsert = bgs.map((bg) => ({
+          story_id: storyId,
+          label: bg.label,
+          description: bg.description,
+        }));
+        const { error } = await admin
+          .from("story_backgrounds")
+          .insert(toInsert);
+        if (error) throw new Error(`insert backgrounds: ${error.message}`);
+        const { data: all } = await admin
+          .from("story_backgrounds")
+          .select("*")
+          .eq("story_id", storyId);
+        return (all ?? []) as import("@/lib/types").Background[];
+      });
+
+      // Stage 2.6 again — portraits for new backgrounds.
+      await step.run("rewrite-gen-bg-portraits", async () => {
+        if (rwBgRows.length === 0) return;
+        const admin = supabaseAdmin();
+        await Promise.all(
+          rwBgRows.map(async (row) => {
+            const dataUri = await generateBackgroundPortrait({
+              label: row.label,
+              description: row.description,
+              userPromptAddition: row.user_prompt_addition,
+              artStylePromptScaffold: rwCtx.style.prompt_scaffold,
+            });
+            const portraitUrl = await uploadGeneratedImage(dataUri);
+            await admin
+              .from("story_backgrounds")
+              .update({ portrait_url: portraitUrl })
+              .eq("id", row.id);
+          })
+        );
+      });
+    }
+
     const ctx = await step.run("load-pages-context", async () => {
       const admin = supabaseAdmin();
       const { data: story, error } = await admin
@@ -1447,307 +1701,6 @@ export const regenerateAiCastPortraitFn = inngest.createFunction(
   }
 );
 
-// Spec A + Spec B: re-run Stage 1 (script) after the user removes
-// an AI-cast member OR a background at the approval gate. The
-// removed name/label is added to the matching exclusion list on
-// the script prompt; the new script may surface a different
-// supporting cast and/or different backgrounds. Stages 1.5, 1.6,
-// 2.5, 2.6 reconcile story_ai_cast + story_backgrounds against
-// the new script. Both triggers route here so the script + cast +
-// backgrounds always end up in sync after any single removal.
-export const regenerateScriptAfterRemovalFn = inngest.createFunction(
-  {
-    id: "regenerate-script-after-removal",
-    name: "Re-run script + cast + backgrounds after removal",
-    retries: TEXT_RETRIES,
-    triggers: [
-      { event: EVENTS.aiCastRemoved },
-      { event: EVENTS.backgroundRemoved },
-    ],
-    onFailure: async ({ event, error }) => onInngestFailure(event, error),
-  },
-  async ({ event, step }) => {
-    const data = event.data as {
-      jobId: string;
-      storyId: string;
-      removedName?: string; // aiCastRemoved payload
-      removedLabel?: string; // backgroundRemoved payload
-    };
-    const { jobId, storyId } = data;
-    const excludedAiCharacterNames = data.removedName ? [data.removedName] : [];
-    const excludedBackgroundLabels = data.removedLabel ? [data.removedLabel] : [];
-    await markRunning(jobId);
-
-    const ctx: StoryV2Context = await step.run("load-context", async () => {
-      const admin = supabaseAdmin();
-      const { data: story, error: storyErr } = await admin
-        .from("stories")
-        .select(
-          "id, user_id, title, prompt, page_count, recipient_type, occasion, story_tone, art_style_id, cast_character_ids, default_text_size"
-        )
-        .eq("id", storyId)
-        .single<StoryV2Context["story"]>();
-      if (storyErr || !story) throw new Error(`load story: ${storyErr?.message}`);
-
-      const { data: cast } = await admin
-        .from("characters")
-        .select("*")
-        .in("id", story.cast_character_ids);
-
-      const { data: style, error: styleErr } = await admin
-        .from("art_styles")
-        .select("id, display_name, prompt_scaffold")
-        .eq("id", story.art_style_id)
-        .single<StoryV2Context["style"]>();
-      if (styleErr || !style) throw new Error(`load style: ${styleErr?.message}`);
-
-      return {
-        story,
-        cast: (cast ?? []) as import("@/lib/types").Character[],
-        style,
-      };
-    });
-
-    // Drop any cached AI-cast + background rows. They'll be re-
-    // extracted from the new script. (User-cast portraits in
-    // character_portraits stay — they're keyed by character_id,
-    // not by script content.)
-    await step.run("clear-derived-rows", async () => {
-      const admin = supabaseAdmin();
-      const { error: castErr } = await admin
-        .from("story_ai_cast")
-        .delete()
-        .eq("story_id", storyId);
-      if (castErr) throw new Error(`clear ai cast: ${castErr.message}`);
-      const { error: bgErr } = await admin
-        .from("story_backgrounds")
-        .delete()
-        .eq("story_id", storyId);
-      if (bgErr) throw new Error(`clear backgrounds: ${bgErr.message}`);
-    });
-
-    const script = await step.run("regen-script", async () => {
-      const { outline, memories } = parsePromptPayload(ctx.story.prompt);
-      const s = await generateScript({
-        recipientType: ctx.story.recipient_type,
-        occasion: ctx.story.occasion ?? undefined,
-        storyTone: ctx.story.story_tone,
-        cast: ctx.cast,
-        outline,
-        memories,
-        pageCount: ctx.story.page_count,
-        excludedAiCharacterNames,
-        excludedBackgroundLabels,
-      });
-      const userTitle = ctx.story.title?.trim();
-      const finalTitle =
-        userTitle && userTitle !== "Untitled story" ? userTitle : s.title;
-      const { error } = await supabaseAdmin()
-        .from("stories")
-        .update({ script: s, title: finalTitle })
-        .eq("id", storyId);
-      if (error) throw new Error(`persist script: ${error.message}`);
-      return s;
-    });
-
-    // Stage 1.5 again — extract AI cast from the new script.
-    const newAiCastRows = await step.run("re-extract-ai-cast", async () => {
-      const admin = supabaseAdmin();
-      const userCastIds = new Set(ctx.cast.map((c) => c.id));
-      const nameToScenes = new Map<string, string[]>();
-      for (const page of script.pages) {
-        for (const id of page.characterIds) {
-          if (UUID_RE.test(id)) continue;
-          const scenes = nameToScenes.get(id) ?? [];
-          scenes.push(page.sceneDescription);
-          nameToScenes.set(id, scenes);
-        }
-        // Hallucinated UUIDs warning (rare)
-        for (const id of page.characterIds) {
-          if (UUID_RE.test(id) && !userCastIds.has(id)) {
-            console.warn(
-              "[stage 1.5 re-run] script references unknown UUID:",
-              id
-            );
-          }
-        }
-      }
-      if (nameToScenes.size === 0)
-        return [] as import("@/lib/types").AiCastMember[];
-
-      const toInsert: Array<{
-        story_id: string;
-        name: string;
-        role_label: string | null;
-        kind: "person" | "pet";
-        description: string;
-      }> = [];
-      for (const [name, scenes] of nameToScenes) {
-        const inferred = await inferAiCastDescription({
-          name,
-          sceneDescriptions: scenes,
-          recipientType: ctx.story.recipient_type,
-          occasion: ctx.story.occasion ?? undefined,
-        });
-        toInsert.push({
-          story_id: storyId,
-          name,
-          role_label: inferred?.role ?? "supporting character",
-          kind: inferred?.kind ?? "person",
-          description:
-            inferred?.description ??
-            `${name} appears in this storybook as a supporting character. Render with consistent features across pages.`,
-        });
-      }
-      if (toInsert.length > 0) {
-        const { error } = await admin.from("story_ai_cast").insert(toInsert);
-        if (error) throw new Error(`insert ai cast: ${error.message}`);
-      }
-      const { data: all } = await admin
-        .from("story_ai_cast")
-        .select("*")
-        .eq("story_id", storyId);
-      return (all ?? []) as import("@/lib/types").AiCastMember[];
-    });
-
-    // Stage 2.5 again — generate portraits for any newly-extracted
-    // AI cast. Existing user-cast portraits in character_portraits
-    // are still valid (keyed by character_id, not by script content)
-    // so this re-run does NOT touch them.
-    const aiPortraits: AiCastPortraitEntry[] = await step.run(
-      "re-generate-ai-cast-portraits",
-      async () => {
-        if (newAiCastRows.length === 0) return [];
-        const admin = supabaseAdmin();
-        return Promise.all(
-          newAiCastRows.map(async (row): Promise<AiCastPortraitEntry> => {
-            const dataUri = await generateAiCastPortrait({
-              name: row.name,
-              kind: row.kind,
-              roleLabel: row.role_label,
-              description: row.description,
-              userPromptAddition: row.user_prompt_addition,
-              artStylePromptScaffold: ctx.style.prompt_scaffold,
-            });
-            const portraitUrl = await uploadGeneratedImage(dataUri);
-            await admin
-              .from("story_ai_cast")
-              .update({ portrait_url: portraitUrl })
-              .eq("id", row.id);
-            return {
-              aiCastId: row.id,
-              name: row.name,
-              roleLabel: row.role_label,
-              kind: row.kind,
-              portraitUrl,
-            };
-          })
-        );
-      }
-    );
-
-    // Stage 1.6 again — re-extract backgrounds from the new script.
-    const newBgRows = await step.run("re-extract-backgrounds", async () => {
-      const admin = supabaseAdmin();
-      const bgs = script.backgrounds ?? [];
-      if (bgs.length === 0)
-        return [] as import("@/lib/types").Background[];
-
-      const toInsert = bgs.map((bg) => ({
-        story_id: storyId,
-        label: bg.label,
-        description: bg.description,
-      }));
-      const { error } = await admin
-        .from("story_backgrounds")
-        .insert(toInsert);
-      if (error) throw new Error(`insert backgrounds: ${error.message}`);
-      const { data: all } = await admin
-        .from("story_backgrounds")
-        .select("*")
-        .eq("story_id", storyId);
-      return (all ?? []) as import("@/lib/types").Background[];
-    });
-
-    // Stage 2.6 again — generate portraits for the new background
-    // rows.
-    const bgPortraits: BackgroundPortraitEntry[] = await step.run(
-      "re-generate-background-portraits",
-      async () => {
-        if (newBgRows.length === 0) return [];
-        const admin = supabaseAdmin();
-        return Promise.all(
-          newBgRows.map(async (row): Promise<BackgroundPortraitEntry> => {
-            const dataUri = await generateBackgroundPortrait({
-              label: row.label,
-              description: row.description,
-              userPromptAddition: row.user_prompt_addition,
-              artStylePromptScaffold: ctx.style.prompt_scaffold,
-            });
-            const portraitUrl = await uploadGeneratedImage(dataUri);
-            await admin
-              .from("story_backgrounds")
-              .update({ portrait_url: portraitUrl })
-              .eq("id", row.id);
-            return {
-              bgId: row.id,
-              label: row.label,
-              portraitUrl,
-            };
-          })
-        );
-      }
-    );
-
-    // Re-read user-cast portraits so the new awaiting-approval payload
-    // matches the format generateStoryV2Fn produces. Stage 3 reads
-    // straight from the DB so it doesn't depend on this payload, but
-    // the approve-cast UI does.
-    const portraits = await step.run("read-user-cast-portraits", async () => {
-      const admin = supabaseAdmin();
-      const usedIds = new Set<string>();
-      for (const p of script.pages)
-        for (const id of p.characterIds) {
-          if (UUID_RE.test(id)) usedIds.add(id);
-        }
-      const usedCast = ctx.cast.filter((c) => usedIds.has(c.id));
-      if (usedCast.length === 0) return [] as CastPortraitEntry[];
-      const { data: rows } = await admin
-        .from("character_portraits")
-        .select("character_id, portrait_url")
-        .in(
-          "character_id",
-          usedCast.map((c) => c.id)
-        )
-        .eq("art_style_id", ctx.style.id);
-      const byId = new Map((rows ?? []).map((r) => [r.character_id, r.portrait_url]));
-      return usedCast
-        .map((c): CastPortraitEntry | null => {
-          const url = byId.get(c.id);
-          return url
-            ? {
-                characterId: c.id,
-                name: c.name,
-                portraitUrl: url,
-                cached: true,
-              }
-            : null;
-        })
-        .filter((x): x is CastPortraitEntry => x !== null);
-    });
-
-    await markAwaitingCastApproval(jobId, {
-      stage: "awaiting_cast_approval",
-      storyId,
-      portraits,
-      aiPortraits,
-      bgPortraits,
-    });
-
-    return { jobId, storyId, awaitingCastApproval: true };
-  }
-);
-
 // Spec B: regenerate a single background portrait. Mirrors
 // regenerateAiCastPortraitFn — owner-side state lives on
 // story_backgrounds (description + optional user_prompt_addition).
@@ -1881,5 +1834,4 @@ export const allFunctions = [
   regenerateCastPortraitFn,
   regenerateAiCastPortraitFn,
   regenerateBackgroundFn,
-  regenerateScriptAfterRemovalFn,
 ];

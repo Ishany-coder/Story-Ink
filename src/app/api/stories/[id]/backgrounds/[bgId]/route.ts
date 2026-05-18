@@ -5,8 +5,6 @@ import {
   UnauthorizedError,
 } from "@/lib/supabase-server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { createJob } from "@/lib/jobs";
-import { inngest, EVENTS } from "@/inngest/client";
 import type { Script } from "@/lib/types";
 
 type RouteContext = {
@@ -134,10 +132,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 }
 
-// Spec B: remove a background. Triggers a Stage 1 re-run with the
-// label in `excludedBackgroundLabels`. Pre-Stage-3 only — once
-// "Approve all & generate pages" has started for this story, the
-// background set is frozen (returns 409 Conflict).
+// Spec B: remove a background. Synchronous row delete only — does
+// NOT trigger a script rewrite. The rewrite is deferred to approve
+// time (see generatePagesAfterApprovalFn). Lets the user remove
+// multiple backgrounds quickly without paying a per-removal
+// rewrite cost.
+//
+// Pre-Stage-3 only — once "Approve all & generate pages" has
+// started, the background set is frozen (returns 409).
 export async function DELETE(_req: NextRequest, ctx: RouteContext) {
   try {
     const user = await requireUser();
@@ -183,8 +185,6 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       );
     }
 
-    // Delete the row first so re-extraction doesn't re-see it via
-    // case-insensitive label match.
     const { error: deleteErr } = await admin
       .from("story_backgrounds")
       .delete()
@@ -197,12 +197,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext) {
       );
     }
 
-    const jobId = await createJob("background.removed", user.id);
-    await inngest.send({
-      name: EVENTS.backgroundRemoved,
-      data: { jobId, storyId, removedLabel: row.label },
-    });
-    return NextResponse.json({ jobId }, { status: 202 });
+    return NextResponse.json({ ok: true, removedLabel: row.label });
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: err.message }, { status: 401 });
