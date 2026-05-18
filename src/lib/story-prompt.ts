@@ -29,6 +29,10 @@ interface BuildPromptArgs {
   // the user removes an AI-cast member at the approval gate and we
   // re-run Stage 1 — the new script must not re-introduce them.
   excludedAiCharacterNames?: string[];
+  // Labels of backgrounds to ban from the script. Used when the
+  // user removes a background at the approval gate and we re-run
+  // Stage 1 — the new script must not re-introduce them.
+  excludedBackgroundLabels?: string[];
 }
 
 function castSummary(cast: Character[]): string {
@@ -160,12 +164,19 @@ Output a single JSON object with this shape:
       "text": string,                        // the page's narrative text
       "sceneDescription": string,            // a vivid description of what is happening, the setting, and which characters are visible — used as input to image generation
       "characterIds": string[],              // ids (verbatim from the cast above) of cast members visible on this page
+      "setting": string,                     // short label of the location this page is set in (e.g. "the park"); MUST match exactly one entry in the top-level "backgrounds" array. Use empty string for setting-less pages (e.g. an abstract dedication page).
       "memoryReferences": [                  // photos to apply to THIS page; [] if none
         {
           "memoryId": string,                // verbatim id from the reference photo list
           "usage": string                    // illustrator instruction for how to combine the photo with cast portraits on this page
         }
       ]
+    }
+  ],
+  "backgrounds": [                            // canonical list of distinct locations
+    {
+      "label": string,                       // short, reusable location name (1–4 words, e.g. "the park", "Sarah's kitchen")
+      "description": string                  // a paragraph describing the location's STABLE physical features — geography, landmarks, structures, palette, general mood. Do NOT describe scene-specific details like characters on the page, per-page lighting, or weather; those vary per page.
     }
   ]
 }
@@ -175,6 +186,8 @@ Constraints:
 - Every character that appears in a sceneDescription must be listed in characterIds.
 - The cast above is the user-provided roster. Reference user-cast characters by their UUID (verbatim from the "id=" prefix in the cast list). If the story genuinely needs additional supporting characters (parents at a wedding, the priest, the child's best friend, the antagonist), invent them with a clear simple name (e.g. "Sarah", "Mr. Patel", "the bride's father") and reference them in characterIds using that exact name (not a UUID). In the first sceneDescription that mentions an invented character, give a specific, consistent visual description (age range, build, hair, distinctive features) so a portrait can be generated.
 - Output ALL characters that appear on any page in characterIds, whether they were in the user-provided cast (use UUIDs) or invented for the story (use names). Don't pad: only invent characters that actually appear in at least one scene.${args.excludedAiCharacterNames && args.excludedAiCharacterNames.length > 0 ? `\n- DO NOT include the following character names in any page or characterIds. Rewrite scenes that would otherwise need them: ${args.excludedAiCharacterNames.map((n) => `"${n}"`).join(", ")}.` : ""}
+- Group pages by location. Define each distinct location ONCE in the top-level "backgrounds" array (typical story: 2–5 backgrounds total), then reference it by exact label in each page's "setting" field. Don't invent a new background for the same place seen at different times of day or different camera angles — that's a per-page variation handled in sceneDescription, not a new location.
+- Backgrounds[].description must describe ONLY stable physical features (geography, landmarks, structures, palette). Don't put characters, per-page lighting, weather, or moment-in-time details in the background description.${args.excludedBackgroundLabels && args.excludedBackgroundLabels.length > 0 ? `\n- DO NOT include the following background labels in any page or backgrounds[]. Rewrite scenes that would otherwise be set there: ${args.excludedBackgroundLabels.map((n) => `"${n}"`).join(", ")}.` : ""}
 - Each page is self-contained but contributes to a continuous arc.
 `.trim();
 
@@ -324,21 +337,64 @@ Rules:
 `.trim();
 }
 
-// Per-page prompt for Stage 3. The cast portraits AND memory reference
-// photos are passed as inline image inputs alongside this text — the
-// prompt enumerates them in order so the model knows which attached
-// image is which. Cast portraits are anchors for character likeness;
-// memory references contribute setting, objects, clothing, or props
-// per the per-photo "usage" instruction emitted by Stage 1.
+// Spec B: portrait prompt for a canonical background — one wide-
+// angle establishing illustration per distinct location. Used by
+// Stage 2.6. The output gets attached as a visual anchor on every
+// Stage 3 page whose `setting` matches `label`.
+export function buildBackgroundPortraitPrompt(args: {
+  label: string;
+  description: string;
+  userPromptAddition: string | null;
+  artStylePromptScaffold: string;
+}): string {
+  const { label, description, userPromptAddition, artStylePromptScaffold } = args;
+  const userAddition =
+    userPromptAddition && userPromptAddition.trim().length > 0
+      ? `\n\nAdditional adjustments from the user (apply these on top of the description above): ${userPromptAddition.trim()}`
+      : "";
+
+  return `
+Generate a wide-angle establishing illustration of: ${label}.
+
+Setting features (use these to render a consistent appearance):
+
+${description}${userAddition}
+
+Render in this illustrated style:
+${artStylePromptScaffold}
+
+Wide-angle establishing shot. No characters in the frame. No text, captions, or watermarks in the image.
+
+This illustration will be used as the canonical visual reference for ${label} on every page of an illustrated storybook set in this location, so the geography, landmarks, palette, and overall look must stay consistent across pages.
+`.trim();
+}
+
+// Per-page prompt for Stage 3. The background portrait + cast
+// portraits + memory reference photos are passed as inline image
+// inputs alongside this text — the prompt enumerates them in order
+// so the model knows which attached image is which.
+//
+// Image-parts order (Stage 3 caller must match this):
+//   [text, background?, ...castPortraits, ...memoryPhotos]
+//
+// Background = canonical geography anchor (the place must look the
+// same on every page set there). Cast portraits = character likeness
+// anchors. Memory references = scene-specific source material per
+// the per-photo "usage" instruction emitted by Stage 1.
 export function buildPagePrompt(args: {
   sceneDescription: string;
   artStylePromptScaffold: string;
   characterNamesOnPage: string[];
   memoryRefsOnPage: Array<{ caption: string; usage: string }>;
+  backgroundLabelOnPage?: string;
 }): string {
+  const backgroundBlock = args.backgroundLabelOnPage
+    ? `Background reference attached: "${args.backgroundLabelOnPage}". Use the geography, landmarks, palette, and overall look from this image as the canonical appearance of ${args.backgroundLabelOnPage}. Adapt only the camera angle, time of day, and mood per the scene description — do not re-imagine the location itself.`
+    : "";
+
   const characterRefList =
     args.characterNamesOnPage.length > 0
-      ? `Cast portraits attached (in order): ${args.characterNamesOnPage.join(
+      ? `Cast portraits attached after the background (in order): ${args.characterNamesOnPage.join(
           ", "
         )}. The faces, features, and overall appearance of these characters must match the attached portraits exactly.`
       : "";
@@ -359,6 +415,8 @@ export function buildPagePrompt(args: {
 ${args.artStylePromptScaffold}
 
 Scene: ${args.sceneDescription}
+
+${backgroundBlock}
 
 ${characterRefList}
 

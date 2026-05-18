@@ -22,13 +22,34 @@ export const ScriptPageSchema = z.object({
   sceneDescription: z.string().min(1),
   characterIds: z.array(z.string()),
   memoryReferences: z.array(MemoryUsageSchema),
+  // Spec B: short location label that matches an entry in the
+  // script's top-level `backgrounds[]`. Empty string or missing
+  // means "no canonical background" (e.g. dedication page) — Stage
+  // 3 then renders without a background visual anchor.
+  setting: z.string().optional(),
+});
+
+// Spec B: script-emitted background entry. Just label + description
+// — the full DB row (story_backgrounds, with portrait_url + user
+// prompt addition + timestamps) is `Background` in @/lib/types.
+export const ScriptBackgroundSchema = z.object({
+  label: z.string().min(1),
+  description: z.string().min(1),
 });
 
 export const ScriptSchema = z.object({
   title: z.string().min(1),
   dedication: z.string().optional(),
   pages: z.array(ScriptPageSchema),
+  // Spec B: canonical list of distinct locations in this story.
+  // Stage 1.6 validates that every page's `setting` matches one
+  // of these `label`s. Optional on the schema level for backward
+  // compatibility with pre-Spec-B scripts already persisted in
+  // stories.script.
+  backgrounds: z.array(ScriptBackgroundSchema).optional(),
 });
+
+export type ScriptBackground = z.infer<typeof ScriptBackgroundSchema>;
 
 export type MemoryUsage = z.infer<typeof MemoryUsageSchema>;
 export type ScriptPage = z.infer<typeof ScriptPageSchema>;
@@ -95,6 +116,24 @@ export function parseScript(
       success: false,
       message: `script never uses memory ids: ${missing.join(", ")}`,
     };
+  }
+
+  // Spec B: every page's `setting` (when present + non-empty) must
+  // match a `backgrounds[].label`. Models that emit a setting
+  // string without a matching backgrounds entry would leave Stage
+  // 1.6 with no canonical illustration to anchor that page on, so
+  // we reject up-front and let the retry logic regenerate.
+  if (script.backgrounds && script.backgrounds.length > 0) {
+    const labels = new Set(script.backgrounds.map((b) => b.label));
+    for (const page of script.pages) {
+      const s = page.setting?.trim();
+      if (s && !labels.has(s)) {
+        return {
+          success: false,
+          message: `page ${page.pageNumber} setting "${s}" does not match any background label`,
+        };
+      }
+    }
   }
 
   return { success: true, data: script };

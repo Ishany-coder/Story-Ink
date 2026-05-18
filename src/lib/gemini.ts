@@ -555,6 +555,7 @@ import type { Character, MemoryReference, Script } from "@/lib/types";
 import { parseScript } from "@/lib/script-schema";
 import {
   buildAiCastPortraitPrompt,
+  buildBackgroundPortraitPrompt,
   buildCastPortraitPrompt,
   buildInferAiCastDescriptionPrompt,
   buildPagePrompt,
@@ -579,6 +580,10 @@ export interface GenerateScriptArgs {
   // generated script. Set when re-running Stage 1 after the user
   // removes an AI-cast member at the approval gate.
   excludedAiCharacterNames?: string[];
+  // Labels of backgrounds that MUST NOT appear in the generated
+  // script. Set when re-running Stage 1 after the user removes a
+  // background at the approval gate.
+  excludedBackgroundLabels?: string[];
 }
 
 export async function generateScript(args: GenerateScriptArgs): Promise<Script> {
@@ -774,11 +779,49 @@ export async function inferAiCastDescription(args: {
   }
 }
 
-// V2 page image — passes the canonical cast portraits AND any memory
-// reference photos that should appear on this page. The Gemini parts
-// array is ordered: [text, ...castInline, ...memoryInline]. The text
-// prompt enumerates both batches by name/caption so the model knows
-// which attached image is which.
+// V2 background portrait — Stage 2.6 of Spec B. Generates one
+// canonical wide-angle illustration per distinct location. No
+// reference photo (backgrounds are entirely AI-described). Same
+// shape as generateAiCastPortrait but with the background prompt.
+export async function generateBackgroundPortrait(args: {
+  label: string;
+  description: string;
+  userPromptAddition: string | null;
+  artStylePromptScaffold: string;
+}): Promise<string> {
+  const prompt = buildBackgroundPortraitPrompt(args);
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.1-flash-image-preview",
+  });
+
+  const result = await withTimeout(
+    model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        // @ts-expect-error - field not declared in legacy SDK types
+        responseModalities: ["IMAGE", "TEXT"],
+      },
+    }),
+    GEMINI_IMAGE_TIMEOUT_MS,
+    "generateBackgroundPortrait"
+  );
+  assertSafeFinish(result, "generateBackgroundPortrait");
+  return extractFirstImageDataUri(result);
+}
+
+// V2 page image — passes the canonical background portrait (Spec B)
+// + cast portraits + memory reference photos that should appear on
+// this page. The Gemini parts array is ordered:
+//   [text, background?, ...castInline, ...memoryInline]
+// The text prompt enumerates each batch in order so the model knows
+// which attached image is which. The background goes FIRST so
+// "where we are" is read before "who's in it."
 export async function generatePageImageWithCastRefs(args: {
   sceneDescription: string;
   artStylePromptScaffold: string;
@@ -788,6 +831,10 @@ export async function generatePageImageWithCastRefs(args: {
     photoUrl: string;
     usage: string;
   }>;
+  // Spec B: optional background portrait for this page's setting.
+  // When null/undefined the page renders without a canonical
+  // background reference (today's behavior).
+  backgroundPortrait?: { label: string; portraitUrl: string } | null;
 }): Promise<string> {
   const memoryRefs = args.memoryRefsOnPage ?? [];
   const prompt = buildPagePrompt({
@@ -798,12 +845,23 @@ export async function generatePageImageWithCastRefs(args: {
       caption: m.caption,
       usage: m.usage,
     })),
+    backgroundLabelOnPage: args.backgroundPortrait?.label,
   });
 
-  // Inline image parts in two batches matched to the prompt's
-  // enumeration: cast portraits first (character anchors), then memory
-  // references. A failure to fetch any single ref is non-fatal — we
-  // skip it and continue rather than dropping the whole page.
+  // Inline image parts in three batches matched to the prompt's
+  // enumeration: background first (geography anchor), then cast
+  // portraits (character anchors), then memory references. A
+  // failure to fetch any single ref is non-fatal — we skip it and
+  // continue rather than dropping the whole page.
+  const backgroundInline: Array<{
+    inlineData: { data: string; mimeType: string };
+  }> = [];
+  if (args.backgroundPortrait) {
+    const inline = await fetchImageAsInlineData(
+      args.backgroundPortrait.portraitUrl
+    );
+    if (inline) backgroundInline.push({ inlineData: inline });
+  }
   const castInline: Array<{ inlineData: { data: string; mimeType: string } }> =
     [];
   for (const c of args.castPortraitsOnPage) {
@@ -827,7 +885,12 @@ export async function generatePageImageWithCastRefs(args: {
       contents: [
         {
           role: "user",
-          parts: [{ text: prompt }, ...castInline, ...memoryInline],
+          parts: [
+            { text: prompt },
+            ...backgroundInline,
+            ...castInline,
+            ...memoryInline,
+          ],
         },
       ],
       generationConfig: {
