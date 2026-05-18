@@ -217,8 +217,16 @@ Constraints:
 export function buildCastPortraitPrompt(args: {
   character: Character;
   artStylePromptScaffold: string;
+  // Optional one-shot prompt addition from the user via the
+  // approval-gate Regenerate prompt box. Applied as a "tweak"
+  // layered on top of the photo-anchored likeness — typical use:
+  // wardrobe / pose / mood adjustments ("wearing a winter coat",
+  // "happier expression"). The photo remains the source of truth
+  // for facial / body features; we tell the model that explicitly
+  // below so the addition doesn't override the likeness.
+  userPromptAddition?: string | null;
 }): string {
-  const { character, artStylePromptScaffold } = args;
+  const { character, artStylePromptScaffold, userPromptAddition } = args;
   const isPet = character.kind === "pet";
   const subjectNoun = isPet
     ? `a real pet (${character.species ?? "pet"})`
@@ -233,6 +241,14 @@ export function buildCastPortraitPrompt(args: {
     ? `Personality (use only for expression and posture, NOT appearance): ${character.traits}.`
     : "";
 
+  // User's optional regenerate-time prompt addition. Bound to the
+  // expression / wardrobe / pose layer — explicitly NOT allowed to
+  // override the photo-anchored likeness.
+  const userAddition =
+    userPromptAddition && userPromptAddition.trim().length > 0
+      ? `\n\nAdditional adjustments from the user (apply these to wardrobe, pose, expression, mood, or surrounding details — NOT to facial or body features, which must continue to match the attached photo): ${userPromptAddition.trim()}`
+      : "";
+
   // Feature-by-feature likeness checklist. Different list for people
   // vs pets so the model has the right vocabulary to anchor on.
   const likenessFeatures = isPet
@@ -246,7 +262,7 @@ The attached image is a photograph of ${character.name}. Your portrait MUST fait
 
 ${role}
 
-${traits}
+${traits}${userAddition}
 
 Render in this illustrated style:
 ${artStylePromptScaffold}
